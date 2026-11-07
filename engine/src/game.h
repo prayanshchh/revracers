@@ -74,6 +74,8 @@ double sdEnergyBatteryShare(int index);
 void sdEnergyArmOvertake(int index);
 bool sdEnergyOvertakeActive(int index);
 double sdEnergyLastLapFuel(int index);
+double sdEnergyStraightOpen(int index);
+double sdEnergySignal(int index);
 void sdServiceCar(int index, int compound);
 void sdCarTeleport(int index, double distance, double lateral);
 void sdCarSlowTo(int index, double speed);
@@ -89,7 +91,7 @@ double sdWeatherFutureLine(double seconds);
 bool sdWeatherWetCompound(int compound);
 int sdWeatherIdealCompound(double water, int dryChoice);
 
-const int SD_CAR_STRIDE = 49;
+const int SD_CAR_STRIDE = 51;
 
 enum SdFrameIndex
 {
@@ -113,7 +115,9 @@ enum SdFrameIndex
     SD_DAMMAGE,
     SD_CAMERA,
     SD_BRAKE_TEMP = SD_CAMERA + 24,
-    SD_FRAME_SIZE = SD_BRAKE_TEMP + 4
+    SD_REAR_FLAP = SD_BRAKE_TEMP + 4,
+    SD_ENERGY_SIGNAL,
+    SD_FRAME_SIZE
 };
 
 #endif

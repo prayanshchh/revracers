@@ -1,0 +1,121 @@
+import { existsSync } from "node:fs";
+import * as THREE from "three/webgpu";
+import { describe, expect, test } from "vitest";
+import {
+  carField,
+  carStride,
+  frameIndex,
+} from "../../apps/client/src/game/frame-layout.ts";
+import { RearFlap } from "../../apps/client/src/game/rear-flap.ts";
+import { planWeekend } from "../../apps/client/src/game/weekend.ts";
+import {
+  energyReader,
+  type RaceSystems,
+  startRace,
+} from "../support/race-systems.ts";
+import { sessionKind, startField, subset } from "../support/race-weekend.ts";
+import { wasm } from "../support/speed-dreams.ts";
+
+const rearWing = 6;
+const opened = 0.3;
+const fieldCars = 4;
+const stepsPerFrame = 8;
+const frameSeconds = stepsPerFrame / 500;
+const closeSeconds = 0.1;
+
+class ShownFlap {
+  private readonly node = new THREE.Group();
+  private readonly flap: RearFlap;
+  widest = 0;
+
+  constructor() {
+    const model = new THREE.Group();
+    this.node.name = "rear-flap";
+    model.add(this.node);
+    const flap = RearFlap.find(model);
+    if (!flap) throw new Error("no rear flap");
+    this.flap = flap;
+  }
+
+  show(opening: number): number {
+    this.flap.update(opening);
+    const e = this.node.matrix.elements;
+    const angle = Math.abs(Math.atan2(e[6], e[5]));
+    this.widest = Math.max(this.widest, angle);
+    return angle;
+  }
+}
+
+async function playerFlap(setup: (m: RaceSystems) => void) {
+  const m = await startRace();
+  setup(m);
+  const energy = energyReader(m);
+  const shown = new ShownFlap();
+  let drift = 0;
+  for (let tick = 0; tick < 3000; tick++) {
+    m._sdInputAnalog(1, 0, 1, 0);
+    m._sdStep(1);
+    const frame = new Float64Array(
+      m.HEAPF64.buffer,
+      m._sdFrame(),
+      frameIndex.size,
+    );
+    const opening = frame[frameIndex.rearFlap] ?? 0;
+    shown.show(opening);
+    drift = Math.max(drift, Math.abs(opening - energy().straight));
+  }
+  return { widest: shown.widest, drift };
+}
+
+describe.runIf(existsSync(wasm))("rear wing flap", () => {
+  test("opens on a straight exactly as the engine's Straight Mode does", async () => {
+    const clean = await playerFlap(() => undefined);
+    expect(clean.widest).toBeGreaterThan(opened);
+    expect(clean.drift).toBe(0);
+  });
+
+  test("stays shut when the rear wing is wrecked or manual Straight Mode is not armed", async () => {
+    const wrecked = await playerFlap((m) => {
+      m._sdCarDamageSet(rearWing, 1);
+    });
+    const unarmed = await playerFlap((m) => {
+      m._sdEnergyStraight(0, 0);
+    });
+    expect(wrecked.widest).toBe(0);
+    expect(unarmed.widest).toBe(0);
+  });
+
+  test("rival flaps open on the straight and shut as soon as they brake", async () => {
+    const m = await startField({
+      kind: sessionKind.race,
+      laps: 3,
+      seed: 4,
+      plan: subset(planWeekend("corvus", 0, null), fieldCars),
+      autopilot: true,
+    });
+    const memory = m._malloc(fieldCars * carStride * 8);
+    const shown = Array.from({ length: fieldCars }, () => new ShownFlap());
+    const braking = Array.from({ length: fieldCars }, () => 0);
+    let openUnderBraking = 0;
+    for (let frame = 0; frame < 2000; frame++) {
+      m._sdStep(stepsPerFrame);
+      m._sdCars(memory);
+      const data = new Float64Array(
+        m.HEAPF64.buffer,
+        memory,
+        fieldCars * carStride,
+      );
+      shown.forEach((flap, car) => {
+        const at = car * carStride;
+        const angle = flap.show(data[at + carField.rearFlap] ?? 0);
+        braking[car] =
+          (data[at + carField.brake] ?? 0) > 0.02
+            ? (braking[car] ?? 0) + frameSeconds
+            : 0;
+        if ((braking[car] ?? 0) > closeSeconds && angle > 0) openUnderBraking++;
+      });
+    }
+    for (const flap of shown) expect(flap.widest).toBeGreaterThan(opened);
+    expect(openUnderBraking).toBe(0);
+  }, 120_000);
+});

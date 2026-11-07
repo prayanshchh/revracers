@@ -1,3 +1,4 @@
+import { carStride } from "../../apps/client/src/game/frame-layout.ts";
 import {
   planWeekend,
   type WeekendPlan,
@@ -5,7 +6,6 @@ import {
 import { type SpeedDreams, startCircuit } from "./speed-dreams.ts";
 
 const timingStride = 20;
-const carStride = 49;
 const sessionFields = 12;
 const statFields = 6;
 const stepsPerCall = 20;

@@ -1,5 +1,6 @@
 import numpy as np
 
+from aero import FLAP_GROUP
 from shapes import both, loft, open_curve, plate, superellipse, sweep, tube, wing
 
 
@@ -83,6 +84,7 @@ def rear_wing_details():
             up=(1, 0, 0),
         ),
         density=0.6,
+        group=FLAP_GROUP,
     )
 
 

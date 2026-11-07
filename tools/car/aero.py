@@ -1,11 +1,12 @@
 import numpy as np
 
 from design import param
-from shapes import both, box, closed_curve, loft, plate, spanwise, superellipse, sweep, tube, wing, wing_rings
+from shapes import both, box, closed_curve, create, interpolate, loft, plate, spanwise, superellipse, sweep, tube, wing, wing_rings
 
 FRONT_SPAN = 0.85
 WING_TIP = 0.842
 REAR_SPAN = 0.55
+FLAP_GROUP = "rear-flap"
 CLIPS = 7
 
 
@@ -31,9 +32,9 @@ FRONT_ENDPLATES = (
     [(2.640, 0.052), (2.672, 0.110), (2.665, 0.175), (2.570, 0.232), (2.400, 0.290), (2.255, 0.360), (2.172, 0.372), (2.150, 0.300), (2.148, 0.120), (2.215, 0.058), (2.400, 0.044)],
 )
 REAR_ENDPLATES = (
-    [(-1.900, 0.720), (-1.915, 0.800), (-1.970, 0.880), (-2.100, 0.940), (-2.280, 0.975), (-2.380, 0.980), (-2.420, 0.960), (-2.420, 0.800), (-2.360, 0.700), (-2.220, 0.640), (-2.040, 0.630), (-1.940, 0.660)],
-    [(-1.895, 0.700), (-1.900, 0.880), (-1.940, 0.950), (-2.200, 0.976), (-2.400, 0.982), (-2.430, 0.960), (-2.430, 0.700), (-2.360, 0.620), (-2.100, 0.600), (-1.950, 0.620)],
-    [(-1.920, 0.760), (-1.980, 0.870), (-2.130, 0.940), (-2.300, 0.976), (-2.430, 0.990), (-2.450, 0.930), (-2.400, 0.780), (-2.260, 0.660), (-2.060, 0.620), (-1.960, 0.650)],
+    [(-1.900, 0.720), (-1.915, 0.800), (-1.970, 0.880), (-2.100, 0.945), (-2.280, 0.964), (-2.400, 0.966), (-2.420, 0.965), (-2.422, 0.930), (-2.420, 0.800), (-2.360, 0.700), (-2.220, 0.640), (-2.040, 0.630), (-1.940, 0.660)],
+    [(-1.895, 0.700), (-1.900, 0.880), (-1.940, 0.950), (-2.200, 0.964), (-2.410, 0.966), (-2.430, 0.965), (-2.432, 0.930), (-2.430, 0.700), (-2.360, 0.620), (-2.100, 0.600), (-1.950, 0.620)],
+    [(-1.920, 0.760), (-1.980, 0.870), (-2.130, 0.940), (-2.300, 0.964), (-2.430, 0.967), (-2.450, 0.966), (-2.452, 0.930), (-2.400, 0.780), (-2.260, 0.660), (-2.060, 0.620), (-1.960, 0.650)],
 )
 FRONT_ELEMENTS = (
     ("fw-main", 0.00, 0.52, 0.068, 0.045, 0.062, 4.0, 0.0, 3.0, 0.026, 0.035, 36),
@@ -121,6 +122,115 @@ def front_wing():
     )
 
 
+ARM = np.array(
+    [
+        (-2.335, 0.553, 0.760, 0.200, 0.0, 0.013),
+        (-2.318, 0.551, 0.650, 0.190, 15.0, 0.013),
+        (-2.285, 0.540, 0.550, 0.180, 32.0, 0.013),
+        (-2.235, 0.515, 0.465, 0.170, 46.0, 0.013),
+        (-2.185, 0.480, 0.400, 0.155, 56.0, 0.012),
+        (-2.150, 0.450, 0.355, 0.140, 60.0, 0.012),
+        (-2.135, 0.435, 0.320, 0.130, 62.0, 0.012),
+    ]
+)
+LED_STRIPS = (((-2.424, 0.800), (-2.424, 0.955)), ((-2.434, 0.740), (-2.434, 0.955)), ((-2.404, 0.800), (-2.454, 0.955)))
+BEAM_Z = 0.362
+RING_X = -2.505
+RING_Z = 0.300
+RING_LEDS = 16
+RING_WIDE = 0.0335
+RING_HOLE = 0.0175
+RING_TALL = 1.30
+LENS_AROUND = 64
+LENS_ACROSS = 3
+LENS_DEPTH = 0.0011
+LENS_SEED = 7
+
+
+def arm_rings(stations, samples=48, points=24):
+    knots = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(stations[:, :3], axis=0), axis=-1))])
+    path = interpolate(knots, stations, np.linspace(0, knots[-1], samples))
+    centres = path[:, :3]
+    tangents = np.gradient(centres, axis=0)
+    tangents /= np.linalg.norm(tangents, axis=-1, keepdims=True)
+    profile = superellipse(1.0, 1.0, 4.0, points)
+    rings = []
+    for centre, tangent, (chord, twist, thick) in zip(centres, tangents, path[:, 3:]):
+        angle = np.radians(twist)
+        along = np.array([np.cos(angle), -np.sin(angle), 0.0])
+        along -= tangent * (along @ tangent)
+        along /= np.linalg.norm(along)
+        across = np.cross(along, tangent)
+        rings.append(centre + chord / 2 * profile[:, 0, None] * along + thick / 2 * profile[:, 1, None] * across)
+    return np.asarray(rings)
+
+
+def endplate_arms():
+    both("rw-endplate-arm", arm_rings(ARM), density=1.0)
+
+
+def beam_wing():
+    reach = float(interpolate(ARM[:, 2], ARM[:, 1], [BEAM_Z])[0])
+    ys = np.array([0.0, reach * 0.5, reach])
+    beam = [(y, -2.138, BEAM_Z + 0.006 * (y / reach) ** 2, 0.080, 14) for y in ys]
+    wing("rw-beam", beam, samples=24, thickness=0.11, camber=0.08, points=28, density=0.8)
+
+
+def ring_point(x, angle, radius):
+    return (x, radius * np.cos(angle), RING_Z + RING_TALL * radius * np.sin(angle))
+
+
+def crystal_lens(face):
+    rng = np.random.default_rng(LENS_SEED)
+    radii = np.linspace(RING_WIDE, RING_HOLE, LENS_ACROSS + 1)
+    angles = 2 * np.pi * np.arange(LENS_AROUND) / LENS_AROUND
+    vertices = [ring_point(face, a, r) for r in radii for a in angles]
+    vertices += [ring_point(RING_X, a, r) for r in (radii[0], radii[-1]) for a in angles]
+    back = (LENS_ACROSS + 1) * LENS_AROUND
+    at = lambda row, k: row * LENS_AROUND + k % LENS_AROUND
+    faces = []
+    for k in range(LENS_AROUND):
+        faces.append([back + k, back + (k + 1) % LENS_AROUND, at(0, k + 1), at(0, k)])
+        faces.append([at(LENS_ACROSS, k), at(LENS_ACROSS, k + 1), back + LENS_AROUND + (k + 1) % LENS_AROUND, back + LENS_AROUND + k])
+        faces.append([back + LENS_AROUND + k, back + LENS_AROUND + (k + 1) % LENS_AROUND, back + (k + 1) % LENS_AROUND, back + k])
+        for row in range(LENS_ACROSS):
+            led = row == LENS_ACROSS // 2 and k % (LENS_AROUND // RING_LEDS) == 1
+            jitter = np.zeros(2) if led else rng.uniform(-0.42, 0.42, 2)
+            angle = 2 * np.pi * (k + 0.5 + jitter[0]) / LENS_AROUND
+            radius = np.interp(row + 0.5 + jitter[1], (0, LENS_ACROSS), (radii[0], radii[-1]))
+            apex = len(vertices)
+            vertices.append(ring_point(face - LENS_DEPTH * rng.uniform(0.3, 1.5), angle, radius))
+            corners = [at(row, k), at(row, k + 1), at(row + 1, k + 1), at(row + 1, k)]
+            faces += [[corners[i], corners[(i + 1) % 4], apex] for i in range(4)]
+    points = np.asarray(vertices)
+    uvs = [[(points[i][1], points[i][2]) for i in face_] for face_ in faces]
+    create("rain-lens", points, faces, uvs, "rain-lens", "chassis", False, sharp_angle=np.radians(1.0))
+
+
+def ring_light():
+    housing = superellipse(0.044, 0.057, 3.4, 48, (0.0, RING_Z))
+    loft(
+        "rain-housing",
+        [np.stack([np.full(48, x), housing[:, 0], housing[:, 1]], axis=-1) for x in (RING_X + 0.035, RING_X)],
+        material_name="lens",
+        atlas=False,
+    )
+    face = RING_X - 0.006
+    crystal_lens(face)
+    middle = (RING_WIDE + RING_HOLE) / 2
+    step = LENS_AROUND // RING_LEDS
+    for k in range(RING_LEDS):
+        angle = 2 * np.pi * (k * step + 1.5) / LENS_AROUND
+        _, y, z = ring_point(face, angle, middle)
+        dots = [(x, superellipse(0.003 * s, 0.003 * s, 2.0, 12, (y, z))) for x, s in ((face + 0.001, 1.0), (face - 0.002, 0.7))]
+        loft(
+            f"rain-led-{k}",
+            [np.stack([np.full(12, x), dot[:, 0], dot[:, 1]], axis=-1) for x, dot in dots],
+            material_name="led-red",
+            atlas=False,
+        )
+
+
 def rear_wing():
     ys = np.array([0.0, 0.14, 0.28, 0.42, REAR_SPAN])
     dip = lambda y: 0.024 * (1 - (y / REAR_SPAN) ** 2)
@@ -128,8 +238,8 @@ def rear_wing():
     flap = [(y, -2.165, 0.800 - dip(y) * 0.6, 0.160, 28) for y in ys]
     upper = [(y, -2.290, 0.882 - dip(y) * 0.4, 0.110, 48) for y in ys]
     wing("rw-main", main, samples=56, thickness=0.040, camber=0.06, points=32)
-    wing("rw-flap", flap, samples=56, thickness=0.045, camber=0.07, points=32)
-    wing("rw-flap2", upper, samples=56, thickness=0.050, camber=0.07, points=32)
+    wing("rw-flap", flap, samples=56, thickness=0.045, camber=0.07, points=32, group=FLAP_GROUP)
+    wing("rw-flap2", upper, samples=56, thickness=0.050, camber=0.07, points=32, group=FLAP_GROUP)
     outline = REAR_ENDPLATES[param("rearEndplate", 0)]
     plate("rw-endplate", outline, REAR_SPAN, 0.012, samples=140, lean=lambda x, z: 0.03 * np.clip(0.75 - z, 0, 1))
     pod = [(-2.020, 0.772), (-2.090, 0.845), (-2.200, 0.912), (-2.290, 0.950), (-2.330, 0.935), (-2.260, 0.872), (-2.150, 0.808), (-2.060, 0.765)]
@@ -147,19 +257,15 @@ def rear_wing():
                 material_name="titanium",
                 atlas=False,
                 up=(0, 1, 0),
+                group=FLAP_GROUP,
             )
     for side in (1, -1):
-        y = side * (REAR_SPAN + 0.0085)
-        x0, x1 = (-2.432, -2.418) if param("rearEndplate", 0) < 2 else (-2.452, -2.438)
-        box(f"rw-led.{side}", (x0, y - 0.0025, 0.800), (x1, y + 0.0025, 0.950), material_name="led-red", atlas=False)
-    panel = superellipse(0.040, 0.030, 5.0, 28, (0.0, 0.302))
-    loft("rain-panel", [np.stack([np.full(28, x), panel[:, 0], panel[:, 1]], axis=-1) for x in (-2.50, -2.507)], material_name="void", atlas=False)
-    for row in range(5):
-        for column in range(7):
-            y = (column - 3) * 0.0098
-            z = 0.302 + (row - 2) * 0.0098
-            dot = superellipse(0.0032, 0.0032, 2.0, 10, (y, z))
-            loft(f"rain-led-{row}-{column}", [np.stack([np.full(10, x), dot[:, 0], dot[:, 1]], axis=-1) for x in (-2.507, -2.5095)], material_name="led-red", atlas=False)
+        low, high = LED_STRIPS[param("rearEndplate", 0)]
+        y = side * (REAR_SPAN + 0.006)
+        tube(f"rw-led.{side}", [(low[0], y, low[1]), (high[0], y, high[1])], 0.010, 0.007, power=6.0, samples=2, points=16, material_name="led-strip", atlas=False, up=(1, 0, 0))
+    endplate_arms()
+    beam_wing()
+    ring_light()
     twin = param("neck", "twin") == "twin"
     for side in (1, -1) if twin else (0,):
         y = 0.035 if twin else 0.0

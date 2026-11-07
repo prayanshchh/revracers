@@ -7,7 +7,7 @@ import {
 } from "../../apps/client/src/game/rumble.ts";
 
 const frame = 1 / 60;
-const cockpitPixelsPerRadian = 1080 / ((48.6 * Math.PI) / 180);
+const cockpitPixelsPerRadian = 1080 / ((50 * Math.PI) / 180);
 const wheelbase = 3.6;
 const left = [1, 3];
 

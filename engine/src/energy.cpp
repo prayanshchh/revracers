@@ -18,6 +18,14 @@ enum Mode
     MODE_BOOST
 };
 
+enum Signal
+{
+    SIGNAL_NONE,
+    SIGNAL_SINGLE,
+    SIGNAL_DOUBLE,
+    SIGNAL_CLIPPING
+};
+
 const double batteryCapacity = 4.0e6;
 const double raceHarvestLimit = 8.5e6;
 const double sessionHarvestLimit = 7.0e6;
@@ -53,6 +61,10 @@ const double straightCloseRate = 12.0;
 const double straightRear = 0.25;
 const double straightFront = 0.6;
 const double straightDrag = 0.55;
+const double signalSpeed = 100.0;
+const double signalIdle = 5.0e3;
+const double fullDeploy = 350.0e3;
+const double fullDeployShare = 0.97;
 const double differentialBase = 60.0;
 
 struct CarEnergy
@@ -76,6 +88,7 @@ struct CarEnergy
     double deployLevel = 0.0;
     double motorPower = 0.0;
     double icePower = 0.0;
+    int signal = SIGNAL_NONE;
     double lapFuelStart = 0.0;
     double lastLapFuel = 0.0;
     double lastLapDeployed = 0.0;
@@ -238,6 +251,17 @@ void updateAero(CarEnergy &e, tCar *car, tCarElt *elt, double alpha, double brak
     elt->ctrl.wingRearCmd = (tdble)(e.baseWing[1] * (1.0 - (1.0 - straightRear) * e.straightOpen));
 }
 
+int energySignal(const CarEnergy &e, double alpha, double brake, double kph, bool driving)
+{
+    if (!driving || alpha < straightAlpha || brake >= 0.02 || kph < signalSpeed)
+        return SIGNAL_NONE;
+    if (e.motorPower < -signalIdle)
+        return SIGNAL_CLIPPING;
+    if (e.motorPower < signalIdle)
+        return SIGNAL_DOUBLE;
+    return e.motorPower < fullDeploy * fullDeployShare ? SIGNAL_SINGLE : SIGNAL_NONE;
+}
+
 void burnFuel(const CarEnergy &e, tCar *car, double alpha, double dt)
 {
     double flow = flowRate / fuelEnergy * mixBurn[e.fuelMix];
@@ -348,6 +372,16 @@ double sdEnergyLastLapFuel(int index)
     return field[index].lastLapFuel;
 }
 
+double sdEnergyStraightOpen(int index)
+{
+    return field[index].straightOpen;
+}
+
+double sdEnergySignal(int index)
+{
+    return field[index].signal;
+}
+
 void sdEnergyStep(tCarElt *elt, double dt)
 {
     CarEnergy &e = field[elt->index];
@@ -376,6 +410,7 @@ void sdEnergyStep(tCarElt *elt, double dt)
         e.deployed -= split.battery * dt;
     e.motorPower = -split.battery;
     e.icePower = alpha * ice;
+    e.signal = energySignal(e, alpha, brake, kph, driving);
     updateAero(e, car, elt, alpha, brake, kph, dt);
     burnFuel(e, car, alpha, dt);
 }

@@ -1,0 +1,63 @@
+import type * as THREE from "three/webgpu";
+
+export const lampMaterials: ReadonlySet<string> = new Set([
+  "led-red",
+  "led-strip",
+]);
+const brakeLampFrom = 0.05;
+export const brakeLampHold = 0.3;
+export const energySignal = {
+  none: 0,
+  single: 1,
+  double: 2,
+  clipping: 3,
+} as const;
+const signalPeriod = 1;
+const blink = 0.12;
+const clippingBlink = 0.08;
+
+export interface CarLamps {
+  lit: number;
+  held: number;
+  signal: number;
+  since: number;
+}
+
+export function carLamps(): CarLamps {
+  return { lit: 0, held: 0, signal: energySignal.none, since: 0 };
+}
+
+export function fitLamps(model: THREE.Object3D, lamps: CarLamps): void {
+  model.traverse((object) => {
+    const material = (object as THREE.Mesh).material as
+      THREE.Material | undefined;
+    if (material && lampMaterials.has(material.name))
+      object.userData = { ...object.userData, lamps };
+  });
+}
+
+function flashes(signal: number): number {
+  if (signal === energySignal.single) return 1;
+  return signal === energySignal.double ? 2 : 0;
+}
+
+function signalLit(signal: number, since: number): boolean {
+  if (signal === energySignal.clipping)
+    return since % (2 * clippingBlink) < clippingBlink;
+  const at = since % signalPeriod;
+  return at < 2 * blink * flashes(signal) && at % (2 * blink) < blink;
+}
+
+export function setLamps(
+  lamps: CarLamps,
+  brake: number,
+  signal: number,
+  seconds: number,
+): void {
+  const step = Math.max(0, seconds);
+  lamps.held =
+    brake > brakeLampFrom ? brakeLampHold : Math.max(0, lamps.held - step);
+  lamps.since = signal === lamps.signal ? lamps.since + step : 0;
+  lamps.signal = signal;
+  lamps.lit = lamps.held > 0 || signalLit(signal, lamps.since) ? 1 : 0;
+}

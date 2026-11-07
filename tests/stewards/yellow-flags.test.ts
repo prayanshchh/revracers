@@ -22,11 +22,11 @@ import {
   type Stewarded,
   stewardMessages,
 } from "../support/stewards.ts";
+import { carStride } from "../../apps/client/src/game/frame-layout.ts";
 
 type Raced = Weekend & Stewarded & RaceSystems;
 
 const fieldCars = 8;
-const carStride = 49;
 const speedIndex = 45;
 const lapIndex = 49;
 const distanceIndex = 53;

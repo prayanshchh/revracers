@@ -29,6 +29,7 @@ const maxWheelbase = 3.4;
 const maxWidth = 1.9;
 const widthTolerance = 0.005;
 const maxLodTriangles = 60_000;
+const minLampTriangles = 500;
 
 function modelFile(team: string, file: string): string {
   return path.join(carsDirectory, team, file);
@@ -83,6 +84,9 @@ describe.each(teams)("$name car", ({ id }) => {
     }
     expect(node(document, "steering-wheel").getMesh()).not.toBeNull();
     expect(node(document, "driver-head").getMesh()).not.toBeNull();
+    expect(node(document, "rear-flap").getParentNode()).toBe(
+      node(document, "chassis"),
+    );
   });
 
   test.skipIf(isPointer(car))(
@@ -105,6 +109,7 @@ describe.each(teams)("$name car", ({ id }) => {
           "wheel-face",
           "glove",
           "void",
+          "led-red",
         ]),
       );
     },
@@ -146,4 +151,23 @@ describe.each(teams)("$name car", ({ id }) => {
     expect(triangles).toBeGreaterThan(0);
     expect(triangles).toBeLessThan(maxLodTriangles);
   });
+
+  test.skipIf(isPointer(lod))(
+    "keeps the rear lamps and a movable rear flap on rival cars",
+    async () => {
+      const document = await readModel(lod);
+      const lampTriangles = document
+        .getRoot()
+        .listMeshes()
+        .flatMap((mesh) => mesh.listPrimitives())
+        .filter((primitive) => primitive.getMaterial()?.getName() === "led-red")
+        .reduce(
+          (sum, primitive) =>
+            sum + (primitive.getIndices()?.getCount() ?? 0) / 3,
+          0,
+        );
+      expect(lampTriangles).toBeGreaterThan(minLampTriangles);
+      expect(node(document, "rear-flap").getMesh()).not.toBeNull();
+    },
+  );
 });
