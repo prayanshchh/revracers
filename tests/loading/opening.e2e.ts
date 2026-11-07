@@ -94,6 +94,27 @@ test.describe("opening", () => {
     expect(trailers).toEqual([]);
   });
 
+  test("a returning driver sees the screenshots before the game's main script has downloaded", async ({
+    page,
+    context,
+  }) => {
+    await pastSchool(context);
+    let asked = false;
+    let released = false;
+    await page.route("**/assets/drive-*.js", async (route) => {
+      asked = true;
+      await new Promise((resolve) => setTimeout(resolve, 12_000));
+      released = true;
+      await route.continue().catch(() => undefined);
+    });
+    await page.goto("/", { waitUntil: "commit" });
+    await expect
+      .poll(async () => (await loadScreen(page)).slide, { timeout: 8_000 })
+      .toMatch(/^\/loading\/\d+\.jpg$/);
+    expect(asked).toBe(true);
+    expect(released).toBe(false);
+  });
+
   if (process.platform !== "linux") {
     test("a returning driver's slow loads show game screenshots at once, then a fresh count of a steady total and a thin bar that fills to the end when a race loads", async ({
       page,

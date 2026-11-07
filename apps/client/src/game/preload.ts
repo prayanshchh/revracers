@@ -1,5 +1,6 @@
 import * as THREE from "three/webgpu";
 import { DefaultLoadingManager } from "three/webgpu";
+import { currentPhase } from "./download-phase.ts";
 import { takeEarly } from "./early.ts";
 
 const settleFrames = 3;
@@ -25,15 +26,8 @@ const sizes = JSON.parse(
 const wire = JSON.parse(
   document.querySelector("[data-asset-wire]")?.textContent ?? "{}",
 ) as Record<string, number>;
-interface DownloadTotals {
-  received: number;
-  expected: number;
-  plans: number;
-}
-
 let expectedBytes = 0;
 let receivedBytes = 0;
-let phase: DownloadTotals = { received: 0, expected: 0, plans: 0 };
 const declared = new Set<string>();
 const plainFetch = globalThis.fetch.bind(globalThis);
 const storeName = "revracers-assets";
@@ -118,7 +112,7 @@ if (Object.keys(sizes).length > 0)
   }, 10_000);
 
 globalThis.fetch = async (input, init) => {
-  const mine = phase;
+  const mine = currentPhase();
   const url = requestUrl(input);
   const response = await (takeHeld(url, input, init) ??
     (buildAsset(url, input, init)
@@ -181,6 +175,7 @@ export function downloadsFromNow(): () => number {
 }
 
 export function expectDownloads(urls: string[]): void {
+  const phase = currentPhase();
   phase.plans += 1;
   for (const url of urls) {
     const path = new URL(url, location.href).pathname;
@@ -190,14 +185,6 @@ export function expectDownloads(urls: string[]): void {
     expectedBytes += size * wireShare(path);
     phase.expected += size * wireShare(path);
   }
-}
-
-export function startDownloadPhase(): void {
-  phase = { received: 0, expected: 0, plans: 0 };
-}
-
-export function downloadTotals(): DownloadTotals {
-  return { ...phase };
 }
 
 export function loaded(): Promise<void> {

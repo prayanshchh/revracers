@@ -131,10 +131,10 @@ import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
 import { type Circuit, circuitOf } from "./game/circuits.ts";
 import { dropEarly } from "./game/early.ts";
-import { openingShow, schoolFirst } from "./game/school-early.ts";
+import { schoolFirst } from "./game/school-early.ts";
 import { releaseUploadedImages } from "./game/preload.ts";
 import { warmGame } from "./game/warm-cache.ts";
-import { LoadShow } from "./game/load-show.ts";
+import { loadShow } from "./game/opening.ts";
 import { showActions } from "./game/weekend-ui.ts";
 
 const canvas = document.querySelector<HTMLCanvasElement>(
@@ -150,11 +150,8 @@ const statusBar = new LoadBar(
 const hudRoot = document.querySelector<HTMLElement>("[data-testid=hud]");
 const autostartKey = "revracers.autostart";
 const redeployKey = "revracers.redeploy";
-const loadShow = openingShow() && status ? new LoadShow(status) : null;
 const speedDreams = schoolFirst() ? loadSpeedDreams() : null;
 speedDreams?.catch(() => undefined);
-
-loadShow?.arm();
 
 function element(selector: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(selector);
