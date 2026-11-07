@@ -1,9 +1,6 @@
 import teamData from "../../../../content/cars/teams.json";
 
-const files = import.meta.glob<string>(
-  "../../../../content/cars/*/*.{glb,jpg,png}",
-  { eager: true, query: "?url", import: "default" },
-);
+export { carFile, liteCarFiles } from "./car-files.ts";
 
 interface TeamDriver {
   first: string;
@@ -126,10 +123,4 @@ export function fieldGrid(
       ? [{ ...seatDriver(player, entrant), position: place + 1 }]
       : [];
   });
-}
-
-export function carFile(team: string, name: string): string {
-  const url = files[`../../../../content/cars/${team}/${name}`];
-  if (!url) throw new Error(`missing car file ${team}/${name}`);
-  return url;
 }

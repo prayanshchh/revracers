@@ -24,6 +24,7 @@ import {
 } from "three/tsl";
 import { type CarEnvironment, useEnvironment } from "./carpaint.ts";
 import { carFile } from "./teams.ts";
+import { swapLater } from "./upgrades.ts";
 import { releaseOnceUploaded } from "./preload.ts";
 import { screenBump } from "./track-surface.ts";
 import { compounds } from "./tyres.ts";
@@ -185,10 +186,17 @@ export function spinBlur(radiansPerSecond: number, seconds: number): number {
   return Math.min(Math.abs(radiansPerSecond) * seconds * shutter, turn) / turn;
 }
 
-function tyreMap(name: string, anisotropy: number): THREE.Texture {
-  const map = releaseOnceUploaded(
-    new THREE.TextureLoader().load(carFile("shared", name)),
-  );
+function tyreMap(
+  name: string,
+  anisotropy: number,
+  first?: string | null,
+): THREE.Texture {
+  const full = carFile("shared", name);
+  const map =
+    first === null
+      ? new THREE.Texture()
+      : releaseOnceUploaded(new THREE.TextureLoader().load(first ?? full));
+  if (first !== undefined) swapLater(map, full);
   map.flipY = false;
   map.colorSpace = THREE.NoColorSpace;
   map.wrapS = THREE.RepeatWrapping;
@@ -618,12 +626,17 @@ const shared = new WeakMap<CarEnvironment, THREE.Material>();
 export function tyreMaterial(
   env: CarEnvironment,
   anisotropy: number,
+  lite = false,
 ): THREE.Material {
   const known = shared.get(env);
   if (known) return known;
   const material = buildMaterial(
-    tyreMap("tyre.png", anisotropy),
-    tyreMap("tyre-condition.png", anisotropy),
+    tyreMap(
+      "tyre.png",
+      anisotropy,
+      lite ? carFile("shared", "lite/tyre.jpg") : undefined,
+    ),
+    tyreMap("tyre-condition.png", anisotropy, lite ? null : undefined),
   );
   useEnvironment(material, env, reflection);
   shared.set(env, material);

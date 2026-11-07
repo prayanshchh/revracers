@@ -49,6 +49,14 @@ import {
 import { releaseOnceUploaded } from "./preload.ts";
 import { reliefKerbs } from "./kerb-relief.ts";
 
+export const groundFiles = [
+  apronAUrl,
+  apronBUrl,
+  streaksUrl,
+  terrainUrl,
+  grainUrl,
+];
+
 const asphaltDark = 0.088;
 const asphaltLight = 0.118;
 const asphaltMean = 0.0152;
@@ -177,7 +185,7 @@ const depthOffsets: Record<string, number> = {
 function sharpen(map: THREE.Texture | null, anisotropy: number): void {
   if (!map) return;
   map.anisotropy = anisotropy;
-  map.needsUpdate = true;
+  if (map.image) map.needsUpdate = true;
 }
 
 const contactCentre = uniform(new THREE.Vector2()).setGroup(renderGroup);

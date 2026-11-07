@@ -97,6 +97,7 @@ export class LoadShow {
 
   private end(): void {
     if (!this.showing) return;
+    this.tick();
     this.showing = false;
     window.clearInterval(this.slideTimer);
     window.clearInterval(this.tickTimer);

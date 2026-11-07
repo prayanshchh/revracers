@@ -305,8 +305,8 @@ const files = [
   [path.join(sd, "speed-dreams-data/data/config"), "/sd/data/config"],
   [path.join(root, "engine/data/local"), "/sd/local"],
   [
-    path.join(root, "content/tracks/hill-country/hill-country.xml"),
-    "/sd/data/tracks/circuit/hill-country/hill-country.xml",
+    path.join(root, "content/tracks/training-ground/training-ground.xml"),
+    "/sd/data/tracks/circuit/training-ground/training-ground.xml",
   ],
 ];
 rmSync(data, { recursive: true, force: true });
@@ -326,10 +326,7 @@ stage(
   path.join(root, "engine/data/local/drivers/human/cars"),
   path.join(data, "/sd/data/aisetup"),
 );
-writeTrackData(
-  root,
-  path.join(data, "/sd/data/tracks/circuit/hill-country/ai.dat"),
-);
+writeTrackData(root, path.join(out, "hill-country-ai.txt"));
 
 const exported = [
   "_sdInit",

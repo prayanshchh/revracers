@@ -87,6 +87,24 @@ if (!softwareGpu) {
     await expect(page.locator("[data-tutorial=root]")).toBeHidden();
   });
 
+  test("a new player whose saved settings are unreadable still lands in Driving School", async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    await page.addInitScript(() => {
+      localStorage.setItem("revracers.settings", "null");
+    });
+    await page.goto("/?intro=off");
+    await page.waitForFunction(
+      () => document.body.dataset["driveStatus"] === "running",
+      null,
+      { timeout: 180_000 },
+    );
+    await expect(step(page)).toHaveAttribute("data-step", "welcome", {
+      timeout: 30_000,
+    });
+  });
+
   test("leaving Driving School takes a named driver to the hub, not back into the tutorial", async ({
     page,
     context,

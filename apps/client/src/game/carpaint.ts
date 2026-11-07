@@ -26,6 +26,7 @@ import {
 import { carFile } from "./teams.ts";
 import { releaseOnceUploaded } from "./preload.ts";
 import { scraped } from "./car-damage.ts";
+import { replaceImage, swapLater, upgradeLater } from "./upgrades.ts";
 
 const envWidth = 512;
 const envHeight = 256;
@@ -196,7 +197,11 @@ function redChannel(
   return { data: red, width, height };
 }
 
-function heightMap(url: string, anisotropy: number): THREE.Texture {
+function heightMap(
+  url: string,
+  anisotropy: number,
+  better: string | null = null,
+): THREE.Texture {
   const map = new THREE.DataTexture(
     new Uint8Array(1),
     1,
@@ -225,10 +230,59 @@ function heightMap(url: string, anisotropy: number): THREE.Texture {
     .finally(() => {
       manager.itemEnd(url);
     });
+  if (better)
+    upgradeLater(better, (image) => {
+      replaceImage(map, redChannel(image));
+    });
   return releaseOnceUploaded(map);
 }
 
-export function carTextures(team: string, anisotropy: number): CarTextures {
+function upgraded(
+  first: string | null,
+  later: string,
+  sRgb: boolean,
+  anisotropy: number,
+): THREE.Texture {
+  const map = first ? loaded(first, sRgb, anisotropy) : new THREE.Texture();
+  map.flipY = false;
+  map.colorSpace = sRgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  map.anisotropy = anisotropy;
+  swapLater(map, later);
+  return map;
+}
+
+export function carTextures(
+  team: string,
+  anisotropy: number,
+  lite = false,
+): CarTextures {
+  if (lite)
+    return {
+      albedo: upgraded(
+        carFile(team, "lite/albedo.jpg"),
+        carFile(team, "albedo.jpg"),
+        true,
+        anisotropy,
+      ),
+      orm: upgraded(
+        carFile(team, "lite/orm.jpg"),
+        carFile(team, "orm.jpg"),
+        false,
+        anisotropy,
+      ),
+      bump: heightMap(
+        carFile(team, "lite/bump.jpg"),
+        anisotropy,
+        carFile(team, "bump.jpg"),
+      ),
+      wheelFace: upgraded(
+        null,
+        carFile(team, "wheel-face.jpg"),
+        true,
+        anisotropy,
+      ),
+      glove: upgraded(null, carFile(team, "glove.jpg"), true, anisotropy),
+    };
   return {
     albedo: loaded(carFile(team, "albedo.jpg"), true, anisotropy),
     orm: loaded(carFile(team, "orm.jpg"), false, anisotropy),

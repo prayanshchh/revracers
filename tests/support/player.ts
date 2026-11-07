@@ -11,6 +11,12 @@ export const asha = {
   team: "corvus",
 };
 
+export async function pastSchool(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    localStorage.setItem("revracers.tutorial", "done");
+  });
+}
+
 export async function seedPlayer(
   context: BrowserContext,
   profile: typeof asha = asha,

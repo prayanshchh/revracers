@@ -30,12 +30,16 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { releaseOnceUploaded } from "./preload.ts";
+import { expectDownloads, releaseOnceUploaded } from "./preload.ts";
 import { alphaTestedOrder } from "./road.ts";
 
 const skyFiles = import.meta.glob<string>(
-  "../../../../content/tracks/hill-country/sky/*",
+  "../../../../content/tracks/hill-country/sky/*.hdr",
   { query: "?url", import: "default", eager: true },
+);
+const skyMetas = import.meta.glob<SkyMeta>(
+  "../../../../content/tracks/hill-country/sky/*.json",
+  { import: "default", eager: true },
 );
 
 const domeRadius = 20000;
@@ -98,6 +102,103 @@ export interface SkyMeta {
   skyRadiance: number[];
   horizon: number[];
   sunColor: number[];
+  encoding?: SkyEncoding;
+}
+
+interface SkyEncoding {
+  scale: number;
+  gamma: number;
+}
+
+export interface CompactSky {
+  name: string;
+  dome: string;
+  env: string;
+  meta: string;
+}
+
+const encodedLimit = 0.999;
+
+function encodedRadiance(level: number, encoding: SkyEncoding): number {
+  const t = Math.min((level / 255) ** encoding.gamma, encodedLimit);
+  return (encoding.scale * t) / (1 - t);
+}
+
+async function decodedSky(
+  url: string,
+  encoding: SkyEncoding,
+): Promise<THREE.DataTexture> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`failed to load ${url}`);
+  const bitmap = await createImageBitmap(await response.blob(), {
+    colorSpaceConversion: "none",
+    premultiplyAlpha: "none",
+  });
+  const { width, height } = bitmap;
+  const canvas = new OffscreenCanvas(width, height);
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("no 2d canvas to decode the sky");
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const table = Uint16Array.from({ length: 256 }, (_, level) =>
+    THREE.DataUtils.toHalfFloat(
+      Math.min(encodedRadiance(level, encoding), 65504),
+    ),
+  );
+  const one = THREE.DataUtils.toHalfFloat(1);
+  const data = new Uint16Array(width * height * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = table[pixels[i] ?? 0] ?? 0;
+    data[i + 1] = table[pixels[i + 1] ?? 0] ?? 0;
+    data[i + 2] = table[pixels[i + 2] ?? 0] ?? 0;
+    data[i + 3] = one;
+  }
+  const map = new THREE.DataTexture(
+    data,
+    width,
+    height,
+    THREE.RGBAFormat,
+    THREE.HalfFloatType,
+  );
+  map.colorSpace = THREE.LinearSRGBColorSpace;
+  map.minFilter = THREE.LinearFilter;
+  map.magFilter = THREE.LinearFilter;
+  map.generateMipmaps = false;
+  map.flipY = true;
+  map.needsUpdate = true;
+  return map;
+}
+
+async function skyTextures(
+  compact: CompactSky | null,
+  elevation: number,
+  afternoon: boolean,
+  night: number,
+): Promise<{
+  name: string;
+  meta: SkyMeta;
+  sky: THREE.Texture;
+  environment: THREE.Texture;
+}> {
+  if (compact) {
+    const meta = (await (await fetch(compact.meta)).json()) as SkyMeta;
+    const encoding = meta.encoding ?? { scale: 1, gamma: 1 };
+    const [sky, environment] = await Promise.all([
+      decodedSky(night >= 1 ? compact.env : compact.dome, encoding),
+      decodedSky(compact.env, encoding),
+    ]);
+    return { name: compact.name, meta, sky, environment };
+  }
+  const { name, meta } = chooseSky(elevation, afternoon);
+  const loader = new HDRLoader();
+  const dome = night >= 1 ? `${name}-env.hdr` : `${name}.hdr`;
+  expectDownloads([fileUrl(dome), fileUrl(`${name}-env.hdr`)]);
+  const [sky, environment] = await Promise.all([
+    loader.loadAsync(fileUrl(dome)),
+    loader.loadAsync(fileUrl(`${name}-env.hdr`)),
+  ]);
+  return { name, meta, sky, environment };
 }
 
 function graded(meta: SkyMeta, grade: THREE.Vector3): SkyMeta {
@@ -120,16 +221,26 @@ function fileUrl(name: string): string {
   return entry[1];
 }
 
-async function chooseSky(
+export function skyDownloads(names: string[]): string[] {
+  return names.flatMap((name) => [
+    fileUrl(`${name}.hdr`),
+    fileUrl(`${name}-env.hdr`),
+  ]);
+}
+
+function metaOf(name: string): SkyMeta {
+  const entry = Object.entries(skyMetas).find(([key]) =>
+    key.endsWith(`/${name}.json`),
+  );
+  if (!entry) throw new Error(`missing sky asset ${name}.json`);
+  return entry[1];
+}
+
+function chooseSky(
   elevation: number,
   afternoon: boolean,
-): Promise<{ name: string; meta: SkyMeta }> {
-  const metas = await Promise.all(
-    skyNames.map(async (name) => ({
-      name,
-      meta: (await (await fetch(fileUrl(`${name}.json`))).json()) as SkyMeta,
-    })),
-  );
+): { name: string; meta: SkyMeta } {
+  const metas = skyNames.map((name) => ({ name, meta: metaOf(name) }));
   const fits = (name: string) => {
     if (elevation < nightElevation) return name === "night";
     if (name === "night") return false;
@@ -401,14 +512,14 @@ export class SkyBox {
     elevation: number,
     afternoon: boolean,
     night: number,
+    compact: CompactSky | null = null,
   ): Promise<SkyBox> {
-    const { name, meta } = await chooseSky(elevation, afternoon);
-    const loader = new HDRLoader();
-    const dome = night >= 1 ? `${name}-env.hdr` : `${name}.hdr`;
-    const [sky, environment] = await Promise.all([
-      loader.loadAsync(fileUrl(dome)),
-      loader.loadAsync(fileUrl(`${name}-env.hdr`)),
-    ]);
+    const { name, meta, sky, environment } = await skyTextures(
+      compact,
+      elevation,
+      afternoon,
+      night,
+    );
     releaseOnceUploaded(sky);
     sky.wrapS = THREE.RepeatWrapping;
     sky.wrapT = THREE.ClampToEdgeWrapping;

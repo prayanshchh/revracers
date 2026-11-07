@@ -23,13 +23,28 @@ interface Practice extends SpeedDreams {
   _sdTrackLength: () => number;
 }
 
-const line = JSON.parse(
-  readRepoFile("content/tracks/hill-country/racing-line.json"),
-) as RacingLineData;
-const { turns } = JSON.parse(
-  readRepoFile("content/tracks/hill-country/circuit-map.json"),
-) as { turns: CourseTurn[] };
-const apex = turns.find((turn) => turn.number === 1)?.distance ?? 0;
+interface Course {
+  track: string;
+  line: RacingLineData;
+  apex: number;
+  cornerSpeed: number;
+}
+
+function courseOf(track: string): Course {
+  const line = JSON.parse(
+    readRepoFile(`content/tracks/${track}/racing-line.json`),
+  ) as RacingLineData;
+  const { turns } = JSON.parse(
+    readRepoFile(`content/tracks/${track}/circuit-map.json`),
+  ) as { turns: CourseTurn[] };
+  const apex = turns.find((turn) => turn.number === 1)?.distance ?? 0;
+  const cornerSpeed =
+    line.profile.speed[
+      Math.round((apex / line.length) * line.profile.speed.length)
+    ] ?? 0;
+  return { track, line, apex, cornerSpeed };
+}
+
 const slowDownTicks = 125;
 const index = { time: 0, speed: 45, laps: 49, distance: 53, toMiddle: 54 };
 
@@ -57,13 +72,13 @@ function carOf(m: Practice, length: number): Car {
   };
 }
 
-async function practiceGrid(): Promise<Practice> {
+async function practiceGrid(track: string): Promise<Practice> {
   const m = await startCircuit<Practice>((module) => {
     module._sdPracticeGridSlot(1);
     module._sdRaceCountdown(2);
     module._sdInputAssist(1);
     module._sdInputAntiLock(1);
-  });
+  }, track);
   const time = () =>
     new Float64Array(m.HEAPF64.buffer, m._sdFrame(), 1)[0] ?? 0;
   while (time() < 0) {
@@ -78,8 +93,9 @@ function reachesRed(reader: LineReader, car: Car): boolean {
   return brakeIn !== null && brakeIn <= freezeDistance(car.speed);
 }
 
-async function stopForTurnOne(lateBy: number): Promise<Stop> {
-  const m = await practiceGrid();
+async function stopForTurnOne(course: Course, lateBy: number): Promise<Stop> {
+  const { line, apex } = course;
+  const m = await practiceGrid(course.track);
   const length = m._sdTrackLength();
   const reader = new LineReader(
     line.profile,
@@ -104,22 +120,22 @@ async function stopForTurnOne(lateBy: number): Promise<Stop> {
   throw new Error("the car never reached Turn 1");
 }
 
-const cornerSpeed =
-  line.profile.speed[
-    Math.round((apex / line.length) * line.profile.speed.length)
-  ] ?? 0;
+describe.runIf(existsSync(wasm)).each(["training-ground", "hill-country"])(
+  "tutorial braking point at Turn 1 of %s",
+  (track) => {
+    const course = courseOf(track);
 
-describe.runIf(existsSync(wasm))("tutorial braking point at Turn 1", () => {
-  test("flat out from the practice grid, time stops in the braking zone and braking from there makes the corner", async () => {
-    const stop = await stopForTurnOne(0);
-    expect(stop.frozeAt).toBeGreaterThan(apex - 220);
-    expect(stop.frozeAt).toBeLessThan(apex - 60);
-    expect(stop.frozeSpeed * 3.6).toBeGreaterThan(180);
-    expect(stop.turnInSpeed).toBeLessThan(cornerSpeed);
-  });
+    test("flat out from the practice grid, time stops in the braking zone and braking from there makes the corner", async () => {
+      const stop = await stopForTurnOne(course, 0);
+      expect(stop.frozeAt).toBeGreaterThan(course.apex - 220);
+      expect(stop.frozeAt).toBeLessThan(course.apex - 60);
+      expect(stop.frozeSpeed * 3.6).toBeGreaterThan(180);
+      expect(stop.turnInSpeed).toBeLessThan(course.cornerSpeed);
+    });
 
-  test("braking 70 m after that point no longer makes the corner", async () => {
-    const stop = await stopForTurnOne(70);
-    expect(stop.turnInSpeed).toBeGreaterThan(cornerSpeed);
-  });
-});
+    test("braking 70 m after that point no longer makes the corner", async () => {
+      const stop = await stopForTurnOne(course, 70);
+      expect(stop.turnInSpeed).toBeGreaterThan(course.cornerSpeed);
+    });
+  },
+);

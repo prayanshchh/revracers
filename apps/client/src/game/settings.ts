@@ -1,6 +1,7 @@
 import { nominalFuelPerLap } from "./energy.ts";
 import { ParamDoc, type ParamFs } from "./params.ts";
 import { teams } from "./teams.ts";
+import { defaultTeam } from "./car-files.ts";
 import { raceLapOptions, type Stage } from "./weekend.ts";
 
 const physicsCar = "revracer-26";
@@ -14,6 +15,16 @@ export const tracks = [
     length: 5528,
   },
 ] as const;
+
+export const tutorialTrack = {
+  id: "training-ground",
+  label: "Training Ground",
+  detail: "Driving School · 3.43 km",
+  category: "circuit",
+  length: 3432,
+} as const;
+
+type TrackChoice = (typeof tracks)[number] | typeof tutorialTrack;
 
 export const cars = teams.map((team) => ({
   id: team.id,
@@ -221,7 +232,7 @@ const raceBurnShare = 1.2;
 
 export const defaults: Settings = {
   track: "hill-country",
-  car: "velza",
+  car: defaultTeam,
   session: "weekend",
   buildUp: true,
   musicVolume: 70,
@@ -295,8 +306,7 @@ export function loadSettings(params: URLSearchParams): Settings {
     setup: { ...stored.setup },
   };
   applyUrl(settings, params);
-  if (!tracks.some((t) => t.id === settings.track))
-    settings.track = defaults.track;
+  pickTrack(settings, params);
   if (!cars.some((c) => c.id === settings.car)) settings.car = defaults.car;
   const options = raceLapOptions();
   if (!options.includes(settings.laps))
@@ -313,6 +323,18 @@ export function loadSettings(params: URLSearchParams): Settings {
   if (!choices.startType.some((c) => c.id === settings.startType))
     settings.startType = defaults.startType;
   return settings;
+}
+
+function pickTrack(settings: Settings, params: URLSearchParams): void {
+  if (!tracks.some((t) => t.id === settings.track))
+    settings.track = defaults.track;
+  if (params.get("track") === tutorialTrack.id)
+    Object.assign(settings, {
+      track: tutorialTrack.id,
+      session: "practice",
+      buildUp: false,
+      clouds: "no cloud",
+    });
 }
 
 function applyUrl(settings: Settings, params: URLSearchParams): void {
@@ -359,7 +381,8 @@ export function carOf(settings: Settings): (typeof cars)[number] {
   return car;
 }
 
-export function trackOf(settings: Settings): (typeof tracks)[number] {
+export function trackOf(settings: Settings): TrackChoice {
+  if (settings.track === tutorialTrack.id) return tutorialTrack;
   return tracks.find((t) => t.id === settings.track) ?? tracks[0];
 }
 

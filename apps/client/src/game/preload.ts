@@ -1,5 +1,6 @@
 import * as THREE from "three/webgpu";
 import { DefaultLoadingManager } from "three/webgpu";
+import { takeEarly } from "./early.ts";
 
 const settleFrames = 3;
 let loading = 0;
@@ -100,6 +101,17 @@ async function forgetOldAssets(): Promise<void> {
       await kept.delete(request);
 }
 
+function takeHeld(
+  url: URL,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> | null {
+  const method =
+    init?.method ?? (input instanceof Request ? input.method : "GET");
+  if (method.toUpperCase() !== "GET") return null;
+  return takeEarly(url.href)?.catch(() => plainFetch(input, init)) ?? null;
+}
+
 if (Object.keys(sizes).length > 0)
   setTimeout(() => {
     void forgetOldAssets().catch(() => undefined);
@@ -108,9 +120,10 @@ if (Object.keys(sizes).length > 0)
 globalThis.fetch = async (input, init) => {
   const mine = phase;
   const url = requestUrl(input);
-  const response = buildAsset(url, input, init)
-    ? await keptFetch(url, input, init)
-    : await plainFetch(input, init);
+  const response = await (takeHeld(url, input, init) ??
+    (buildAsset(url, input, init)
+      ? keptFetch(url, input, init)
+      : plainFetch(input, init)));
   const size =
     url.origin === location.origin && url.protocol === location.protocol
       ? expectedSize(url, response)
@@ -134,6 +147,29 @@ globalThis.fetch = async (input, init) => {
     headers: response.headers,
   });
 };
+
+export async function prefetch(urls: string[], lanes = 2): Promise<void> {
+  const kept = await assetStore();
+  if (!kept) return;
+  const wanted = [
+    ...new Set(urls.map((url) => new URL(url, location.href).href)),
+  ].filter((href) => sizes[new URL(href).pathname] !== undefined);
+  const queue = [...wanted];
+  const lane = async (): Promise<void> => {
+    for (let href = queue.shift(); href; href = queue.shift()) {
+      const hit = await kept.match(href).catch(() => undefined);
+      if (!hit) {
+        const response = await plainFetch(href, { priority: "low" }).catch(
+          () => null,
+        );
+        if (response?.status === 200)
+          await kept.put(href, response).catch(() => undefined);
+        else await response?.body?.cancel().catch(() => undefined);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: lanes }, lane));
+}
 
 export function downloadsFromNow(): () => number {
   const expected = expectedBytes;
@@ -237,12 +273,7 @@ export function releaseUploadedImages(
   releasable.clear();
 }
 
-export async function uploadEverything(
-  renderer: THREE.WebGPURenderer,
-  scene: THREE.Scene,
-  draw: () => void,
-): Promise<void> {
-  await loaded();
+function drawEverything(scene: THREE.Scene, draw: () => void): void {
   const hidden: THREE.Object3D[] = [];
   const culled: THREE.Object3D[] = [];
   scene.traverse((object) => {
@@ -258,6 +289,16 @@ export async function uploadEverything(
   draw();
   for (const object of hidden) object.visible = false;
   for (const object of culled) object.frustumCulled = true;
+}
+
+export async function uploadEverything(
+  renderer: THREE.WebGPURenderer,
+  scene: THREE.Scene,
+  draw: () => void,
+): Promise<void> {
+  drawEverything(scene, draw);
+  await loaded();
+  drawEverything(scene, draw);
   for (let frame = 0; frame < settleFrames; frame += 1) draw();
   await (
     renderer.backend as unknown as GpuBackend

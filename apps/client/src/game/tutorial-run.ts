@@ -1,4 +1,3 @@
-import racingLineUrl from "../../../../content/tracks/hill-country/racing-line.json?url";
 import { type Engine, frameIndex } from "./engine.ts";
 import { hurtOf, Incidents } from "./incidents.ts";
 import type { CarStatus } from "./mfd.ts";
@@ -11,6 +10,7 @@ import {
   type Command,
   type CourseTurn,
   type Finish,
+  type Lessons,
   type Pedals,
   Tutorial,
   type TutorialEvent,
@@ -42,6 +42,8 @@ export interface TutorialLive {
 
 export interface TutorialTrack {
   turns: CourseTurn[];
+  lessons: Lessons;
+  racingLine: string;
 }
 
 type Held = Record<"left" | "right" | "up" | "down", boolean>;
@@ -85,7 +87,7 @@ export class TutorialRun {
     hooks: TutorialHooks,
     track: TutorialTrack,
   ): Promise<TutorialRun> {
-    const data = await fetchJson<RacingLineData>(racingLineUrl);
+    const data = await fetchJson<RacingLineData>(track.racingLine);
     return new TutorialRun(hooks, data, track);
   }
 
@@ -121,7 +123,8 @@ export class TutorialRun {
     );
     this.machine = new Tutorial({
       length: this.length,
-      ...track,
+      turns: track.turns,
+      lessons: track.lessons,
     });
     this.clock.hold();
     this.screen = new TutorialScreen(hooks.root);

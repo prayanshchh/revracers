@@ -1,4 +1,5 @@
 import * as THREE from "three/webgpu";
+import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { float, smoothstep, uv, vec3 } from "three/tsl";
 import { carMaterials, carTextures, mirrorLayout } from "./carpaint.ts";
 import {
@@ -142,6 +143,19 @@ interface Wheel {
   slump: WheelSlump;
 }
 
+async function carModels(
+  team: string,
+  lite: boolean,
+): Promise<[GLTF, GLTF | null]> {
+  const loader = gltfLoader();
+  if (lite)
+    return [await loader.loadAsync(carFile(team, "lite/car.bin")), null];
+  return Promise.all([
+    loader.loadAsync(carFile(team, "car.glb")),
+    loader.loadAsync(carFile(team, "lod.glb")),
+  ]);
+}
+
 export function contactShadow(wheels: THREE.Vector3[]): THREE.Mesh {
   const along = wheels.map((w) => w.z);
   const across = wheels.map((w) => w.x);
@@ -220,27 +234,30 @@ export function makeDamageable(
   model: THREE.Object3D,
   look: DamageLook,
   breakable: (mesh: THREE.Mesh) => boolean,
-): void {
+  zoned = new Set<THREE.Material>(),
+): Set<THREE.Material> {
   const meshes: THREE.Mesh[] = [];
   model.traverse((object) => {
     if (object instanceof THREE.Mesh) meshes.push(object as THREE.Mesh);
   });
-  const zoned = new Set<THREE.Material>();
-  for (const mesh of meshes)
+  const fresh = new Set<THREE.Material>();
+  for (const mesh of meshes) {
+    const material = mesh.material as THREE.Material;
     if (
       breakable(mesh) &&
-      tagDamageZones(
-        mesh.geometry,
-        (mesh.material as THREE.Material).name === armMaterial,
-      )
+      tagDamageZones(mesh.geometry, material.name === armMaterial) &&
+      !zoned.has(material)
     )
-      zoned.add(mesh.material as THREE.Material);
+      fresh.add(material);
+  }
+  for (const material of fresh) zoned.add(material);
   for (const mesh of meshes) {
     if (!zoned.has(mesh.material as THREE.Material)) continue;
     zeroZones(mesh.geometry);
     mesh.userData = { ...mesh.userData, damage: look };
   }
-  for (const material of zoned) damageable(material as THREE.NodeMaterial);
+  for (const material of fresh) damageable(material as THREE.NodeMaterial);
+  return zoned;
 }
 
 export class GltfCar {
@@ -268,6 +285,10 @@ export class GltfCar {
   private compoundShown = -1;
   private readonly radii: number[] = [];
   private materials: CarMaterials | null = null;
+  private carScene: THREE.Object3D | null = null;
+  private readonly axes = new THREE.Group();
+  private later: string | null = null;
+  private zoned = new Set<THREE.Material>();
   private textures: CarTextures | null = null;
   private auxFrame = 0;
   private mirrorsShown = false;
@@ -320,66 +341,33 @@ export class GltfCar {
     team: string,
     renderer: THREE.WebGPURenderer,
     env: CarEnvironment,
+    lite = false,
   ): Promise<GltfCar> {
     const car = new GltfCar();
     const anisotropy = renderer.getMaxAnisotropy();
-    const loader = gltfLoader();
-    const [gltf, lod] = await Promise.all([
-      loader.loadAsync(carFile(team, "car.glb")),
-      loader.loadAsync(carFile(team, "lod.glb")),
-    ]);
-    car.textures = carTextures(team, anisotropy);
+    const [gltf, lod] = await carModels(team, lite);
+    car.textures = carTextures(team, anisotropy, lite);
     const materials = carMaterials(car.textures, env, {
       "mirror-l": car.addMirror("mirror-l"),
       "mirror-r": car.addMirror("mirror-r"),
     });
     car.materials = materials;
-    const tyres = tyreMaterial(env, anisotropy);
+    const tyres = tyreMaterial(env, anisotropy, lite);
     car.sharedTyres = tyres;
-    gltf.scene.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return;
-      const source = object.material as THREE.MeshStandardMaterial;
-      object.receiveShadow = true;
-      if (source.name === "tyre") {
-        markTyres(object.geometry as THREE.BufferGeometry, false);
-        object.material = tyres;
-        return;
-      }
-      if (source.name.startsWith("mirror-")) car.glass.push(object);
-      if (cockpitOnly.test(source.name)) car.cockpitParts.push(object);
-      object.material = materials.build(source);
-    });
-    makeDamageable(gltf.scene, car.damage, withinChassis);
+    car.dress(gltf.scene, materials, tyres);
+    car.zoned = makeDamageable(gltf.scene, car.damage, withinChassis);
     car.pieces = zonePieces(gltf.scene, new Set(car.glass));
-    const axes = new THREE.Group();
+    const axes = car.axes;
     axes.matrixAutoUpdate = false;
     axes.matrix.copy(gltfToSdCar);
-    axes.add(gltf.scene, shadowCaster(lod.scene, car.damage));
+    axes.add(gltf.scene);
+    if (lod) axes.add(shadowCaster(lod.scene, car.damage));
+    car.carScene = gltf.scene;
+    car.later = lite ? team : null;
     car.model.add(axes);
     car.root.matrixAutoUpdate = false;
     car.root.add(car.model);
-    for (const name of wheelNames) {
-      const pivot = gltf.scene.getObjectByName(name);
-      const spin = gltf.scene.getObjectByName(`${name}-spin`);
-      if (!pivot || !spin) throw new Error(`car model has no ${name}`);
-      const look = { ...tyreLook(), compound: car.compoundColour };
-      let tyre: THREE.Object3D | null = null;
-      spin.traverse((part) => {
-        if ((part as THREE.Mesh).material !== tyres) return;
-        part.userData = { ...part.userData, tyre: look };
-        tyre ??= part;
-      });
-      car.wheels.push({
-        pivot,
-        spin,
-        tyre,
-        rest: pivot.position.clone(),
-        restZ: null,
-        look,
-        flatSpin: 0,
-        slump: wheelSlump(0, true, true),
-      });
-    }
+    car.fitWheels(gltf.scene, tyres);
     car.measureWheels();
     car.wheelPieces = car.wheels.map((wheel, i) =>
       gltfWheelPiece(
@@ -401,6 +389,50 @@ export class GltfCar {
     return car;
   }
 
+  private dress(
+    model: THREE.Object3D,
+    materials: CarMaterials,
+    tyres: THREE.Material,
+  ): void {
+    model.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const source = object.material as THREE.MeshStandardMaterial;
+      object.receiveShadow = true;
+      if (source.name === "tyre") {
+        markTyres(object.geometry as THREE.BufferGeometry, false);
+        object.material = tyres;
+        return;
+      }
+      if (source.name.startsWith("mirror-")) this.glass.push(object);
+      if (cockpitOnly.test(source.name)) {
+        this.cockpitParts.push(object);
+        object.visible = this.onboard;
+      }
+      object.material = materials.build(source);
+    });
+  }
+
+  async finish(): Promise<void> {
+    const team = this.later;
+    const { materials, sharedTyres, carScene } = this;
+    if (!team || !materials || !sharedTyres || !carScene) return;
+    this.later = null;
+    const loader = gltfLoader();
+    const [cockpit, lod] = await Promise.all([
+      loader.loadAsync(carFile(team, "lite/cockpit.bin")),
+      loader.loadAsync(carFile(team, "lite/lod.bin")),
+    ]);
+    const wheel = cockpit.scene.getObjectByName("steering-wheel");
+    const holder = carScene.getObjectByName("car") ?? carScene;
+    if (wheel) {
+      this.dress(wheel, materials, sharedTyres);
+      makeDamageable(wheel, this.damage, withinChassis, this.zoned);
+      holder.add(wheel);
+      this.steeringWheel = wheel;
+    }
+    this.axes.add(shadowCaster(lod.scene, this.damage));
+  }
+
   dispose(): void {
     this.root.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
@@ -411,6 +443,31 @@ export class GltfCar {
     for (const map of Object.values(this.textures ?? {}))
       (map as THREE.Texture).dispose();
     for (const mirror of this.mirrors.values()) mirror.target.dispose();
+  }
+
+  private fitWheels(model: THREE.Object3D, tyres: THREE.Material): void {
+    for (const name of wheelNames) {
+      const pivot = model.getObjectByName(name);
+      const spin = model.getObjectByName(`${name}-spin`);
+      if (!pivot || !spin) throw new Error(`car model has no ${name}`);
+      const look = { ...tyreLook(), compound: this.compoundColour };
+      let tyre: THREE.Object3D | null = null;
+      spin.traverse((part) => {
+        if ((part as THREE.Mesh).material !== tyres) return;
+        part.userData = { ...part.userData, tyre: look };
+        tyre ??= part;
+      });
+      this.wheels.push({
+        pivot,
+        spin,
+        tyre,
+        rest: pivot.position.clone(),
+        restZ: null,
+        look,
+        flatSpin: 0,
+        slump: wheelSlump(0, true, true),
+      });
+    }
   }
 
   private measureWheels(): void {
@@ -525,6 +582,30 @@ export class GltfCar {
     for (const mirror of this.mirrors.values())
       this.drawMirror(renderer, scene, mirror, everywhere);
     renderer.setRenderTarget(previous);
+  }
+
+  compileMirrors(
+    renderer: THREE.WebGPURenderer,
+    scene: THREE.Scene,
+  ): Promise<void> {
+    this.root.updateWorldMatrix(true, true);
+    const previous = renderer.getRenderTarget();
+    const culled: THREE.Object3D[] = [];
+    scene.traverse((object) => {
+      if (!object.frustumCulled) return;
+      culled.push(object);
+      object.frustumCulled = false;
+    });
+    for (const glass of this.glass) glass.visible = false;
+    const pending: Promise<void>[] = [];
+    for (const mirror of this.mirrors.values()) {
+      renderer.setRenderTarget(mirror.target);
+      pending.push(renderer.compileAsync(scene, mirror.camera));
+    }
+    renderer.setRenderTarget(previous);
+    for (const glass of this.glass) glass.visible = true;
+    for (const object of culled) object.frustumCulled = true;
+    return Promise.all(pending).then(() => undefined);
   }
 
   private viewOf(mirror: {

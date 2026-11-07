@@ -15,6 +15,7 @@ import { compounds } from "./tyres.ts";
 
 const trackNames: Record<string, string> = {
   "hill-country": "Hill Country Circuit",
+  "training-ground": "Training Ground",
 };
 
 function fromMs(ms: number | null | undefined): string {

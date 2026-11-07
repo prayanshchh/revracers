@@ -20,6 +20,10 @@ const files = import.meta.glob<string>("../../../../../content/music/*.ogg", {
   import: "default",
 });
 const tracks = sources.tracks as Track[];
+
+export function musicFiles(): string[] {
+  return Object.values(files);
+}
 const introKey = "revracers.introPlayed";
 const fadeIn = 1.2;
 const crossfade = 1.5;

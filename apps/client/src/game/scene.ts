@@ -1,14 +1,16 @@
 import * as THREE from "three/webgpu";
 import crewUrl from "../../../../content/tracks/hill-country/crew.glb?url";
-import frameUrl from "../../../../content/tracks/hill-country/sd-frame.json?url";
-import racingLineUrl from "../../../../content/tracks/hill-country/racing-line.json?url";
-import trackUrl from "../../../../content/tracks/hill-country/track.json?url";
 import roadUrl from "../../../../content/tracks/hill-country/road.glb?url";
+import { type Circuit, circuitFiles } from "./circuits.ts";
+import { carFile, liteCarFiles, teams } from "./teams.ts";
+import { buildTrainingGround } from "./training-ground.ts";
+import { trainingTextures } from "./training-files.ts";
+import type { LinePath, TrainingTrack } from "./training-layout.ts";
 import { FieldCars } from "./field-cars.ts";
 import { frameIndex, type Engine, type HudInfo } from "./engine.ts";
 import type { WeatherInfo } from "./weather.ts";
 import { farRain, nearRain, RainStreaks, Spray } from "./rain.ts";
-import { carWetness, rainLight } from "./carpaint.ts";
+import { type CarEnvironment, carWetness, rainLight } from "./carpaint.ts";
 import {
   carState,
   type LookChange,
@@ -59,7 +61,7 @@ import {
   type TrackPoint,
 } from "./floodlights.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
-import { Crowd } from "./crowd.ts";
+import { Crowd, crowdData } from "./crowd.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
 import { tyreWetness } from "./tyre-paint.ts";
 import { frustumContains, WorldCuller } from "./world-culler.ts";
@@ -135,7 +137,7 @@ interface TrackData {
   length: number;
   grid: GridSlot[];
   centerline: TrackPoint[];
-  pitLane: { entry: number; exit: number };
+  pitLane: { entry: number; exit: number } | null;
 }
 
 function buildFloodlights(
@@ -143,7 +145,10 @@ function buildFloodlights(
   frame: TrackFrame,
   start: [number, number, number],
 ): Floodlights {
-  const poles = layoutPoles(data.centerline, data.pitLane);
+  const poles = layoutPoles(
+    data.centerline,
+    data.pitLane ?? { entry: 0, exit: 0 },
+  );
   const holder = new THREE.Group();
   const placed = placeOnTrack(holder, frame, start);
   const toWorld = placed.matrix;
@@ -228,6 +233,27 @@ function presentRoots(
   return items.flatMap((item) => (item ? [item.root] : []));
 }
 
+function venueDownloads(
+  circuit: Circuit,
+  team: string,
+  rivals: string[],
+): string[] {
+  const fleet =
+    rivals.length > 0 ? [team, ...rivals] : teams.map((each) => each.id);
+  return [
+    roadUrl,
+    crewUrl,
+    crowdData,
+    ...circuitFiles(circuit),
+    carFile(team, "car.glb"),
+    ...[...new Set(fleet)].map((each) => carFile(each, "lod.glb")),
+  ];
+}
+
+function lightFiles(circuit: Circuit, team: string): string[] {
+  return [...circuitFiles(circuit), ...trainingTextures, ...liteCarFiles(team)];
+}
+
 export async function fetchJson<T>(url: string): Promise<T> {
   THREE.DefaultLoadingManager.itemStart(url);
   try {
@@ -237,6 +263,100 @@ export async function fetchJson<T>(url: string): Promise<T> {
   } finally {
     THREE.DefaultLoadingManager.itemEnd(url);
   }
+}
+
+interface SharedLoads {
+  sky: Promise<SkyBox>;
+  env: Promise<CarEnvironment>;
+  radiance: Promise<SkyRadiance>;
+  track: Promise<TrackData>;
+  line: Promise<RacingLineData>;
+}
+
+function sharedLoads(
+  renderer: THREE.WebGPURenderer,
+  light: SessionLight,
+  circuit: Circuit,
+): SharedLoads {
+  const sky = SkyBox.load(
+    light.elevation,
+    light.afternoon,
+    light.night,
+    circuit.sky,
+  ).then((loaded) => {
+    loaded.refreshEnvironment(renderer, 0, 1);
+    return loaded;
+  });
+  return {
+    sky,
+    env: sky.then((loaded) => ({
+      texture: loaded.environment,
+      rotation: loaded.environmentRotation,
+    })),
+    radiance: sky.then(
+      (loaded): SkyRadiance =>
+        (direction) =>
+          loaded.radiance(direction, false),
+    ),
+    track: fetchJson<TrackData>(circuit.track),
+    line: fetchJson<RacingLineData>(circuit.racingLine),
+  };
+}
+
+function groundOf(
+  circuit: Circuit,
+  renderer: THREE.WebGPURenderer,
+  loads: SharedLoads,
+  after: Promise<unknown>,
+): Promise<THREE.Object3D> {
+  const anisotropy = renderer.getMaxAnisotropy();
+  if (circuit.venue) {
+    const limit =
+      (renderer.backend as { device?: GPUDevice }).device?.limits
+        .maxTextureDimension2D ?? defaultTextureLimit;
+    return loadRoad(roadUrl, anisotropy, limit, loads.radiance);
+  }
+  return Promise.all([loads.track, loads.line]).then(([data, line]) =>
+    buildTrainingGround(
+      data as unknown as TrainingTrack,
+      line as LinePath,
+      anisotropy,
+      loads.radiance,
+      after,
+    ),
+  );
+}
+
+async function venueExtras(
+  venue: boolean,
+  anisotropy: number,
+  team: string,
+  env: Promise<CarEnvironment>,
+): Promise<{ people: Crowd | null; crew: PitCrew | null }> {
+  if (!venue) return { people: null, crew: null };
+  const [people, crew] = await Promise.all([
+    Crowd.load(),
+    env.then((loaded) => PitCrew.load(crewUrl, anisotropy, loaded, team)),
+  ]);
+  return { people, crew };
+}
+
+async function parkedGrid(
+  engine: Engine,
+  team: string,
+  loads: SharedLoads,
+): Promise<GridCars> {
+  const [gridData, env] = await Promise.all([loads.track, loads.env]);
+  const lengthScale = engine.trackLength() / gridData.length;
+  return GridCars.load(
+    team,
+    gridData.grid.map((slot) => ({
+      distance: slot.distance * lengthScale,
+      offset: slot.offset,
+    })),
+    engine.trackPoint.bind(engine),
+    env,
+  );
 }
 
 const defaultTextureLimit = 8192;
@@ -336,14 +456,14 @@ export class Scene {
   private constructor(
     private readonly sky: SdSky,
     private readonly skyBox: SkyBox,
-    private readonly people: Crowd,
+    private readonly people: Crowd | null,
     private readonly car: GltfCar,
     private readonly grid: GridCars | null,
     track: THREE.Object3D,
     private readonly road: THREE.Object3D,
     private readonly culler: WorldCuller,
     private readonly racingLine: RacingLineView,
-    readonly crew: PitCrew,
+    readonly crew: PitCrew | null,
     private readonly lapScale: number,
     private readonly field: FieldCars | null,
     private lights: StartLights,
@@ -388,7 +508,7 @@ export class Scene {
     this.greyHaze.copy(skyBox.overcastHorizon).multiplyScalar(overcastHaze);
     this.scene.add(
       this.marks.mesh,
-      this.crew.root,
+      ...presentRoots(this.crew),
       this.gate.mesh,
       this.safetyCar.root,
     );
@@ -431,78 +551,39 @@ export class Scene {
     rivals: string[],
     lights: StartLights,
     clouds: string,
+    circuit: Circuit,
   ): Promise<Scene> {
-    expectDownloads([roadUrl, crewUrl, frameUrl, racingLineUrl, trackUrl]);
+    const venue = circuit.venue;
+    expectDownloads(Scene.downloads(circuit, team, rivals));
     const anisotropy = renderer.getMaxAnisotropy();
-    const textureLimit =
-      (renderer.backend as { device?: GPUDevice }).device?.limits
-        .maxTextureDimension2D ?? defaultTextureLimit;
     const local = engine.trackLocal();
     const light = sessionLight(local.timeOfDay / 3600);
-    const skyLoad = SkyBox.load(
-      light.elevation,
-      light.afternoon,
-      light.night,
-    ).then((sky) => {
-      sky.refreshEnvironment(renderer, 0, 1);
-      return sky;
-    });
-    const envLoad = skyLoad.then((sky) => ({
-      texture: sky.environment,
-      rotation: sky.environmentRotation,
-    }));
-    const point = engine.trackPoint.bind(engine);
-    const trackLoad = fetchJson<TrackData>(trackUrl);
-    const gridLoad =
-      rivals.length > 0
-        ? Promise.resolve(null)
-        : Promise.all([trackLoad, envLoad]).then(([gridData, loaded]) => {
-            const lengthScale = engine.trackLength() / gridData.length;
-            return GridCars.load(
-              team,
-              gridData.grid.map((slot) => ({
-                distance: slot.distance * lengthScale,
-                offset: slot.offset,
-              })),
-              point,
-              loaded,
-            );
-          });
-    const fieldLoad =
-      rivals.length > 0
-        ? envLoad.then((loaded) => FieldCars.load(rivals, loaded))
-        : Promise.resolve(null);
+    const loads = sharedLoads(renderer, light, circuit);
+    const carLoad = loads.env.then((env) =>
+      GltfCar.load(team, renderer, env, !venue),
+    );
     const [
       skyBox,
       frame,
-      people,
+      { people, crew },
       road,
       data,
-      crew,
       car,
       gridData,
       grid,
       field,
     ] = await Promise.all([
-      skyLoad,
-      fetchJson<TrackFrame>(frameUrl),
-      Crowd.load(),
-      loadRoad(
-        roadUrl,
-        anisotropy,
-        textureLimit,
-        skyLoad.then(
-          (sky): SkyRadiance =>
-            (direction) =>
-              sky.radiance(direction, false),
-        ),
-      ),
-      fetchJson<RacingLineData>(racingLineUrl),
-      envLoad.then((loaded) => PitCrew.load(crewUrl, anisotropy, loaded, team)),
-      envLoad.then((loaded) => GltfCar.load(team, renderer, loaded)),
-      trackLoad,
-      gridLoad,
-      fieldLoad,
+      loads.sky,
+      fetchJson<TrackFrame>(circuit.frame),
+      venueExtras(venue, anisotropy, team, loads.env),
+      groundOf(circuit, renderer, loads, carLoad),
+      loads.line,
+      carLoad,
+      loads.track,
+      venue && rivals.length === 0 ? parkedGrid(engine, team, loads) : null,
+      rivals.length > 0
+        ? loads.env.then((env) => FieldCars.load(rivals, env))
+        : null,
     ]);
     const racingLine = new RacingLineView(data, data.profile, lineMode);
     const start = engine.trackPoint(0, 0);
@@ -510,11 +591,13 @@ export class Scene {
     placed.updateMatrixWorld(true);
     const culler = new WorldCuller(road, cascadeLayers);
     const floodlights =
-      light.lamps > 0 ? buildFloodlights(gridData, frame, start) : null;
+      venue && light.lamps > 0
+        ? buildFloodlights(gridData, frame, start)
+        : null;
     const track = new THREE.Group();
     track.add(
       placed,
-      placeOnTrack(people.root, frame, start),
+      ...presentRoots(people).map((root) => placeOnTrack(root, frame, start)),
       placeOnTrack(racingLine.root, frame, start),
     );
     const scene = new Scene(
@@ -541,6 +624,24 @@ export class Scene {
     );
     engine.barriers(0, 0);
     return scene;
+  }
+
+  warmMirrors(renderer: THREE.WebGPURenderer): void {
+    this.car.warmMirrors(renderer, this.scene);
+  }
+
+  compileMirrors(renderer: THREE.WebGPURenderer): Promise<void> {
+    return this.car.compileMirrors(renderer, this.scene);
+  }
+
+  static downloads(circuit: Circuit, team: string, rivals: string[]): string[] {
+    return circuit.venue
+      ? venueDownloads(circuit, team, rivals)
+      : lightFiles(circuit, team);
+  }
+
+  finishCar(): Promise<void> {
+    return this.car.finish();
   }
 
   updateField(cars: Float64Array): void {
@@ -803,6 +904,8 @@ export class Scene {
       this.fittedCompound = this.compound;
       this.fittedWear = this.wear;
     }
+    this.gate.update(control.countdown);
+    if (!this.crew) return;
     this.crew.setCompounds(this.fittedCompound, fresh, this.fittedWear);
     const eye = new THREE.Vector3().setFromMatrixPosition(
       this.camera.matrixWorld,
@@ -816,7 +919,6 @@ export class Scene {
       performance.now() / 1000,
     );
     this.car.setPitService(lift, wheelsOff);
-    this.gate.update(control.countdown);
   }
 
   placePit(
@@ -826,7 +928,7 @@ export class Scene {
     const lateral = layout.boxLateral - layout.shift;
     const [x, y, z] = point(layout.boxDistance, lateral);
     const [x2, y2] = point(layout.boxDistance + 2, lateral);
-    this.crew.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x));
+    this.crew?.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x));
     const turn = layout.boxDistance - gateLead;
     const gateLateral = layout.fastLane - layout.shift;
     const [gx, gy, gz] = point(turn, gateLateral);
@@ -841,7 +943,7 @@ export class Scene {
       this.skyBox.overcastLight.value,
     );
     this.sunlight.freeze();
-    if (this.warming) this.crew.root.visible = true;
+    if (this.warming && this.crew) this.crew.root.visible = true;
     this.car.renderAuxiliary(renderer, this.scene);
   }
 
@@ -1007,6 +1109,18 @@ export class Scene {
     this.atmosphere.shock = this.shockLevel(time);
     const lit = this.lights.lit(time - this.signalAt);
     setStartLights(this.cinematic ? 0 : lit);
+    this.updateSky(time, eyeX, eyeY, eyeZ);
+    this.people?.update(this.eye.set(eyeX, eyeY, eyeZ));
+    this.applyWeather(frame, onboard);
+    this.debris.update(time);
+  }
+
+  private updateSky(
+    time: number,
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+  ): void {
     const sky = this.sky.update(time, time, eyeX, eyeY);
     const [focusX, focusY, focusZ] = this.cinematic?.target ?? [
       eyeX,
@@ -1016,9 +1130,6 @@ export class Scene {
     this.sunlight.update(sky, focusX, focusY, focusZ);
     this.atmosphere.sunDirection.copy(this.sunlight.direction);
     this.skyBox.update(this.sunlight.direction, eyeX, eyeY, this.scene);
-    this.people.update(this.eye.set(eyeX, eyeY, eyeZ));
-    this.applyWeather(frame, onboard);
-    this.debris.update(time);
   }
 
   commitMoves(): void {
@@ -1040,6 +1151,7 @@ export class Scene {
   }
 
   hideUnseenCrew(): void {
+    if (!this.crew) return;
     const { root } = this.crew;
     if (!this.warming) {
       this.crewBounds.center.setFromMatrixPosition(root.matrix);
@@ -1056,13 +1168,14 @@ export class Scene {
   async warmUp(
     renderer: THREE.WebGPURenderer,
     draw: () => void,
+    mirrors: boolean,
   ): Promise<void> {
     this.warming = true;
-    this.crew.bake();
+    this.crew?.bake();
     await uploadEverything(renderer, this.scene, () => {
       draw();
       this.sunlight.freeze();
-      this.car.warmMirrors(renderer, this.scene);
+      if (mirrors) this.warmMirrors(renderer);
     });
     this.warming = false;
     releaseCpuCopies(this.road, this.culler.retained());
