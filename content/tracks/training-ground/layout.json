@@ -1,0 +1,62 @@
+{
+  "id": "training-ground",
+  "name": "Training Ground",
+  "width": 14,
+  "line": [300, 0],
+  "vertices": [
+    {
+      "at": [760, 0],
+      "radius": 22,
+      "turn": 1
+    },
+    {
+      "at": [800, -250],
+      "radius": 110,
+      "turn": 2
+    },
+    {
+      "at": [700, -420],
+      "radius": 75,
+      "turn": 3
+    },
+    {
+      "at": [860, -580],
+      "radius": 55,
+      "turn": null
+    },
+    {
+      "at": [980, -760],
+      "radius": 15,
+      "turn": 4
+    },
+    {
+      "at": [-150, -420],
+      "radius": 30,
+      "turn": 5
+    },
+    {
+      "at": [-60, -230],
+      "radius": 140,
+      "turn": 6
+    },
+    {
+      "at": [-200, -120],
+      "radius": 45,
+      "turn": 7
+    },
+    {
+      "at": [-250, 0],
+      "radius": 40,
+      "turn": 8
+    }
+  ],
+  "smoothing": 24,
+  "verge": 10,
+  "runoff": 20,
+  "gridToLine": 12,
+  "gridRows": 2,
+  "straights": [
+    [8, 0],
+    [4, 5]
+  ]
+}

@@ -1,4 +1,9 @@
-import { type HudPart, hudParts, type Settings } from "./settings.ts";
+import {
+  type HudPart,
+  hudParts,
+  type Settings,
+  tutorialTrack,
+} from "./settings.ts";
 
 export type TutorialStatus = "done" | "skipped";
 
@@ -34,6 +39,7 @@ export function tutorialSettings(base: Settings): Settings {
   const parts = Object.keys(hudParts) as HudPart[];
   return {
     ...base,
+    track: tutorialTrack.id,
     session: "practice",
     buildUp: false,
     racingLine: "full",
@@ -41,7 +47,7 @@ export function tutorialSettings(base: Settings): Settings {
     ersAssist: false,
     antiLock: true,
     rain: "none",
-    clouds: "few clouds",
+    clouds: "no cloud",
     timeOfDay: "noon",
     tyreWear: "real",
     fuel: 0,

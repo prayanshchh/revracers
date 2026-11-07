@@ -23,7 +23,7 @@ const pitDeckRamp = 20;
 const pitWallHeight = 1;
 const pitWallRamp = 30;
 const pit = track.pitLane;
-const pitShift = pit.pitWall - half;
+const pitShift = pit ? pit.pitWall - half : 0;
 
 const points = track.centerline.map((p) => ({
   x: p.x,
@@ -99,6 +99,7 @@ const lapDistance = (distance) =>
 const smooth = (t) => t * t * (3 - 2 * t);
 
 function shiftAt(distance) {
+  if (!pit) return 0;
   if (onArc(distance, pit.wallStart, pit.wallEnd)) return pitShift;
   const before = lapDistance(pit.wallStart - distance);
   const after = lapDistance(distance - pit.wallEnd);
@@ -107,6 +108,7 @@ function shiftAt(distance) {
 }
 
 function pitWallThickness(distance) {
+  if (!pit) return pitWallThin;
   if (!onArc(distance, pit.garageStart, pit.garageEnd)) return pitWallThin;
   const inside = Math.min(
     lapDistance(distance - pit.garageStart),
@@ -119,6 +121,7 @@ function pitWallThickness(distance) {
 }
 
 function pitZoneAt(distance) {
+  if (!pit) return null;
   if (!onArc(distance, pit.entry, pit.exit)) return null;
   return onArc(distance, pit.wallStart, pit.wallEnd) ? "wall" : "mouth";
 }
@@ -179,6 +182,7 @@ points.forEach((p, i) => {
   p.kerbRight = levelRight[i];
 });
 
+const straightBelow = track.straightBelow ?? 1e-7;
 const cross = (ax, ay, bx, by) => ax * by - ay * bx;
 const dot = (ax, ay, bx, by) => ax * bx + ay * by;
 
@@ -187,7 +191,7 @@ function arc(ax, ay, tx, ty, bx, by) {
   const cy = by - ay;
   const chord = Math.hypot(cx, cy);
   const theta = 2 * Math.atan2(cross(tx, ty, cx, cy), dot(tx, ty, cx, cy));
-  if (Math.abs(theta) < 1e-7)
+  if (Math.abs(theta) < straightBelow)
     return { kind: "str", length: chord, arc: 0, radius: Infinity };
   const radius = chord / (2 * Math.sin(Math.abs(theta) / 2));
   return {
@@ -387,6 +391,17 @@ const body = segments
   })
   .join("\n");
 
+function startingGrid() {
+  if (!track.gridRows) return "";
+  const [slot] = track.grid;
+  return `
+<section name="Starting Grid">
+${num("rows", track.gridRows)}
+${num("distance to start", track.length - slot.distance, "m")}
+${str("pole position side", slot.offset < 0 ? "right" : "left")}
+</section>`;
+}
+
 const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE params SYSTEM "../../../src/libs/tgf/params.dtd" [
 <!ENTITY default-surfaces SYSTEM "../../../data/tracks/surfaces.xml">
@@ -401,8 +416,8 @@ ${grassSurface()}
 ${str("name", track.name)}
 ${str("category", "circuit")}
 ${num("version", 4)}
-${str("author", "generated from content/tracks/hill-country/track.json")}
-</section>
+${str("author", `generated from content/tracks/${track.id}/track.json`)}
+</section>${startingGrid()}
 <section name="Local Info">
 ${str("station", "KAUS")}
 ${num("time of day", timeOfDay, "hour")}
@@ -437,7 +452,7 @@ const frame = {
   heading: Math.atan2(start.ty, start.tx),
   width,
   segments: segments.length,
-  pit: {
+  pit: pit && {
     length: segments.reduce((sum, s) => sum + s.length, 0),
     entry: pit.entry,
     wallStart: pit.wallStart,

@@ -4,9 +4,11 @@ import {
   LineReader,
   type RacingLineData,
 } from "../../apps/client/src/game/racing-line.ts";
+import { circuitOf } from "../../apps/client/src/game/circuits.ts";
 import {
   type Command,
   type CourseTurn,
+  type Lessons,
   type Pedals,
   Tutorial,
   type TutorialEvent,
@@ -29,6 +31,38 @@ const dt = 1 / 60;
 const turnAt = (number: number) =>
   turns.find((turn) => turn.number === number)?.distance ?? 0;
 
+interface Course {
+  length: number;
+  line: RacingLineData;
+  turns: CourseTurn[];
+  gridStart: number;
+  lessons: Lessons;
+}
+
+const venue: Course = {
+  length,
+  line,
+  turns,
+  gridStart,
+  lessons: circuitOf("hill-country").lessons,
+};
+
+function courseOf(track: string, gridStart: number): Course {
+  const data = JSON.parse(
+    readRepoFile(`content/tracks/${track}/racing-line.json`),
+  ) as RacingLineData;
+  const map = JSON.parse(
+    readRepoFile(`content/tracks/${track}/circuit-map.json`),
+  ) as { turns: CourseTurn[] };
+  return {
+    length: data.length,
+    line: data,
+    turns: map.turns,
+    gridStart,
+    lessons: circuitOf(track).lessons,
+  };
+}
+
 const mfdPages = ["quick", "weather", "temps", "wear", "pressure"];
 const nextPage = (page: string) =>
   mfdPages[(mfdPages.indexOf(page) + 1) % mfdPages.length] ?? "quick";
@@ -36,14 +70,10 @@ const nextPage = (page: string) =>
 type Policy = (drive: Drive) => void;
 
 class Drive {
-  readonly tutorial = new Tutorial({ length, turns });
-  private readonly reader = new LineReader(
-    line.profile,
-    line.length,
-    line.length / length,
-  );
+  readonly tutorial: Tutorial;
+  private readonly reader: LineReader;
   now = 0;
-  travel = gridStart;
+  travel: number;
   speed = 0;
   raceTime = -countdown;
   input: Pedals = { steer: 0, throttle: 0, brake: 0 };
@@ -65,7 +95,22 @@ class Drive {
   brakeIn: number | null = null;
   readonly events: TutorialEvent[] = [];
   readonly seen: string[] = [];
+  readonly seenAt = new Map<string, number>();
   private shownAt = 0;
+
+  constructor(readonly course: Course = venue) {
+    this.tutorial = new Tutorial({
+      length: course.length,
+      turns: course.turns,
+      lessons: course.lessons,
+    });
+    this.reader = new LineReader(
+      course.line.profile,
+      course.line.length,
+      course.line.length / course.length,
+    );
+    this.travel = course.gridStart;
+  }
 
   get id(): string {
     return this.tutorial.view.id;
@@ -81,9 +126,9 @@ class Drive {
       !this.tutorial.holding && !this.tutorial.frozen && !this.menu;
     if (running) this.raceTime += dt;
     if (running && this.raceTime >= 0) this.move();
-    const lap = Math.floor(this.travel / length) + 1;
+    const lap = Math.floor(this.travel / this.course.length) + 1;
     const reading = this.reader.read(
-      this.travel - (lap - 1) * length,
+      this.travel - (lap - 1) * this.course.length,
       this.speed,
     );
     this.brakeIn = reading.brakeIn;
@@ -139,6 +184,7 @@ class Drive {
     const id = this.id;
     if (id === "" || this.seen.at(-1) === id) return;
     this.seen.push(id);
+    if (!this.seenAt.has(id)) this.seenAt.set(id, this.travel);
     this.shownAt = this.now;
   }
 
@@ -343,6 +389,25 @@ describe("driving school", () => {
 
     expect(drive.tutorial.finished).toBe("done");
     expect(drive.seen).toEqual(lessons);
+  });
+
+  test("on the Training Ground every lesson comes in order, braking before Turn 1, boost after the hairpin and the camera after the back straight", () => {
+    const course = courseOf("training-ground", -12);
+    const drive = new Drive(course);
+    drive.drive(cooperative());
+    const at = (number: number) =>
+      course.turns.find((turn) => turn.number === number)?.distance ?? 0;
+    const shownAt = (id: string) => drive.seenAt.get(id) ?? NaN;
+
+    expect(drive.tutorial.finished).toBe("done");
+    expect(drive.seen).toEqual(lessons);
+    expect(shownAt("line")).toBeGreaterThan(0);
+    expect(shownAt("t1-brake")).toBeGreaterThan(at(1) - 220);
+    expect(shownAt("t1-brake")).toBeLessThan(at(1));
+    expect(shownAt("boost")).toBeGreaterThan(at(4));
+    expect(shownAt("boost")).toBeLessThan(at(5) - 600);
+    expect(shownAt("camera")).toBeGreaterThan(at(5));
+    expect(shownAt("reverse")).toBeGreaterThan(course.length);
   });
 
   test("every card that only explains moves on by itself after its time, menu cards after a second and a half, with no key or pedal pressed for it", () => {

@@ -12,3 +12,8 @@ apps/client/src/game/sound/tables.json
 apps/client/src/game/sound/start-beep.json
 tests/sound/start-beep-fingerprint.json
 content/tracks/hill-country/circuit-map.json
+content/tracks/training-ground/track.json
+content/tracks/training-ground/racing-line.json
+content/tracks/training-ground/sd-frame.json
+content/tracks/training-ground/circuit-map.json
+content/tracks/training-ground/sky/noon.json

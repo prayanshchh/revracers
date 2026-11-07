@@ -27,6 +27,9 @@ import albedoUrl from "../../../../content/tracks/hill-country/textures/baked/pe
 import crowdUrl from "../../../../content/tracks/hill-country/crowd.bin?url";
 import maskUrl from "../../../../content/tracks/hill-country/textures/baked/people_mask.png?url";
 import { releaseOnceUploaded } from "./preload.ts";
+
+export const crowdFiles = [albedoUrl, crowdUrl, maskUrl];
+export const crowdData = crowdUrl;
 import {
   alphaCutoff,
   atlasColumns,

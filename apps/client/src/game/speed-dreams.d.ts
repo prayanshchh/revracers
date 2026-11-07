@@ -169,7 +169,7 @@ declare module "*/wasm/speed-dreams.js" {
     _free(pointer: number): void;
     FS: {
       readFile(path: string, options: { encoding: "utf8" }): string;
-      writeFile(path: string, data: string): void;
+      writeFile(path: string, data: string | Uint8Array): void;
       analyzePath(path: string): { exists: boolean };
       mkdirTree(path: string): void;
     };

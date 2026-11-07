@@ -1,37 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { playerKeyName, seedPlayer } from "../support/player.ts";
+import { pastSchool, playerKeyName, seedPlayer } from "../support/player.ts";
 import { slowNetwork } from "../support/slow-network.ts";
-
-interface TrailerExit {
-  at: number;
-  length: number;
-  status: string;
-}
-
-declare global {
-  interface Window {
-    trailerExit?: TrailerExit;
-  }
-}
-
-function recordTrailerExit(): void {
-  new MutationObserver((_, observer) => {
-    const box = document.querySelector("[data-intro]");
-    if (!box?.classList.contains("leaving")) return;
-    const video = box.querySelector("video");
-    window.trailerExit = {
-      at: video?.currentTime ?? -1,
-      length: video?.duration ?? -1,
-      status: document.body.dataset["driveStatus"] ?? "",
-    };
-    observer.disconnect();
-  }).observe(document, {
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["class"],
-  });
-}
 
 function trailer(page: Page) {
   return page.evaluate(() => {
@@ -124,30 +94,30 @@ test.describe("loading trailer", () => {
   test.setTimeout(240_000);
 
   if (process.platform !== "linux") {
-    test("a new player watches the trailer while Driving School loads, and it fades out as soon as the circuit is ready", async ({
+    test("a new player goes straight into Driving School with no trailer, and the trailer does not come back after the lesson in the same visit", async ({
       page,
     }) => {
-      await page.addInitScript(recordTrailerExit);
-      await page.goto("/");
-      await playing(page);
-      await page.keyboard.press("Enter");
-      expect((await trailer(page)).muted).toBe(false);
-
-      await expect(page.getByTestId("intro")).toHaveCount(0, {
-        timeout: 180_000,
+      const trailers: string[] = [];
+      page.on("request", (request) => {
+        if (request.url().includes("/intro/trailer.mp4"))
+          trailers.push(request.url());
       });
-      const exit = await page.evaluate(() => window.trailerExit);
-      expect(exit?.status).toBe("loading");
-      expect(exit?.at).toBeGreaterThan(1);
-      expect(exit?.at).toBeLessThan((exit?.length ?? 0) - 5);
+      await page.goto("/");
+      await expect(page.getByTestId("intro")).toHaveCount(0);
       await expect
-        .poll(async () => (await trailer(page)).status)
+        .poll(async () => (await trailer(page)).status, { timeout: 60_000 })
         .toBe("running");
       await expect(page.locator("[data-tutorial=root]")).toHaveAttribute(
         "data-step",
         "welcome",
-        { timeout: 30_000 },
       );
+      await page.waitForTimeout(800);
+      await page.keyboard.press("Escape");
+      await expect(page.locator("[data-front=name]")).toBeVisible({
+        timeout: 120_000,
+      });
+      await expect(page.getByTestId("intro")).toHaveCount(0);
+      expect(trailers).toEqual([]);
     });
 
     test("a returning driver's hub and menu music wait for the trailer, keys never reach the hub, and it plays once", async ({
@@ -155,6 +125,7 @@ test.describe("loading trailer", () => {
       context,
     }) => {
       await seedPlayer(context);
+      await pastSchool(context);
       await page.goto("/");
       await playing(page);
       const hub = page.locator(".front-hub");
@@ -176,15 +147,23 @@ test.describe("loading trailer", () => {
       await expect(page.getByTestId("intro")).toHaveCount(0);
     });
 
-    test("after the trailer, a slow first download shows game screenshots, megabytes of a steady total and a thin bar that keeps filling, with music", async ({
+    test("after the trailer, a slow race download shows game screenshots, megabytes of a steady total and a thin bar that keeps filling, with music", async ({
       page,
+      context,
     }) => {
-      test.setTimeout(300_000);
+      test.setTimeout(420_000);
+      await seedPlayer(context);
+      await pastSchool(context);
       await slowNetwork(page, 40);
       await page.goto("/");
       await playing(page);
+      await expect(page.locator(".front-hub")).toBeAttached({
+        timeout: 180_000,
+      });
       await page.waitForTimeout(12_000);
       await seekToEnd(page);
+      await page.getByRole("button", { name: /^Race/ }).click();
+      await page.locator('[data-menu="start"]').click();
       await expect
         .poll(async () => (await loadScreen(page)).slide, { timeout: 30_000 })
         .toMatch(/^\/loading\/\d+\.jpg$/);
@@ -214,33 +193,6 @@ test.describe("loading trailer", () => {
       await expect
         .poll(async () => (await trailer(page)).status)
         .toBe("running");
-      await expect(page.locator("[data-tutorial=root]")).toHaveAttribute(
-        "data-step",
-        "welcome",
-        { timeout: 30_000 },
-      );
-    });
-
-    test("skipping the trailer at once shows the download from its start and only reaches 100% when the circuit is in", async ({
-      page,
-    }) => {
-      test.setTimeout(300_000);
-      await slowNetwork(page, 40);
-      await page.goto("/");
-      await page
-        .getByTestId("intro")
-        .getByRole("button", { name: "Skip" })
-        .click({ timeout: 60_000 });
-
-      const samples = await countDuring(page, 240);
-
-      expect(samples.length).toBeGreaterThan(10);
-      expect(samples[0]?.bar).toBeLessThan(30);
-      expect(rising(samples.map((sample) => sample.bar))).toBe(true);
-      expect(samples.at(-1)?.bar).toBe(100);
-      await expect
-        .poll(async () => (await trailer(page)).status)
-        .toBe("running");
     });
 
     test("a returning driver who skips the trailer sees a fresh download count when a race loads later", async ({
@@ -249,6 +201,7 @@ test.describe("loading trailer", () => {
     }) => {
       test.setTimeout(420_000);
       await seedPlayer(context);
+      await pastSchool(context);
       await slowNetwork(page, 40);
       await page.goto("/");
       await page
@@ -302,7 +255,9 @@ test.describe("loading trailer", () => {
 
     test("Skip and sound work before the game's main script has downloaded", async ({
       page,
+      context,
     }) => {
+      await pastSchool(context);
       let held = 0;
       await page.route("**/assets/*.js", async (route) => {
         const response = await route.fetch();
@@ -332,6 +287,7 @@ test.describe("loading trailer", () => {
       context,
     }) => {
       await seedPlayer(context);
+      await pastSchool(context);
       await slowNetwork(page, 20);
       await page.goto("/");
       await page
@@ -351,6 +307,7 @@ test.describe("loading trailer", () => {
     context,
   }) => {
     await seedPlayer(context);
+    await pastSchool(context);
     await page.route("**/intro/trailer.mp4", (route) =>
       route.fulfill({ status: 404 }),
     );

@@ -26,17 +26,36 @@
       (() => {
         const box = document.querySelector("[data-intro]");
         const query = new URLSearchParams(location.search);
+        const stored = (store, key) => {
+          try {
+            return store.getItem(key);
+          } catch {
+            return null;
+          }
+        };
+        const school =
+          (stored(localStorage, "revracers.tutorial") === null &&
+            stored(localStorage, "revracers.player") === null) ||
+          stored(sessionStorage, "revracers.tutorialRun") === "1" ||
+          query.has("tutorial");
         const skip =
-          sessionStorage.getItem("revracers.introPlayed") === "1" ||
-          sessionStorage.getItem("revracers.autostart") === "1" ||
+          school ||
+          stored(sessionStorage, "revracers.introPlayed") === "1" ||
+          stored(sessionStorage, "revracers.autostart") === "1" ||
           query.has("autostart") ||
           query.get("intro") === "off" ||
           !("gpu" in navigator);
+        if (school) sessionStorage.setItem("revracers.introPlayed", "1");
         if (skip) {
           box.remove();
           return;
         }
         sessionStorage.setItem("revracers.introPlayed", "1");
+        const slide = document.createElement("link");
+        slide.rel = "preload";
+        slide.as = "image";
+        slide.href = "/loading/01.jpg";
+        document.head.append(slide);
         const video = box.querySelector("video");
         video.preload = "auto";
         video
@@ -51,7 +70,7 @@
     <canvas data-testid="drive-canvas"></canvas>
     <div class="status" data-testid="drive-status" role="status">
       <div class="show" aria-hidden="true">
-        <img class="show-slide" src="/loading/01.jpg" alt="" data-show-slide />
+        <img class="show-slide" alt="" data-show-slide />
         <img class="show-slide" alt="" data-show-slide />
       </div>
       <svg class="status-word" aria-hidden="true">

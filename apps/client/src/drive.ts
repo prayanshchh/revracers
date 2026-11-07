@@ -5,8 +5,6 @@ import {
   type PitDrive,
   type PitLayout,
 } from "./game/pitstop.ts";
-import frameUrl from "../../../content/tracks/hill-country/sd-frame.json?url";
-import mapUrl from "../../../content/tracks/hill-country/circuit-map.json?url";
 import "@fontsource-variable/saira/wdth.css";
 import "./drive.css";
 import "./front.css";
@@ -27,6 +25,7 @@ import {
   carWheel,
   Engine,
   frameIndex,
+  installTrack,
   loadSpeedDreams,
   type RaceSystems,
   sessionKinds,
@@ -130,6 +129,10 @@ import {
 } from "./game/weekend.ts";
 import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
+import { type Circuit, circuitOf } from "./game/circuits.ts";
+import { dropEarly } from "./game/early.ts";
+import { releaseUploadedImages } from "./game/preload.ts";
+import { warmGame } from "./game/warm-cache.ts";
 import { intro } from "./game/intro.ts";
 import { LoadShow } from "./game/load-show.ts";
 import { showActions } from "./game/weekend-ui.ts";
@@ -148,6 +151,9 @@ const hudRoot = document.querySelector<HTMLElement>("[data-testid=hud]");
 const autostartKey = "revracers.autostart";
 const redeployKey = "revracers.redeploy";
 const loadShow = status && intro.shown ? new LoadShow(status) : null;
+const speedDreams = loadSpeedDreams();
+speedDreams.catch(() => undefined);
+
 void intro.done.then(() => {
   loadShow?.arm();
 });
@@ -575,12 +581,52 @@ function hudOptions(
   };
 }
 
+function closedPit(length: number): PitLayout {
+  return {
+    length,
+    entry: 0,
+    wallStart: 0,
+    wallEnd: 0,
+    exit: 0,
+    pitWall: Infinity,
+    shift: 0,
+    ramp: 1,
+    fastLane: 0,
+    speedLimit: 80,
+    boxDistance: 0,
+    boxLateral: 0,
+  };
+}
+
 async function pitLayout(
   engine: Engine,
   field: WeekendPlan | null,
+  circuit: Circuit,
 ): Promise<PitLayout> {
-  const { pit } = await fetchJson<{ pit: PitLayout }>(frameUrl);
+  const { pit } = await fetchJson<{ pit: PitLayout | null }>(circuit.frame);
+  if (!pit) return closedPit(engine.trackLength());
   return field ? { ...pit, boxDistance: engine.playerBox() } : pit;
+}
+
+function warmInBackground(
+  tutorial: boolean,
+  mirrorsWarm: boolean,
+  team: string,
+  renderer: THREE.WebGPURenderer,
+  scene: Scene,
+): void {
+  const release = () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        releaseUploadedImages(renderer, scene.scene);
+      });
+    });
+  };
+  if (!mirrorsWarm) void scene.compileMirrors(renderer).catch(() => undefined);
+  void scene
+    .finishCar()
+    .then(() => (tutorial ? warmGame(team, release) : undefined))
+    .catch(() => undefined);
 }
 
 function pitInput(frame: Float64Array, laneClear: boolean) {
@@ -868,6 +914,8 @@ async function signIn(
   music: Music,
 ): Promise<Entry> {
   const known = await currentDriver();
+  if (known?.onboarded === true && tutorialStatus() === null)
+    rememberTutorial("skipped");
   if (autostart) return { driver: known, tutorial: false };
   if (newcomer(known)) return { driver: known, tutorial: true };
   const entry = await enterGame(renderer, settings, menu, music, known);
@@ -955,7 +1003,7 @@ function debugHooks(
 async function bootEngine(): ReturnType<typeof loadSpeedDreams> {
   setStatus("Loading");
   statusBar.followDownloads(0, 0.95);
-  const module = await loadSpeedDreams();
+  const module = await speedDreams;
   statusBar.set(1);
   return module;
 }
@@ -982,8 +1030,10 @@ async function main(): Promise<void> {
   const { driver, autostart } = entry;
   startTutorial(entry.tutorial, settings, menu);
   const audio = openAudio();
+  const soundStart = GameSound.start(audio);
 
   const track = trackOf(settings);
+  const circuit = circuitOf(track.id);
   const setup = prepareSession(settings);
   const seek = params.get("buildup");
   if (wantsBuildUp(settings, setup, autostart, seek)) music.preload("buildup");
@@ -993,6 +1043,8 @@ async function main(): Promise<void> {
   const car = carOf(settings);
   const seat = playerSeat(driver, car.id);
   applySettings(source, settings, stage);
+  const referenceLoad = loadReference(driver, settings.track, car.car);
+  await installTrack(module, circuit.engineFiles);
   setStatus(`Loading ${track.label}…`);
   statusBar.reset();
   statusBar.followDownloads(0, 0.85);
@@ -1015,17 +1067,18 @@ async function main(): Promise<void> {
     rivalCars(field),
     lights,
     settings.clouds,
+    circuit,
   );
   const draw = drawer(renderer, scene);
   debugHooks(params, engine, scene, renderer);
 
-  const reference = await loadReference(driver, settings.track, car.car);
+  const reference = await referenceLoad;
   const trace = new LapTrace(
     engine.trackLength(),
     engine.sectorBoundaries(),
     reference,
   );
-  const { turns } = await fetchJson<{ turns: CourseTurn[] }>(mapUrl);
+  const { turns } = await fetchJson<{ turns: CourseTurn[] }>(circuit.map);
   const hud = new Hud(
     hudRoot,
     trace,
@@ -1045,7 +1098,7 @@ async function main(): Promise<void> {
     ),
   );
   const pad = padLink();
-  const sound = await GameSound.start(audio);
+  const sound = await soundStart;
 
   let frameStale = true;
   const resize = () => {
@@ -1157,14 +1210,15 @@ async function main(): Promise<void> {
   window.addEventListener("keydown", onKey(true));
   window.addEventListener("keyup", onKey(false));
 
-  const layout = await pitLayout(engine, field);
+  const layout = await pitLayout(engine, field, circuit);
   const pit = new PitStop(layout, settings.pitExperience === "broadcast");
   scene.placePit(layout, (d, l) => engine.trackPoint(d, l));
   scene.setWeather(engine.weather());
   scene.update(engine.update(performance.now() / 1000));
   setStatus("Preparing circuit…");
   statusBar.followDownloads(0.85, 0.99);
-  await scene.warmUp(renderer, draw);
+  await scene.warmUp(renderer, draw, circuit.venue);
+  dropEarly();
   setStatus("");
   await intro.fadeOut();
   replay = new InstantReplay({
@@ -1208,6 +1262,7 @@ async function main(): Promise<void> {
         );
   };
   document.body.dataset["driveStatus"] = "running";
+  warmInBackground(entry.tutorial, circuit.venue, car.id, renderer, scene);
 
   const startFuel = engine.hudInfo().fuel;
   let padBrakeWas = false;
@@ -1483,7 +1538,7 @@ async function main(): Promise<void> {
         toHub();
       },
     },
-    { turns },
+    { turns, lessons: circuit.lessons, racingLine: circuit.racingLine },
   );
   waiting = readyFirst(params, coach);
   if (waiting)

@@ -17,6 +17,20 @@ const loaded = await import(
   path.join(root, "apps/client/wasm/speed-dreams.js")
 );
 const m = await loaded.default({ print: () => {}, printErr: () => {} });
+for (const [from, to] of [
+  [
+    "content/tracks/hill-country/hill-country.xml",
+    "tracks/circuit/hill-country/hill-country.xml",
+  ],
+  [
+    "apps/client/wasm/hill-country-ai.txt",
+    "tracks/circuit/hill-country/ai.dat",
+  ],
+]) {
+  const target = `/sd/data/${to}`;
+  m.FS.mkdirTree(target.slice(0, target.lastIndexOf("/")));
+  m.FS.writeFile(target, readFileSync(path.join(root, from)));
+}
 m._sdFieldClear();
 m._sdSessionConfigure(3, 0, 1, 1);
 m._sdFieldAutopilot(1);

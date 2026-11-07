@@ -163,6 +163,29 @@ export async function loadSpeedDreams(): Promise<SpeedDreamsModule> {
   });
 }
 
+const engineData = "/sd/data/";
+
+export async function installTrack(
+  module: SpeedDreamsModule,
+  files: { path: string; url: string }[],
+): Promise<void> {
+  const loaded = await Promise.all(
+    files.map(async (file) => {
+      const response = await fetch(file.url);
+      if (!response.ok) throw new Error(`failed to load ${file.url}`);
+      return {
+        path: file.path,
+        bytes: new Uint8Array(await response.arrayBuffer()),
+      };
+    }),
+  );
+  for (const { path, bytes } of loaded) {
+    const target = `${engineData}${path}`;
+    module.FS.mkdirTree(target.slice(0, target.lastIndexOf("/")));
+    module.FS.writeFile(target, bytes);
+  }
+}
+
 export function setupSource(module: SpeedDreamsModule): SetupSource {
   const limits = module.cwrap("sdCarLimits", "number", [
     "string",

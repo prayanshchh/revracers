@@ -86,10 +86,19 @@ export type TutorialEvent =
 
 export type CourseTurn = Turn & { side?: string };
 
+export interface Lessons {
+  brake: number;
+  boost: number;
+  camera: number;
+}
+
 export interface Course {
   length: number;
   turns: CourseTurn[];
+  lessons?: Lessons;
 }
+
+const venueLessons: Lessons = { brake: 1, boost: 11, camera: 12 };
 
 const reaction = 0.12;
 const slowLead = 0.25;
@@ -297,12 +306,14 @@ function steeringSteps(): Step[] {
 }
 
 interface Place {
-  at: (turn: number) => number;
+  brake: number;
+  boost: number;
+  camera: number;
   length: number;
 }
 
 function lineSteps(p: Place): Step[] {
-  const t1 = p.at(1);
+  const t1 = p.brake;
   return [
     {
       id: "line",
@@ -346,7 +357,7 @@ function lineSteps(p: Place): Step[] {
       card: () => glance("Keep braking till it's green"),
       done: (s) => !nearBrake(s, coachLead),
     },
-    drive("follow", t1, p.at(11) + 150),
+    drive("follow", t1, p.boost),
   ];
 }
 
@@ -355,7 +366,7 @@ function boostSteps(p: Place): Step[] {
     {
       id: "boost",
       mode: "pause",
-      from: p.at(11) + 150,
+      from: p.boost,
       card: (_s, c) =>
         card(
           "Boost",
@@ -371,7 +382,7 @@ function boostSteps(p: Place): Step[] {
         ),
       done: (s) => s.boost,
     },
-    drive("boosting", p.at(11) + 150, p.at(12) + 150),
+    drive("boosting", p.boost, p.camera),
   ];
 }
 
@@ -393,7 +404,7 @@ function viewSteps(p: Place): Step[] {
     {
       id: "camera",
       mode: "pause",
-      from: p.at(12) + 150,
+      from: p.camera,
       card: (s, c) =>
         s.cameras > c.startCameras
           ? card(
@@ -437,7 +448,7 @@ function viewSteps(p: Place): Step[] {
             ),
       done: (s, c) => screensSeen(s, c) >= mfdPages.length,
     },
-    drive("drive", p.at(12) + 150, p.length + reverseLead),
+    drive("drive", p.camera, p.length + reverseLead),
   ];
 }
 
@@ -632,10 +643,16 @@ function drive(id: string, from: number, to: number): Step {
   };
 }
 
+const lessonLead = 150;
+
 function script(course: Course): Step[] {
   const byNumber = new Map(course.turns.map((t) => [t.number, t]));
+  const at = (turn: number) => byNumber.get(turn)?.distance ?? 0;
+  const lessons = course.lessons ?? venueLessons;
   const place: Place = {
-    at: (turn) => byNumber.get(turn)?.distance ?? 0,
+    brake: at(lessons.brake),
+    boost: at(lessons.boost) + lessonLead,
+    camera: at(lessons.camera) + lessonLead,
     length: course.length,
   };
   return [
