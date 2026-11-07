@@ -134,8 +134,7 @@ import { dropEarly } from "./game/early.ts";
 import { schoolFirst } from "./game/school-early.ts";
 import { releaseUploadedImages } from "./game/preload.ts";
 import { warmGame } from "./game/warm-cache.ts";
-import { intro } from "./game/intro.ts";
-import { LoadShow } from "./game/load-show.ts";
+import { loadShow } from "./game/opening.ts";
 import { showActions } from "./game/weekend-ui.ts";
 
 const canvas = document.querySelector<HTMLCanvasElement>(
@@ -151,13 +150,8 @@ const statusBar = new LoadBar(
 const hudRoot = document.querySelector<HTMLElement>("[data-testid=hud]");
 const autostartKey = "revracers.autostart";
 const redeployKey = "revracers.redeploy";
-const loadShow = status && intro.shown ? new LoadShow(status) : null;
 const speedDreams = schoolFirst() ? loadSpeedDreams() : null;
 speedDreams?.catch(() => undefined);
-
-void intro.done.then(() => {
-  loadShow?.arm();
-});
 
 function element(selector: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(selector);
@@ -170,9 +164,7 @@ function padLink(): PadLink {
 }
 
 function menuMusic(music: Music): void {
-  void intro.done.then(() => {
-    music.play("menu");
-  });
+  music.play("menu");
 }
 
 function scoreLoadShow(music: Music): void {
@@ -181,7 +173,7 @@ function scoreLoadShow(music: Music): void {
       return music.blocked;
     },
     start: () => {
-      if (!music.cue) music.play("menu");
+      if (!music.cue) music.opening();
     },
   });
 }
@@ -877,9 +869,7 @@ async function enterGame(
   const studio = new Studio(renderer);
   const front = new FrontEnd(element("[data-front=root]"), studio);
   front.open();
-  void intro.done.then(() => {
-    music.opening();
-  });
+  music.opening();
   void studio.preloadTeams();
   setStatus("");
   let driver = known ?? (await front.welcome());
@@ -1221,7 +1211,6 @@ async function main(): Promise<void> {
   await scene.warmUp(renderer, draw, circuit.venue);
   dropEarly();
   setStatus("");
-  await intro.fadeOut();
   replay = new InstantReplay({
     engine,
     scene,
@@ -1574,7 +1563,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  intro.stop();
   document.body.dataset["driveStatus"] = "error";
   statusBar.reset();
   setStatus(

@@ -1,4 +1,4 @@
-import { downloadTotals, startDownloadPhase } from "./preload.ts";
+import { downloadTotals, startDownloadPhase } from "./download-phase.ts";
 
 const slideMs = 12_000;
 const fadeMs = 1_600;
