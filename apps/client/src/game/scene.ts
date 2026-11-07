@@ -67,6 +67,9 @@ import type { TyreInfo } from "./tyres.ts";
 
 const gateLead = 30;
 const onboardReach = 3;
+const chaseFollow = 0.5;
+const cameraListSlot = 21;
+const carCameraList = -1;
 const crewReach = 12;
 const flipX = new THREE.Matrix4().makeScale(-1, 1, 1);
 const sunGlow = 2.4;
@@ -244,6 +247,9 @@ export class Scene {
   private readonly view = new THREE.Matrix4();
   private readonly rumble = new Rumble();
   private readonly shakeMatrix = new THREE.Matrix4();
+  private readonly carPose = new THREE.Matrix4();
+  private readonly shakeTurn = new THREE.Matrix4();
+  private readonly shakeEye = new THREE.Vector3();
   private readonly cinematicLook = new THREE.Matrix4();
   private shake: Shake | null = null;
   private lastFeel = 0;
@@ -781,7 +787,7 @@ export class Scene {
       tyreRough,
     );
     this.lastFeel = now;
-    this.car.setRumble(this.shake.heave, this.shake.roll);
+    this.car.setRumble(this.shake.heave, this.shake.pitch, this.shake.roll);
     return this.shake.amount;
   }
 
@@ -892,7 +898,7 @@ export class Scene {
     const c = frameIndex.camera;
     const at = (k: number) => frame[c + k] ?? 0;
     this.view.fromArray(frame, c);
-    this.applyShake();
+    this.applyShake(frame);
     const det = this.view.determinant();
     if (Math.abs(det) > 1e-6) {
       this.viewMirrored = det < 0;
@@ -903,12 +909,29 @@ export class Scene {
     this.setLens(at(16), at(17), at(18));
   }
 
-  private applyShake(): void {
+  private applyShake(frame: Float64Array): void {
     if (!this.shake) return;
+    this.carPose.fromArray(frame, frameIndex.posMat);
+    this.shakeEye.setFromMatrixPosition(
+      this.shakeMatrix.copy(this.view).invert(),
+    );
+    const onboard =
+      this.shakeEye.distanceToSquared(
+        this.carPosition.setFromMatrixPosition(this.carPose),
+      ) <
+      onboardReach * onboardReach;
+    const carCamera =
+      frame[frameIndex.camera + cameraListSlot] === carCameraList;
+    if (!onboard && !carCamera) return;
+    this.car.bodyBounce(onboard ? 1 : chaseFollow, this.shakeMatrix).invert();
+    this.view
+      .multiply(this.carPose)
+      .multiply(this.shakeMatrix)
+      .multiply(this.carPose.invert());
     this.view.premultiply(
       this.shakeMatrix
-        .makeRotationZ(this.shake.cameraRoll)
-        .setPosition(this.shake.cameraX, this.shake.cameraY, 0),
+        .makeRotationX(this.shake.buzzPitch)
+        .multiply(this.shakeTurn.makeRotationY(this.shake.buzzYaw)),
     );
   }
 
