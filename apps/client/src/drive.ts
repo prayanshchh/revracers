@@ -131,10 +131,9 @@ import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
 import { type Circuit, circuitOf } from "./game/circuits.ts";
 import { dropEarly } from "./game/early.ts";
-import { schoolFirst } from "./game/school-early.ts";
+import { openingShow, schoolFirst } from "./game/school-early.ts";
 import { releaseUploadedImages } from "./game/preload.ts";
 import { warmGame } from "./game/warm-cache.ts";
-import { intro } from "./game/intro.ts";
 import { LoadShow } from "./game/load-show.ts";
 import { showActions } from "./game/weekend-ui.ts";
 
@@ -151,13 +150,11 @@ const statusBar = new LoadBar(
 const hudRoot = document.querySelector<HTMLElement>("[data-testid=hud]");
 const autostartKey = "revracers.autostart";
 const redeployKey = "revracers.redeploy";
-const loadShow = status && intro.shown ? new LoadShow(status) : null;
+const loadShow = openingShow() && status ? new LoadShow(status) : null;
 const speedDreams = schoolFirst() ? loadSpeedDreams() : null;
 speedDreams?.catch(() => undefined);
 
-void intro.done.then(() => {
-  loadShow?.arm();
-});
+loadShow?.arm();
 
 function element(selector: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(selector);
@@ -170,9 +167,7 @@ function padLink(): PadLink {
 }
 
 function menuMusic(music: Music): void {
-  void intro.done.then(() => {
-    music.play("menu");
-  });
+  music.play("menu");
 }
 
 function scoreLoadShow(music: Music): void {
@@ -181,7 +176,7 @@ function scoreLoadShow(music: Music): void {
       return music.blocked;
     },
     start: () => {
-      if (!music.cue) music.play("menu");
+      if (!music.cue) music.opening();
     },
   });
 }
@@ -877,9 +872,7 @@ async function enterGame(
   const studio = new Studio(renderer);
   const front = new FrontEnd(element("[data-front=root]"), studio);
   front.open();
-  void intro.done.then(() => {
-    music.opening();
-  });
+  music.opening();
   void studio.preloadTeams();
   setStatus("");
   let driver = known ?? (await front.welcome());
@@ -1221,7 +1214,6 @@ async function main(): Promise<void> {
   await scene.warmUp(renderer, draw, circuit.venue);
   dropEarly();
   setStatus("");
-  await intro.fadeOut();
   replay = new InstantReplay({
     engine,
     scene,
@@ -1574,7 +1566,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  intro.stop();
   document.body.dataset["driveStatus"] = "error";
   statusBar.reset();
   setStatus(

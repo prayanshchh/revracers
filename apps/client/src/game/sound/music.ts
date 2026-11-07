@@ -77,7 +77,7 @@ export class Music {
   opening(): void {
     const played = sessionStorage.getItem(introKey) === "1";
     sessionStorage.setItem(introKey, "1");
-    this.play(played ? "menu" : "intro");
+    if (!this.wanted) this.play(played ? "menu" : "intro");
   }
 
   preload(cue: Cue): void {

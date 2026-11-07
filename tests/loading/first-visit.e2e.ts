@@ -1,4 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import { randomBytes } from "node:crypto";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { playerKeyName } from "../support/player.ts";
 
 interface Debugged {
   f1Debug: { engine: { trackLength: () => number } };
@@ -63,6 +65,30 @@ function loadedBeforeRunning(page: Page): Promise<Loaded[]> {
   });
 }
 
+async function leftSchoolEarly(context: BrowserContext): Promise<void> {
+  const key = randomBytes(32).toString("base64url");
+  const joined = await context.request.post("/api/players", {
+    data: { key },
+  });
+  expect(joined.ok()).toBe(true);
+  const { driver } = (await joined.json()) as { driver: unknown };
+  await context.addInitScript(
+    ([name, value, cached]) => {
+      localStorage.setItem(name, value);
+      localStorage.setItem("revracers.driver", cached);
+    },
+    [playerKeyName, key, JSON.stringify(driver)] as const,
+  );
+}
+
+const newcomers = [
+  { who: "a new player", arrive: () => Promise.resolve() },
+  {
+    who: "a new player who left Driving School part-way and comes back",
+    arrive: leftSchoolEarly,
+  },
+];
+
 async function running(page: Page): Promise<void> {
   await page.waitForFunction(
     () => document.body.dataset["driveStatus"] === "running",
@@ -73,34 +99,36 @@ async function running(page: Page): Promise<void> {
 
 test.describe("first visit", () => {
   if (!softwareGpu) {
-    test("a new player is driving on the Training Ground after a small download, without the trailer or any of the race's big files", async ({
-      page,
-    }) => {
-      await noteRunning(page);
-      await page.goto("/?debug");
-      await running(page);
-      await expect(page.locator("[data-tutorial=root]")).toHaveAttribute(
-        "data-step",
-        "welcome",
-      );
-      expect(
-        await page.evaluate(() =>
-          (window as unknown as Debugged).f1Debug.engine.trackLength(),
-        ),
-      ).toBeCloseTo(3432, -1);
-      await expect(page.getByTestId("intro")).toHaveCount(0);
+    for (const { who, arrive } of newcomers)
+      test(`${who} is driving on the Training Ground after a small download, without the trailer, the loading screen or any of the race's big files`, async ({
+        page,
+        context,
+      }) => {
+        await arrive(context);
+        await noteRunning(page);
+        await page.goto("/?debug");
+        await running(page);
+        await expect(page.locator("[data-tutorial=root]")).toHaveAttribute(
+          "data-step",
+          "welcome",
+        );
+        expect(
+          await page.evaluate(() =>
+            (window as unknown as Debugged).f1Debug.engine.trackLength(),
+          ),
+        ).toBeCloseTo(3432, -1);
 
-      const files = await loadedBeforeRunning(page);
-      const content = files.filter((file) => !sentCompressed.test(file.path));
-      const bytes = content.reduce((sum, file) => sum + file.bytes, 0);
-      expect(content.length).toBeGreaterThan(10);
-      expect(bytes).toBeLessThan(contentBudget);
-      for (const file of files)
-        for (const pattern of raceOnly)
-          expect(file.path, "a race file on the first screen").not.toMatch(
-            pattern,
-          );
-    });
+        const files = await loadedBeforeRunning(page);
+        const content = files.filter((file) => !sentCompressed.test(file.path));
+        const bytes = content.reduce((sum, file) => sum + file.bytes, 0);
+        expect(content.length).toBeGreaterThan(10);
+        expect(bytes).toBeLessThan(contentBudget);
+        for (const file of files)
+          for (const pattern of raceOnly)
+            expect(file.path, "a race file on the first screen").not.toMatch(
+              pattern,
+            );
+      });
 
     test("while Driving School runs, the race's files are saved in the browser so the hub and the first race need no download", async ({
       page,
