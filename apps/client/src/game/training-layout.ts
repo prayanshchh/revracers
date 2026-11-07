@@ -491,10 +491,15 @@ function wallFaces(
       builder.grid(run.length, 2, first);
       run = [];
     };
-    for (const station of rows) {
-      if (pick(station)) run.push(station);
-      else flush();
-    }
+    rows.forEach((station, i) => {
+      const next = rows[i + 1];
+      if (!next || !pick(station)) {
+        flush();
+        return;
+      }
+      if (run.length === 0) run.push(station);
+      run.push(next);
+    });
     flush();
   }
 }

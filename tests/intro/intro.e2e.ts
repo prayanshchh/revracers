@@ -41,6 +41,22 @@ interface LoadScreen {
   music: string;
 }
 
+declare global {
+  interface Window {
+    loadBytesLog: string[];
+  }
+}
+
+function logLoadBytes(): void {
+  const log: string[] = [];
+  window.loadBytesLog = log;
+  new MutationObserver(() => {
+    const text =
+      document.querySelector("[data-testid=load-bytes]")?.textContent ?? "";
+    if (text && text !== log.at(-1)) log.push(text);
+  }).observe(document, { subtree: true, childList: true, characterData: true });
+}
+
 async function loadScreen(page: Page): Promise<LoadScreen> {
   const screen = await page.evaluate(() => {
     const status = document.querySelector("[data-testid=drive-status]");
@@ -154,6 +170,7 @@ test.describe("loading trailer", () => {
       test.setTimeout(420_000);
       await seedPlayer(context);
       await pastSchool(context);
+      await page.addInitScript(logLoadBytes);
       await slowNetwork(page, 40);
       await page.goto("/");
       await playing(page);
@@ -186,9 +203,11 @@ test.describe("loading trailer", () => {
       const totals = samples.map((sample) => sample.total);
       expect(Math.max(...totals)).toBeGreaterThan(50);
       expect(Math.max(...totals) / Math.min(...totals)).toBeLessThan(1.1);
-      const last = samples.at(-1);
-      expect(last?.bar).toBe(100);
-      expect(last?.received).toBe(last?.total);
+      const counted = await page.evaluate(() => window.loadBytesLog.at(-1));
+      const [, received, total, percent] =
+        /([\d.]+) MB \/ ([\d.]+) MB · (\d+)%/.exec(counted ?? "") ?? [];
+      expect(received).toBe(total);
+      expect(percent).toBe("100");
 
       await expect
         .poll(async () => (await trailer(page)).status)

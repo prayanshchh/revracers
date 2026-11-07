@@ -131,6 +131,7 @@ import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
 import { type Circuit, circuitOf } from "./game/circuits.ts";
 import { dropEarly } from "./game/early.ts";
+import { schoolFirst } from "./game/school-early.ts";
 import { releaseUploadedImages } from "./game/preload.ts";
 import { warmGame } from "./game/warm-cache.ts";
 import { intro } from "./game/intro.ts";
@@ -151,8 +152,8 @@ const hudRoot = document.querySelector<HTMLElement>("[data-testid=hud]");
 const autostartKey = "revracers.autostart";
 const redeployKey = "revracers.redeploy";
 const loadShow = status && intro.shown ? new LoadShow(status) : null;
-const speedDreams = loadSpeedDreams();
-speedDreams.catch(() => undefined);
+const speedDreams = schoolFirst() ? loadSpeedDreams() : null;
+speedDreams?.catch(() => undefined);
 
 void intro.done.then(() => {
   loadShow?.arm();
@@ -625,7 +626,7 @@ function warmInBackground(
   if (!mirrorsWarm) void scene.compileMirrors(renderer).catch(() => undefined);
   void scene
     .finishCar()
-    .then(() => (tutorial ? warmGame(team, release) : undefined))
+    .then(() => warmGame(team, release, tutorial))
     .catch(() => undefined);
 }
 
@@ -1003,7 +1004,7 @@ function debugHooks(
 async function bootEngine(): ReturnType<typeof loadSpeedDreams> {
   setStatus("Loading");
   statusBar.followDownloads(0, 0.95);
-  const module = await speedDreams;
+  const module = await (speedDreams ?? loadSpeedDreams());
   statusBar.set(1);
   return module;
 }

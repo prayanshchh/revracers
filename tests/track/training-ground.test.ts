@@ -217,6 +217,61 @@ describe("Training Ground meshes", () => {
     for (const part of parts) expect(backFacing(part), part.name).toBe(0);
   });
 
+  test("both walls run unbroken round the lap, so no gap shows where the physics wall is solid", () => {
+    const list = stations(track, line);
+    const walls = parts.filter((part) => part.name.startsWith("wall"));
+    const along = (part: Part, v: number) => part.uvs[0]?.[v * 2] ?? 0;
+    const end = Math.max(
+      ...walls.flatMap((part) =>
+        Array.from({ length: part.position.length / 3 }, (_, v) =>
+          along(part, v),
+        ),
+      ),
+    );
+    const stationAt = (u: number) => {
+      const s = (u / end) * track.length;
+      let best = list[0];
+      for (const station of list)
+        if (Math.abs(station.s - s) < Math.abs((best?.s ?? 0) - s))
+          best = station;
+      if (!best) throw new Error("no stations");
+      return best;
+    };
+    const covered = new Map<number, [number, number][]>([
+      [1, []],
+      [-1, []],
+    ]);
+    for (const part of walls)
+      for (let t = 0; t < part.index.length; t += 3) {
+        const corners = [0, 1, 2].map((k) => Number(part.index[t + k]));
+        if (corners.some((v) => (part.normal[v * 3 + 1] ?? 0) < 0.99)) continue;
+        const us = corners.map((v) => along(part, v));
+        const middle = (Math.min(...us) + Math.max(...us)) / 2;
+        const station = stationAt(middle);
+        const x =
+          corners.reduce((sum, v) => sum + (part.position[v * 3] ?? 0), 0) / 3;
+        const z =
+          corners.reduce((sum, v) => sum + (part.position[v * 3 + 2] ?? 0), 0) /
+          3;
+        const side = Math.sign(
+          (x - station.x) * station.lx + (z - station.z) * station.lz,
+        );
+        covered.get(side)?.push([Math.min(...us), Math.max(...us)]);
+      }
+    for (const [side, spans] of covered) {
+      spans.sort((a, b) => a[0] - b[0]);
+      let reach = 0;
+      for (const [from, to] of spans) {
+        expect(
+          from,
+          `gap on side ${String(side)} at u ${from.toFixed(2)}`,
+        ).toBeLessThanOrEqual(reach + 1e-4);
+        reach = Math.max(reach, to);
+      }
+      expect(reach).toBeCloseTo(end, 4);
+    }
+  });
+
   test("the road spans the asphalt physics drives on and its edge lines sit on the road edge", () => {
     const road = parts.find((part) => part.name === "road");
     const lines = parts.find((part) => part.name === "edge lines");

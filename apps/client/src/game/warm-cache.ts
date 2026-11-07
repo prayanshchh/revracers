@@ -41,8 +41,9 @@ function gameFiles(team: string): string[] {
 export async function warmGame(
   team: string,
   upgraded: () => void,
+  saveRace: boolean,
 ): Promise<void> {
   const files = gameFiles(team);
   if ((await upgradeAll()) > 0) upgraded();
-  await prefetch(files);
+  if (saveRace) await prefetch(files);
 }

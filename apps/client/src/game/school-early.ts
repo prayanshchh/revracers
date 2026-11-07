@@ -21,11 +21,21 @@ function schoolAhead(params: URLSearchParams): boolean {
   );
 }
 
+function savedCar(): unknown {
+  try {
+    const settings: unknown = JSON.parse(
+      stored(localStorage, "revracers.settings") ?? "{}",
+    );
+    return typeof settings === "object" && settings !== null
+      ? (settings as { car?: unknown }).car
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function teamOf(params: URLSearchParams): string {
-  const settings = JSON.parse(
-    stored(localStorage, "revracers.settings") ?? "{}",
-  ) as { car?: unknown };
-  const wanted = params.get("team") ?? settings.car;
+  const wanted = params.get("team") ?? savedCar();
   if (typeof wanted !== "string") return defaultTeam;
   try {
     carFile(wanted, "lite/car.bin");
@@ -35,9 +45,14 @@ function teamOf(params: URLSearchParams): string {
   }
 }
 
-export function fetchSchoolEarly(): void {
+export function schoolFirst(): boolean {
   const params = new URLSearchParams(location.search);
-  if (!schoolAhead(params) || params.has("autostart")) return;
+  return schoolAhead(params) && !params.has("autostart");
+}
+
+export function fetchSchoolEarly(): void {
+  if (!schoolFirst()) return;
+  const params = new URLSearchParams(location.search);
   const car = liteCarFiles(teamOf(params));
   const geometry = car.filter((url) => url.endsWith(".bin"));
   fetchEarly([wasmUrl, ...circuitFiles(circuitOf(trainingGround))], geometry, [
