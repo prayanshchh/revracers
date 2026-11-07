@@ -306,12 +306,17 @@ bool isFlat(const Tyre &tyre)
     return tyre.leak >= flatLeak;
 }
 
+void updateShred(Tyre &tyre, double speed, double dt)
+{
+    if (isFlat(tyre))
+        tyre.shred = std::min(1.0, tyre.shred + tyre.leak * tyre.leak * speed * dt / shredDistance);
+}
+
 void applyFlat(int index, double clock, tCar *car, Tyre &tyre, tWheel &wheel, bool front, double speed, double dt)
 {
     double drop = tyre.gone > 0 ? lostWheelDrop : tyre.leak * flatDrop;
     wheel.susp.spring.x0 = (tdble)(tyre.baseSpring - drop * wheel.susp.spring.bellcrank);
     double deflated = tyre.leak * tyre.leak;
-    tyre.shred = std::min(1.0, tyre.shred + (isFlat(tyre) ? deflated * speed * dt / shredDistance : 0.0));
     double drag = deflated * (flatDragLoad * wheel.forces.z + flatDragSpeed * speed * speed);
     if (drag <= 0.0 || speed <= 0.0)
         return;
@@ -548,6 +553,7 @@ void sdTyresStep(tCarElt *elt, double dt)
             updateDirt(tyre, wheel, speed, dt);
             applyFlat(elt->index, state.flailClock, car, tyre, wheel, i < 2, speed, dt);
         }
+        updateShred(tyre, speed, dt);
         dragLostCorner(car, tyre, wheel, speed, dt);
         applyGrip(elt->index, i, tyre, wheel, c, temperature, pressure, target, water, speed);
     }
