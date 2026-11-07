@@ -63,3 +63,20 @@ export function setLamps(
   lamps.signal = signal;
   lamps.lit = lamps.held > 0 || signalLit(signal, lamps.since) ? 1 : 0;
 }
+
+export class PastLamps {
+  private readonly past = carLamps();
+  private time = 0;
+  private live = 0;
+
+  show(lamps: CarLamps, brake: number, signal: number, time: number): void {
+    setLamps(this.past, brake, signal, time - this.time);
+    this.time = time;
+    this.live = lamps.lit;
+    lamps.lit = this.past.lit;
+  }
+
+  restore(lamps: CarLamps): void {
+    lamps.lit = this.live;
+  }
+}

@@ -10,6 +10,7 @@ import {
   carLamps,
   fitLamps,
   lampMaterial,
+  PastLamps,
   setLamps,
 } from "./lamps.ts";
 import { detailFor, detailLevels } from "./detail-level.ts";
@@ -104,6 +105,7 @@ interface FieldCar {
   spinning: boolean;
   staticWheels: THREE.Object3D[];
   lamps: CarLamps;
+  pastLamps: PastLamps;
   flaps: RearFlap[];
 }
 
@@ -359,6 +361,7 @@ export class FieldCars {
         width: shape.width,
       })),
       lamps,
+      pastLamps: new PastLamps(),
       flaps: [body, ...levels].flatMap((part) => RearFlap.find(part) ?? []),
     };
   }
@@ -509,6 +512,24 @@ export class FieldCars {
         seconds,
       );
     });
+  }
+
+  showPast(data: Float64Array, camera: THREE.Camera, time: number): void {
+    this.cars.forEach((car, i) => {
+      const at = (i + 1) * carStride;
+      car.pastLamps.show(
+        car.lamps,
+        data[at + carField.brake] ?? 0,
+        data[at + carField.energySignal] ?? 0,
+        time,
+      );
+    });
+    this.update(data, camera);
+  }
+
+  showPresent(data: Float64Array, camera: THREE.Camera): void {
+    for (const car of this.cars) car.pastLamps.restore(car.lamps);
+    this.update(data, camera);
   }
 
   update(data: Float64Array, camera: THREE.Camera): void {

@@ -8,6 +8,7 @@ import {
 import {
   carLamps,
   energySignal,
+  PastLamps,
   setLamps,
 } from "../../apps/client/src/game/lamps.ts";
 import { planWeekend } from "../../apps/client/src/game/weekend.ts";
@@ -133,5 +134,21 @@ describe.runIf(existsSync(wasm))("2026 energy signal lamps", () => {
     expect(flashing.lit).toBe(0);
     setLamps(flashing, 0, energySignal.single, -0.5);
     expect(flashing.lit).toBe(1);
+  });
+
+  test("an incident replay shows the lamps of its own moment and hands the live ones back", () => {
+    const live = carLamps();
+    setLamps(live, 1, energySignal.none, 1 / 60);
+    const past = new PastLamps();
+    const shown: number[] = [];
+    for (let frame = 0; frame < 120; frame++) {
+      past.show(live, 0, energySignal.double, 30 + frame / 60);
+      shown.push(live.lit);
+      past.restore(live);
+      expect(live.lit).toBe(1);
+      setLamps(live, 1, energySignal.none, 1 / 60);
+    }
+    const onsets = shown.filter((lit, i) => lit > (shown[i - 1] ?? 0)).length;
+    expect(onsets).toBe(4);
   });
 });

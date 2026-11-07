@@ -2,7 +2,7 @@ import * as THREE from "three/webgpu";
 import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { float, smoothstep, uv, vec3 } from "three/tsl";
 import { carMaterials, carTextures, mirrorLayout } from "./carpaint.ts";
-import { carLamps, fitLamps, setLamps } from "./lamps.ts";
+import { carLamps, fitLamps, PastLamps, setLamps } from "./lamps.ts";
 import {
   damageable,
   type DamageLook,
@@ -268,6 +268,7 @@ export class GltfCar {
   pieces: CarPieces = new Map();
   wheelPieces: WheelPiece[] = [];
   private readonly lamps = carLamps();
+  private readonly pastLamps = new PastLamps();
   private flap: RearFlap | null = null;
   private rearTime = 0;
   private readonly model = new THREE.Group();
@@ -685,6 +686,19 @@ export class GltfCar {
     );
     this.rearTime = time;
     this.flap?.update(frame[frameIndex.rearFlap] ?? 0);
+  }
+
+  showPastLamps(frame: Float64Array): void {
+    this.pastLamps.show(
+      this.lamps,
+      frame[frameIndex.brake] ?? 0,
+      frame[frameIndex.energySignal] ?? 0,
+      frame[frameIndex.time] ?? 0,
+    );
+  }
+
+  showLiveLamps(): void {
+    this.pastLamps.restore(this.lamps);
   }
 
   get drawn(): [boolean, boolean, boolean] {

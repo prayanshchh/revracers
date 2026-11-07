@@ -1052,21 +1052,23 @@ export class Scene {
       this.liveShown = this.presentOnly().map((root) => root.visible);
     }
     this.car.pose(frame);
+    this.car.showPastLamps(frame);
     this.car.setDraw(true, true, false);
     for (const root of this.presentOnly()) root.visible = false;
-    this.field?.update(cars, eye);
+    this.field?.showPast(cars, eye, frame[frameIndex.time] ?? 0);
     this.commitPoses();
   }
 
   posePresent(): void {
     if (!this.liveDraw || !this.liveFrame) return;
     this.car.pose(this.liveFrame);
+    this.car.showLiveLamps();
     this.car.setDraw(...this.liveDraw);
     this.liveDraw = null;
     this.presentOnly().forEach((root, k) => {
       root.visible = this.liveShown[k] ?? true;
     });
-    if (this.cars) this.field?.update(this.cars, this.camera);
+    if (this.cars) this.field?.showPresent(this.cars, this.camera);
     this.commitPoses();
   }
 
