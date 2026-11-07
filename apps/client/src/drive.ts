@@ -454,6 +454,7 @@ function raceControls(
 
 const wearShortestRace = 28;
 const pitCompounds = 5;
+const gravelCars = 22;
 const stewardPeriod = 0.1;
 const damagePeriod = 0.1;
 const fieldReferenceLap = 97.5;
@@ -1451,6 +1452,7 @@ async function main(): Promise<void> {
     const info = engine.hudInfo();
     scene.setDash(info);
     scene.updateTyres(frame, tyres);
+    scene.updateGravel(frame, audio.wheels, engine.carsGravel(gravelCars));
     scene.updatePit(control, frame, freshTyre());
     scene.marks.update(
       frame,

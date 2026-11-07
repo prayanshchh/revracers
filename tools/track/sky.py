@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from scipy.ndimage import binary_dilation, gaussian_filter1d
 
 ENV_SIZE = (1024, 512)
 HORIZON_MARGIN = 6.0
@@ -13,6 +14,16 @@ HORIZON_BAND = (2.0, 6.0)
 GROUND_ALBEDO = np.array([0.30, 0.30, 0.22])
 GROUND_BLEND = 4.0
 ENV_GAIN_BELOW = 1.0
+CLEAR_SIZE = (512, 128)
+CLEAR_SKY_SHARE = 0.75
+CLEAR_PERCENTILE = 85
+CLEAR_DILATE = 6
+CLEAR_ROW_SMOOTH = 2.5
+CLEAR_BIN = 2.0
+HAZE_FROM = 3.5
+MONOTONE_FROM = 10.0
+HAZE_SMOOTH = 24.0
+CLOUD_ABOVE = 5.0
 
 
 def read_header(data):
@@ -74,6 +85,62 @@ def box(image, width, height):
     return (out / weights[..., None]).astype(np.float32)
 
 
+def clear_sky(image, latitudes, sun_direction):
+    red, blue = image[..., 0], image[..., 2]
+    chroma = (blue - red) / np.maximum(blue, 1e-6)
+    sky_chroma = np.percentile(chroma, CLEAR_PERCENTILE, axis=1)[:, None]
+    cloud = chroma < CLEAR_SKY_SHARE * np.maximum(sky_chroma, 1e-3)
+    cloud = binary_dilation(cloud, iterations=CLEAR_DILATE)
+    rows, columns = image.shape[:2]
+    clear = ~cloud
+    weight = clear.sum(axis=1).astype(np.float64)
+    logged = np.log(np.maximum(image, 1e-6))
+    mean = (logged * clear[..., None]).sum(axis=1) / np.maximum(weight, 1)[:, None]
+    rows_per_degree = rows / max(np.degrees(latitudes[0] - latitudes[-1]), 1e-6)
+    sigma = CLEAR_ROW_SMOOTH * rows_per_degree
+    spread = gaussian_filter1d(mean * weight[:, None], sigma, axis=0, mode="nearest")
+    total = gaussian_filter1d(weight, sigma, mode="nearest")
+    colour = np.exp(spread / np.maximum(total, 1e-9)[:, None])
+    for row in range(rows - 2, -1, -1):
+        if np.degrees(latitudes[row]) > MONOTONE_FROM:
+            colour[row] = np.minimum(colour[row], colour[row + 1])
+    longitudes = ((np.arange(columns) + 0.5) / columns - 0.5) * 2 * np.pi
+    angle = sun_angle(latitudes[:, None], longitudes[None, :], sun_direction)
+    bins = np.minimum((angle / np.radians(CLEAR_BIN)).astype(int), int(180 / CLEAR_BIN) - 1)
+    usable = clear & (np.degrees(latitudes)[:, None] > HAZE_FROM)
+    ratio = image / np.maximum(colour[:, None, :], 1e-6)
+    glow = np.ones((int(180 / CLEAR_BIN), 3))
+    filled = np.zeros(len(glow), bool)
+    for b in range(len(glow)):
+        chosen = usable & (bins == b)
+        if chosen.sum() > 50:
+            glow[b] = np.median(ratio[chosen], axis=0)
+            filled[b] = True
+    centres = np.arange(len(glow))
+    glow = np.stack([np.interp(centres, centres[filled], glow[filled, c]) for c in range(3)], 1)
+    glow = gaussian_filter1d(glow, 1.5, axis=0, mode="nearest")
+    width, height = CLEAR_SIZE
+    cell_rows = ((np.arange(height) + 0.5) * rows / height).astype(int)
+    cell_lat = latitudes[cell_rows]
+    cell_lon = ((np.arange(width) + 0.5) / width - 0.5) * 2 * np.pi
+    cell_angle = np.degrees(sun_angle(cell_lat[:, None], cell_lon[None, :], sun_direction))
+    position = np.clip(cell_angle / CLEAR_BIN - 0.5, 0, len(glow) - 1)
+    lower = np.floor(position).astype(int)
+    upper = np.minimum(lower + 1, len(glow) - 1)
+    t = (position - lower)[..., None]
+    shape = glow[lower] * (1 - t) + glow[upper] * t
+    field = colour[cell_rows][:, None, :] * shape
+    haze_row = int(np.argmin(np.abs(np.degrees(cell_lat) - HAZE_FROM)))
+    field[np.degrees(cell_lat) < HAZE_FROM] = gaussian_filter1d(field[haze_row], HAZE_SMOOTH, axis=0, mode="wrap")[None]
+    share = float(cloud[np.degrees(latitudes) > CLOUD_ABOVE].mean())
+    return field.astype(np.float32), share
+
+
+def sun_angle(latitude, longitude, sun_direction):
+    cos_angle = np.sin(latitude) * sun_direction[2] + np.cos(latitude) * (np.cos(longitude) * sun_direction[0] + np.sin(longitude) * sun_direction[1])
+    return np.arccos(np.clip(cos_angle, -1, 1))
+
+
 def main():
     source = Path(sys.argv[1])
     out = Path(sys.argv[2])
@@ -123,6 +190,9 @@ def main():
     env_header = f"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {ENV_SIZE[1]} +X {ENV_SIZE[0]}\n".encode()
     (out / f"{name}-env.hdr").write_bytes(env_header + encode(env).tobytes())
     disc = cos_angle > np.cos(np.radians(SUN_DISC))
+    clear, cloud_share = clear_sky(image[:keep], latitudes[:keep], sun_direction)
+    clear_header = f"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {CLEAR_SIZE[1]} +X {CLEAR_SIZE[0]}\n".encode()
+    (out / f"{name}-clear.hdr").write_bytes(clear_header + encode(clear).tobytes())
     sun_colour = np.percentile(image[disc], 90, axis=0)
     sun_colour = sun_colour / sun_colour.max()
     band = (np.degrees(latitudes) > HORIZON_BAND[0]) & (np.degrees(latitudes) < HORIZON_BAND[1])
@@ -136,6 +206,7 @@ def main():
                 "skyRadiance": [float(v) for v in sky_radiance],
                 "horizon": [float(v) for v in horizon_radiance],
                 "sunColor": [float(v) for v in sun_colour],
+                "clouds": round(cloud_share, 4),
             },
             indent=2,
         )

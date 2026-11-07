@@ -16,8 +16,11 @@ from the same sources, so they stay aligned.
 - Race lap length: published circuit guides.
 - Aerial photography: USGS National Agriculture Imagery Program at 0.3 m
   (`source/aerial.jpg`, public domain) gives the kerb positions, paint and
-  run-off bands, ground colour and tree positions. USGS National Map imagery
-  and 3DEP elevation (`source/region-*`, public domain) give the horizon.
+  run-off bands, ground colour and tree positions. Its near-infrared band
+  (`source/aerial-nir.png`, public domain) separates growing grass from bare
+  ground, which together with the colour finds the gravel beds. USGS National
+  Map imagery and 3DEP elevation (`source/region-*`, public domain) give the
+  horizon.
 - Surface textures: Poly Haven, CC0 (`textures/source`, `TEXTURE-SOURCES.json`).
 - Skies: Poly Haven, CC0 (`sky/`): Kloofendal 48d Partly Cloudy Pure Sky for the
   circuit's own time of day, and Qwantani Dawn, Mid Morning, Noon, Afternoon,
@@ -53,7 +56,10 @@ from the same sources, so they stay aligned.
 
 Walls and physics barriers follow OpenStreetMap guard rails out to 110 m from
 the road, with synthetic walls elsewhere. Kerbs come from the aerial photo,
-where they show as a 5 m red and white cycle. Ground within the
+where they show as a 5 m red and white cycle. Gravel beds are pale, unpainted
+ground with no growing grass in the near-infrared band, between the road edge
+and the walls; Speed Dreams drives them as a separate gravel surface. Ground
+within the
 drivable area follows the road's camber plane, which is what Speed Dreams
 simulates; beyond it the lidar terrain is blended in smoothly. Building
 heights come from OSM tags where present. The observation tower position

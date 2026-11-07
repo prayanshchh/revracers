@@ -87,6 +87,16 @@ async function stopMidRace() {
   return { m, pilot, stoppedAt };
 }
 
+async function stopUntilYellow() {
+  const { m, pilot } = await reachStopPoint();
+  while (!flags(m).some((message) => message.car === 0)) {
+    const speed = Math.abs(frameOf(m)[speedIndex] ?? 0);
+    m._sdInputAnalog(1, 0, 0, speed > 0.5 ? 1 : 0);
+    m._sdStep(1);
+  }
+  return { m, pilot };
+}
+
 function rival(m: Raced): Float64Array {
   const cars = m._malloc(2 * carStride * 8);
   m._sdCars(cars);
@@ -147,7 +157,7 @@ describe.runIf(existsSync(wasm))("yellow flags", () => {
   }, 600_000);
 
   test("cars may pass the player stopped under its own yellow and keep the place", async () => {
-    const { m, pilot } = await stopMidRace();
+    const { m, pilot } = await stopUntilYellow();
     const before = timingOf(m, fieldCars).map((row) => row.position);
     const behind = before.flatMap((position, car) =>
       position > (before[0] ?? 0) ? [car] : [],

@@ -34,7 +34,7 @@ describe.runIf(existsSync(wasm))("rain and a drying track", () => {
     const m = await startField({
       kind: sessionKind.race,
       laps,
-      seed: 9,
+      seed: 7,
       rain: "medium",
     });
     const rivals = () => timingOf(m, fieldSize).slice(1);

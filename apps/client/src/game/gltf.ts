@@ -33,6 +33,7 @@ import { bounceMatrix } from "./rumble.ts";
 import { RearFlap } from "./rear-flap.ts";
 import { setTyreShadows, shadowOnlyLayer } from "./road.ts";
 import { carFile } from "./teams.ts";
+import type { TyreMount } from "./tyre-stones.ts";
 import { compounds, type WheelTyre } from "./tyres.ts";
 import {
   deflatedSag,
@@ -290,6 +291,7 @@ export class GltfCar {
   private sharedTyres: THREE.Material | null = null;
   private compoundShown = -1;
   private readonly radii: number[] = [];
+  private readonly widths: number[] = [];
   private materials: CarMaterials | null = null;
   private carScene: THREE.Object3D | null = null;
   private readonly axes = new THREE.Group();
@@ -483,7 +485,16 @@ export class GltfCar {
     for (const wheel of this.wheels) {
       new THREE.Box3().setFromObject(wheel.spin).getSize(size);
       this.radii.push(Math.max(size.y, size.z) / 2);
+      this.widths.push(size.x);
     }
+  }
+
+  tyreMounts(): TyreMount[] {
+    return this.wheels.map((wheel, i) => ({
+      spin: wheel.spin,
+      radius: this.radii[i] ?? 0,
+      width: this.widths[i] ?? 0,
+    }));
   }
 
   setCompound(index: number): void {

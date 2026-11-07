@@ -147,6 +147,13 @@ declare module "*/wasm/speed-dreams.js" {
     _sdTrackBarrier(x: number, y: number, out: number): void;
     _sdCarsTyres(out: number): number;
     _sdTyresInfo(out: number): void;
+    _sdCarsGravel(out: number, limit: number): number;
+    _sdCarPlace(
+      index: number,
+      distance: number,
+      lateral: number,
+      speed: number,
+    ): void;
     _sdEnergyConfigure(
       race: number,
       mode: number,

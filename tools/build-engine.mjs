@@ -82,6 +82,7 @@ const sources = [
   path.join(glue, "stewards.cpp"),
   path.join(glue, "race-control.cpp"),
   path.join(glue, "weather.cpp"),
+  path.join(glue, "gravel.cpp"),
   path.join(root, "engine/third_party/OpenSceneGraph/src/osg/Matrixd.cpp"),
   path.join(root, "engine/third_party/OpenSceneGraph/src/osg/Quat.cpp"),
 ];
@@ -411,11 +412,14 @@ const exported = [
   "_sdGroundHeight",
   "_sdTrackBarrier",
   "_sdCarsTyres",
+  "_sdCarsGravel",
+  "_sdCarPlace",
   "_sdViewResize",
   "_malloc",
   "_free",
 ];
 
+const trackLookup = "_Z19RtTrackGlobal2LocalP8trackSegffP9TrkLocPosi";
 process.stdout.write("link apps/client/wasm/speed-dreams.js\n");
 execFileSync(
   "em++",
@@ -432,6 +436,7 @@ execFileSync(
     "-sFORCE_FILESYSTEM=1",
     `-sEXPORTED_FUNCTIONS=${exported.join(",")}`,
     "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,HEAPF64,HEAPF32,FS",
+    `-Wl,--wrap=${trackLookup}`,
     "--embed-file",
     `${path.join(data, "sd")}@/sd`,
   ],

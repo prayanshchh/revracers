@@ -46,6 +46,8 @@ double sdCarStatusReplaceWing();
 void sdCarStatusDriveLimit(tCarElt *car);
 void sdCarStatusPrepare(tCarElt *car);
 int sdSurfaceClass(const tTrackSeg *seg);
+void sdGravelInit(tTrack *track);
+bool sdGravelSealedAt(tTrackSeg *near, double x, double y);
 void sdTyresReset(tCarElt *car);
 void sdTyresStep(tCarElt *car, double dt);
 void sdTyresService(int index, int compound);

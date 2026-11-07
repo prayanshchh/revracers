@@ -771,6 +771,7 @@ EMSCRIPTEN_KEEPALIVE int sdInit(const char *trackCategory, const char *trackName
     if (!ReInfo->track)
         return -1;
     indexSegments();
+    sdGravelInit(ReInfo->track);
     sdInitWeather();
 
     tSituation *s = ReInfo->s;
@@ -963,6 +964,41 @@ EMSCRIPTEN_KEEPALIVE void sdAudio(double *out)
     }
     out[20] = car->_speed_xy;
     out[21] = car->priv.simcollision;
+}
+
+const double placeRevShare = 0.85;
+
+EMSCRIPTEN_KEEPALIVE void sdCarPlace(int index, double distance, double lateral, double speed)
+{
+    if (index < 0 || index >= ReInfo->s->_ncars)
+        return;
+    sdCarTeleport(index, distance, lateral);
+    tCar *car = &SimCarTable[index];
+    double yaw = car->DynGCg.pos.az;
+    car->DynGCg.vel.x = (tdble)(speed * cos(yaw));
+    car->DynGCg.vel.y = (tdble)(speed * sin(yaw));
+    car->DynGC.vel.x = (tdble)speed;
+    for (int i = 0; i < 4; i++)
+        car->wheel[i].spinVel = (tdble)(speed / car->wheel[i].radius);
+    tTransmission &trans = car->transmission;
+    tCarElt *elt = ReInfo->s->cars[index];
+    int offset = elt->priv.gearOffset;
+    double wheelRads = speed / car->wheel[REAR_RGT].radius;
+    int gear = 1;
+    for (int g = 1; g <= trans.gearbox.gearMax; g++)
+        if (wheelRads * trans.overallRatio[g + offset] < placeRevShare * car->engine.revsLimiter)
+        {
+            gear = g;
+            break;
+        }
+    trans.gearbox.gear = gear;
+    trans.gearbox.gearNext = 0;
+    trans.gearbox.timeToEngage = 0;
+    trans.curOverallRatio = trans.overallRatio[gear + offset];
+    trans.clutch.state = CLUTCH_RELEASED;
+    trans.clutch.transferValue = 1.0f;
+    elt->_gearCmd = gear;
+    car->engine.rads = (tdble)std::max((double)car->engine.tickover, wheelRads * trans.curOverallRatio);
 }
 
 EMSCRIPTEN_KEEPALIVE double sdTrackLength()

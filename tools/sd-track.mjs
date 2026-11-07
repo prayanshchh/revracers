@@ -16,6 +16,11 @@ const kerbMaxWidening = 0.6;
 const kerbRamp = 16;
 const grassRoughness = 0.006;
 const grassWavelength = 3;
+const gravelFriction = 0.45;
+const gravelRollingResistance = 0.2;
+const gravelRoughness = 0.012;
+const gravelWavelength = 0.7;
+const gravelSpansPerEntry = 200;
 const timeOfDay = 14.8;
 const sunAscension = 73.2;
 const pitWallThin = 0.4;
@@ -299,6 +304,47 @@ function grassSurface() {
   ].join("")}</section>`;
 }
 
+const gravelSpans = track.gravel ?? [];
+
+function gravelSurface() {
+  if (!gravelSpans.length) return "";
+  return `
+<section name="track-gravel">${[
+    str("texture name", "tr-gravel.png"),
+    str("texture type", "continuous"),
+    num("texture size", 2, "m"),
+    num("friction", gravelFriction),
+    num("rolling resistance", gravelRollingResistance),
+    num("roughness", gravelRoughness),
+    num("roughness wavelength", gravelWavelength),
+  ].join("")}</section>`;
+}
+
+function spanSection(name, list) {
+  const spans = list.map(([distance, near, far]) => {
+    const shift = shiftAt(distance);
+    return [distance, near - shift, far - shift]
+      .map((v) => Number(v.toFixed(2)))
+      .join(",");
+  });
+  const entries = [];
+  for (let i = 0; i < spans.length; i += gravelSpansPerEntry)
+    entries.push(
+      str(
+        `spans ${String(entries.length).padStart(3, "0")}`,
+        spans.slice(i, i + gravelSpansPerEntry).join(";"),
+      ),
+    );
+  return `<section name="${name}">${num("count", spans.length)}${entries.join("")}</section>`;
+}
+
+function gravelSections() {
+  if (!gravelSpans.length) return "";
+  return `
+${spanSection("Gravel Beds", gravelSpans)}
+${spanSection("Sealed Run-off", track.sealed ?? [])}`;
+}
+
 function sideOf(s, isLeft) {
   return isLeft
     ? {
@@ -410,8 +456,8 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <section name="Surfaces">
 &default-surfaces;
 ${["l", "r"].map(kerbSurface).join("\n")}
-${grassSurface()}
-</section>
+${grassSurface()}${gravelSurface()}
+</section>${gravelSections()}
 <section name="Header">
 ${str("name", track.name)}
 ${str("category", "circuit")}

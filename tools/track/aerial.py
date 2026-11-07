@@ -3,7 +3,7 @@ import json
 import numpy as np
 from PIL import Image
 from pyproj import Transformer
-from scipy.ndimage import distance_transform_edt, gaussian_filter, gaussian_filter1d, map_coordinates, median_filter
+from scipy.ndimage import binary_closing, binary_fill_holes, binary_opening, distance_transform_edt, gaussian_filter, gaussian_filter1d, label, map_coordinates, median_filter
 
 from geo import DEM_ORIGIN, Osm
 
@@ -16,6 +16,7 @@ class Aerial:
     def __init__(self, source):
         self.osm = Osm(source / "osm.json")
         self.image = np.asarray(Image.open(source / "aerial.jpg").convert("RGB"), np.float32) / 255.0
+        self.infrared = np.asarray(Image.open(source / "aerial-nir.png").convert("L"), np.float32) / 255.0
 
     def pixels(self, points):
         lat, lon = self.osm.latlon(points)
@@ -34,7 +35,8 @@ class Aerial:
         shape = points.shape[:-1]
         rows, columns = self.pixels(points.reshape(-1, 2))
         channels = [map_coordinates(self.image[..., c], [rows, columns], order=1, mode="nearest") for c in range(3)]
-        return np.stack(channels, -1).reshape(shape + (3,))
+        channels.append(map_coordinates(self.infrared, [rows, columns], order=1, mode="nearest"))
+        return np.stack(channels, -1).reshape(shape + (4,))
 
 
 LATERAL_REACH = 60.0
@@ -59,6 +61,18 @@ PHOTO_WHITE = 0.92
 TERRAIN_DOWNSAMPLE = 2
 TERRAIN_QUALITY = 90
 GRASS_GRADE = np.array([0.88, 1.02, 0.72], np.float32)
+GRAVEL_VEGETATION = -0.105
+GRAVEL_SATURATION = (0.085, 0.14)
+GRAVEL_VALUE = 0.7
+GRAVEL_HUE = (15, 55)
+GRAVEL_BLUR = 1.2
+GRAVEL_OPEN = 5
+GRAVEL_CLOSE = 7
+GRAVEL_MIN_AREA = 36.0
+GRAVEL_HOLE_AREA = 250.0
+GRAVEL_WALL_MARGIN = 0.5
+GRAVEL_SPAN_ROW = 1.0
+GRAVEL_SPAN_MIN = 0.6
 
 
 def hsv(rgb):
@@ -86,6 +100,50 @@ def road_space(air, points, normal):
     lateral = np.arange(-LATERAL_REACH, LATERAL_REACH + 1e-3, LATERAL_STEP)
     grid = points[:, None, :] + normal[:, None, :] * lateral[None, :, None]
     return lateral, air.sample(grid)
+
+
+def vegetation(sample):
+    red, infrared = sample[..., 0], sample[..., 3]
+    return (infrared - red) / np.maximum(infrared + red, 1e-3)
+
+
+def gravel_beds(sample, found, lateral, half, walls, row_metres):
+    hue, saturation, value = hsv(gaussian_filter(sample[..., :3], (GRAVEL_BLUR, GRAVEL_BLUR, 0)))
+    green = gaussian_filter(vegetation(sample), GRAVEL_BLUR)
+    paved = np.zeros(green.shape, bool)
+    for name in ("red", "teal", "blue", "white", "asphalt", "concrete"):
+        paved |= found[name]
+    paved = gaussian_filter(paved.astype(np.float32), 1.0) > 0.3
+    bare = (green < GRAVEL_VEGETATION) & (saturation > GRAVEL_SATURATION[0]) & (saturation < GRAVEL_SATURATION[1])
+    bare &= (value > GRAVEL_VALUE) & (hue > GRAVEL_HUE[0]) & (hue < GRAVEL_HUE[1]) & ~paved
+    bare = binary_closing(binary_opening(bare, np.ones((GRAVEL_OPEN, GRAVEL_OPEN))), np.ones((GRAVEL_CLOSE, GRAVEL_CLOSE)))
+    regions, _ = label(bare)
+    sizes = np.bincount(regions.ravel()) * row_metres * LATERAL_STEP
+    sizes[0] = 0
+    bare = (sizes > GRAVEL_MIN_AREA)[regions]
+    holes, _ = label(binary_fill_holes(bare) & ~bare)
+    hole_sizes = np.bincount(holes.ravel()) * row_metres * LATERAL_STEP
+    hole_sizes[0] = np.inf
+    bare |= (hole_sizes < GRAVEL_HOLE_AREA)[holes]
+    left, right = walls[:, 0], walls[:, 1]
+    beside = np.abs(lateral)[None, :] > half[:, None]
+    within = (lateral[None, :] < left[:, None] - GRAVEL_WALL_MARGIN) & (lateral[None, :] > -right[:, None] + GRAVEL_WALL_MARGIN)
+    return bare & beside & within
+
+
+def gravel_spans(beds, lateral, row_metres):
+    per = max(1, int(round(GRAVEL_SPAN_ROW / row_metres)))
+    rows = beds.shape[0] // per
+    coarse = beds[: rows * per].reshape(rows, per, -1).mean(1) > 0.5
+    spans = []
+    for row in range(rows):
+        line = coarse[row]
+        edges = np.flatnonzero(np.diff(np.concatenate([[0], line.astype(np.int8), [0]])))
+        for start, end in zip(edges[::2], edges[1::2]):
+            near, far = lateral[start] - LATERAL_STEP / 2, lateral[end - 1] + LATERAL_STEP / 2
+            if far - near >= GRAVEL_SPAN_MIN:
+                spans.append([round((row + 0.5) * per * row_metres, 2), round(float(near), 2), round(float(far), 2)])
+    return spans
 
 
 def resample(points, normal, half, rows):
@@ -171,15 +229,22 @@ def shape_field(mask, row_metres):
     return np.clip(0.5 + field / (2 * FIELD_REACH), 0, 1)
 
 
-def write_masks(rgb, lateral, half, row_metres, directory):
+def write_masks(sample, lateral, half, walls, row_metres, directory):
+    rgb = sample[..., :3]
     found = classes(rgb)
     fill_to_edge(found, lateral, half)
+    beds = gravel_beds(sample, found, lateral, half, walls, row_metres)
+    sealed = np.zeros(beds.shape, bool)
+    for name in ("red", "teal", "blue", "white", "asphalt", "concrete"):
+        sealed |= shape_field(found[name], row_metres) > 0.5
+    sealed &= (np.abs(lateral)[None, :] > half[:, None]) & ~beds
     luminance = stretch(rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32))
     field = lambda name: shape_field(found[name], row_metres)
     first = np.stack([field(name) for name in ("red", "teal", "blue", "white")], -1)
-    second = np.stack([field("concrete"), field("asphalt"), gaussian_filter1d(luminance, 1.0, axis=0, mode="wrap"), np.ones(luminance.shape, np.float32)], -1)
+    second = np.stack([field("concrete"), field("asphalt"), gaussian_filter1d(luminance, 1.0, axis=0, mode="wrap"), shape_field(beds, row_metres)], -1)
     for name, data in (("apron_a.png", first), ("apron_b.png", second)):
         Image.fromarray(np.round(data * 255).astype(np.uint8), "RGBA").save(directory / name)
+    return gravel_spans(beds, lateral, row_metres), gravel_spans(sealed, lateral, row_metres)
 
 
 def write_terrain(air, directory):
@@ -204,15 +269,18 @@ def fit_affine(air, reach=1600.0):
     return {"u": [float(c) for c in u], "v": [float(c) for c in v]}
 
 
-def bake(source, points, normal, half, step, blocked, textures, build):
+def bake(source, points, normal, half, walls, step, blocked, textures, build):
     air = Aerial(source)
-    lateral, rgb = road_space(air, points, normal)
-    spans = kerb_spans(rgb, lateral, half, step, blocked)
+    lateral, sample = road_space(air, points, normal)
+    spans = kerb_spans(sample[..., :3], lateral, half, step, blocked)
     textures.mkdir(parents=True, exist_ok=True)
     build.mkdir(parents=True, exist_ok=True)
     fine_points, fine_normal, fine_half = resample(points, normal, half, MASK_ROWS)
-    fine_lateral, fine_rgb = road_space(air, fine_points, fine_normal)
-    write_masks(fine_rgb, fine_lateral, fine_half, step * len(points) / MASK_ROWS, textures)
+    position = np.arange(MASK_ROWS) * len(points) / MASK_ROWS
+    fine_walls = np.stack([np.interp(position, np.arange(len(points) + 1), np.append(w, w[0])) for w in walls.T], 1)
+    fine_lateral, fine_sample = road_space(air, fine_points, fine_normal)
+    row_metres = step * len(points) / MASK_ROWS
+    gravel, sealed = write_masks(fine_sample, fine_lateral, fine_half, fine_walls, row_metres, textures)
     write_terrain(air, textures)
     (build / "aerial.json").write_text(json.dumps({**fit_affine(air), "reach": LATERAL_REACH}))
-    return spans
+    return spans, gravel, sealed
