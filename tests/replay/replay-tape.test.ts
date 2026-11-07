@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
+  carField,
   carStride,
   frameIndex,
 } from "../../apps/client/src/game/frame-layout.ts";
+import { energySignal } from "../../apps/client/src/game/lamps.ts";
 import { ReplayTape, tapeRate } from "../../apps/client/src/game/replay.ts";
 
 const spinAngle = frameIndex.wheels + 4;
@@ -75,5 +77,36 @@ describe("replay tape", () => {
     expect(frame[frameIndex.posMat + 12]).toBeCloseTo(500, 6);
     tape.sample(99, frame, cars);
     expect(frame[frameIndex.time]).toBeCloseTo(1.6, 6);
+  });
+
+  test("energy signals play back as recorded, never as a blend of two signals", () => {
+    const tape = new ReplayTape(2);
+    const step = 1 / tapeRate;
+    const signalled = (time: number, signal: number) => {
+      const frame = frameAt(time, 0, 0, 0);
+      const cars = carsAt(0);
+      frame[frameIndex.energySignal] = signal;
+      cars[carStride + carField.energySignal] = signal;
+      return [frame, cars] as const;
+    };
+    tape.record(...signalled(0, energySignal.single));
+    tape.record(...signalled(step, energySignal.clipping));
+    const frame = new Float64Array(frameIndex.size);
+    const cars = new Float64Array(2 * carStride);
+    const shown = (at: number) => {
+      tape.sample(at, frame, cars);
+      return [
+        frame[frameIndex.energySignal],
+        cars[carStride + carField.energySignal],
+      ];
+    };
+    expect(shown(step * 0.3)).toEqual([
+      energySignal.single,
+      energySignal.single,
+    ]);
+    expect(shown(step * 0.7)).toEqual([
+      energySignal.clipping,
+      energySignal.clipping,
+    ]);
   });
 });

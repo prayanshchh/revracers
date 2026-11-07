@@ -1,7 +1,8 @@
 import type * as THREE from "three/webgpu";
 
+export const lampMaterial = "led-red";
 export const lampMaterials: ReadonlySet<string> = new Set([
-  "led-red",
+  lampMaterial,
   "led-strip",
 ]);
 const brakeLampFrom = 0.05;
@@ -54,10 +55,11 @@ export function setLamps(
   signal: number,
   seconds: number,
 ): void {
+  const rewound = seconds < 0;
   const step = Math.max(0, seconds);
-  lamps.held =
-    brake > brakeLampFrom ? brakeLampHold : Math.max(0, lamps.held - step);
-  lamps.since = signal === lamps.signal ? lamps.since + step : 0;
+  const held = rewound ? 0 : Math.max(0, lamps.held - step);
+  lamps.held = brake > brakeLampFrom ? brakeLampHold : held;
+  lamps.since = signal === lamps.signal && !rewound ? lamps.since + step : 0;
   lamps.signal = signal;
   lamps.lit = lamps.held > 0 || signalLit(signal, lamps.since) ? 1 : 0;
 }

@@ -1079,9 +1079,14 @@ export class Scene {
       if (object.visible) object.updateMatrixWorld();
   }
 
+  private stepFieldLamps(time: number): void {
+    if (this.cars) this.field?.stepLamps(this.cars, time);
+  }
+
   update(frame: Float64Array): void {
     this.liveFrame = frame;
     const time = frame[frameIndex.time] ?? 0;
+    this.stepFieldLamps(time);
     if (this.cinematic) this.showPast(time);
     this.car.update(frame);
     this.updateContact(frame);

@@ -6,7 +6,10 @@ import {
   carStride,
   frameIndex,
 } from "../../apps/client/src/game/frame-layout.ts";
-import { RearFlap } from "../../apps/client/src/game/rear-flap.ts";
+import { MeshoptSimplifier } from "meshoptimizer";
+import { detailLevels } from "../../apps/client/src/game/detail-level.ts";
+import { flapName, RearFlap } from "../../apps/client/src/game/rear-flap.ts";
+import { simplifiedBody } from "../../apps/client/src/game/simplify.ts";
 import { planWeekend } from "../../apps/client/src/game/weekend.ts";
 import {
   energyReader,
@@ -118,4 +121,54 @@ describe.runIf(existsSync(wasm))("rear wing flap", () => {
     for (const flap of shown) expect(flap.widest).toBeGreaterThan(opened);
     expect(openUnderBraking).toBe(0);
   }, 120_000);
+});
+
+function rivalModel(): THREE.Group {
+  const atlas = new THREE.MeshStandardMaterial({ name: "rival atlas" });
+  const body = new THREE.Group();
+  const model = new THREE.Group();
+  const flap = new THREE.Group();
+  flap.name = flapName;
+  flap.add(
+    new THREE.Mesh(
+      new THREE.BoxGeometry(1, 0.4, 0.4).translate(0, 0.9, -2.4),
+      atlas,
+    ),
+  );
+  model.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 4), atlas), flap);
+  body.add(model);
+  return body;
+}
+
+function topOf(root: THREE.Object3D): number {
+  let top = -Infinity;
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const geometry = object.geometry as THREE.BufferGeometry;
+    const index = geometry.index;
+    const position = geometry.getAttribute("position");
+    const count = index ? index.count : position.count;
+    for (let i = 0; i < count; i++)
+      top = Math.max(top, position.getY(index ? index.getX(i) : i));
+  });
+  return top;
+}
+
+describe("distant rival flaps", () => {
+  test("every simpler rival model keeps its flap apart from the body so it still opens", async () => {
+    await MeshoptSimplifier.ready;
+    for (const { error } of detailLevels) {
+      const level = simplifiedBody(rivalModel(), error);
+      const flap = RearFlap.find(level);
+      const node = level.getObjectByName(flapName);
+      if (!flap || !node) throw new Error("a simpler model lost its flap");
+      const fixed = new THREE.Group();
+      for (const part of level.children)
+        if (part !== node) fixed.add(part.clone());
+      expect(topOf(node)).toBeGreaterThan(0.9);
+      expect(topOf(fixed)).toBeLessThan(0.31);
+      flap.update(1);
+      expect(node.matrix.equals(new THREE.Matrix4())).toBe(false);
+    }
+  });
 });

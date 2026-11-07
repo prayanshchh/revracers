@@ -121,4 +121,17 @@ describe.runIf(existsSync(wasm))("2026 energy signal lamps", () => {
     expect(flashesPerSecond(energySignal.clipping)).toBeGreaterThanOrEqual(5);
     expect(flashesPerSecond(energySignal.clipping, 1)).toBeLessThanOrEqual(0.2);
   });
+
+  test("rewinding a replay drops a brake hold and restarts the flashes from the earlier moment", () => {
+    const lamps = carLamps();
+    setLamps(lamps, 1, energySignal.none, 1 / 60);
+    setLamps(lamps, 0, energySignal.none, -5);
+    expect(lamps.lit).toBe(0);
+    const flashing = carLamps();
+    setLamps(flashing, 0, energySignal.single, 1 / 60);
+    setLamps(flashing, 0, energySignal.single, 0.5);
+    expect(flashing.lit).toBe(0);
+    setLamps(flashing, 0, energySignal.single, -0.5);
+    expect(flashing.lit).toBe(1);
+  });
 });

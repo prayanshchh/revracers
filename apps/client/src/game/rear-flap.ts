@@ -2,7 +2,7 @@ import * as THREE from "three/webgpu";
 
 const openAngle = -0.38;
 const hinge = new THREE.Vector3(0, 0.795, -2.168);
-const flapName = "rear-flap";
+export const flapName = "rear-flap";
 
 const toHinge = new THREE.Matrix4();
 const turn = new THREE.Matrix4();
