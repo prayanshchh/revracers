@@ -568,6 +568,8 @@ static void fillFrame()
     sdCameraUpdate(car, ReInfo->s, &frame[SD_CAMERA]);
     for (int i = 0; i < 4; i++)
         frame[SD_BRAKE_TEMP + i] = car->_brakeTemp(i);
+    frame[SD_REAR_FLAP] = sdEnergyStraightOpen(car->index);
+    frame[SD_ENERGY_SIGNAL] = sdEnergySignal(car->index);
 }
 
 static bool initGf()
@@ -681,6 +683,8 @@ EMSCRIPTEN_KEEPALIVE void sdCars(double *out)
         c[46] = sdSessionCarVisible(i) ? 1 : 0;
         c[47] = car->_trkPos.toMiddle;
         c[48] = car->_distFromStartLine;
+        c[49] = sdEnergyStraightOpen(car->index);
+        c[50] = sdEnergySignal(car->index);
     }
 }
 

@@ -1,11 +1,13 @@
 import * as THREE from "three/webgpu";
 import { texture, uv } from "three/tsl";
 import { frameIndex } from "./frame-layout.ts";
-import { type CarEnvironment, useEnvironment } from "./carpaint.ts";
+import { type CarEnvironment, lampGlow, useEnvironment } from "./carpaint.ts";
 import { contactShadow, gltfToSdCar, wheelRest } from "./gltf.ts";
 import { gltfLoader } from "./gltf-loader.ts";
 import { mergedMesh, placedCopy } from "./merge.ts";
 import { loaded, releaseOnceUploaded } from "./preload.ts";
+import { lampMaterial, lampMaterials } from "./lamps.ts";
+import { flapName } from "./rear-flap.ts";
 import { carFile, gridTeamOrder, teams } from "./teams.ts";
 import { markTyres, tyreAttribute, tyreMaterial } from "./tyre-paint.ts";
 
@@ -13,6 +15,7 @@ const leaveAfterLap = 2;
 const headingProbe = 2;
 const envStrength = 1;
 const atlasMaterials = new Set(["body", "cockpit", "helmet"]);
+const lampParts = new Set([...lampMaterials, "rain-lens"]);
 const anisotropy = 16;
 const textured = ["position", "normal", "uv"] as const;
 const plain = ["position", "normal"] as const;
@@ -42,14 +45,16 @@ function textureOf(url: string, sRgb: boolean): THREE.Texture {
 function flatMaterial(
   source: THREE.MeshStandardMaterial,
   env: CarEnvironment,
+  name: string,
 ): THREE.MeshStandardNodeMaterial {
   const material = new THREE.MeshStandardNodeMaterial({
-    name: source.name,
+    name,
     roughness: source.roughness,
     metalness: source.metalness,
     vertexColors: true,
   });
   useEnvironment(material, env, envStrength);
+  if (name === lampMaterial) lampGlow(material);
   return material;
 }
 
@@ -72,6 +77,13 @@ function atlasMaterial(
 interface TeamPart {
   geometry: THREE.BufferGeometry;
   source: THREE.MeshStandardMaterial;
+  flap: boolean;
+}
+
+function inFlap(object: THREE.Object3D): boolean {
+  for (let node: THREE.Object3D | null = object; node; node = node.parent)
+    if (node.name === flapName) return true;
+  return false;
 }
 
 async function teamParts(team: string): Promise<TeamPart[]> {
@@ -84,6 +96,7 @@ async function teamParts(team: string): Promise<TeamPart[]> {
     parts.push({
       geometry: object.geometry as THREE.BufferGeometry,
       source: object.material as THREE.MeshStandardMaterial,
+      flap: inFlap(object),
     });
   });
   return parts;
@@ -95,12 +108,16 @@ class Batches {
     { material: THREE.Material; parts: THREE.BufferGeometry[] }
   >();
 
+  constructor(private readonly materials = new Map<string, THREE.Material>()) {}
+
   add(
     key: string,
     material: () => THREE.Material,
     part: THREE.BufferGeometry,
   ): void {
-    const group = this.groups.get(key) ?? { material: material(), parts: [] };
+    const shared = this.materials.get(key) ?? material();
+    this.materials.set(key, shared);
+    const group = this.groups.get(key) ?? { material: shared, parts: [] };
     group.parts.push(part);
     this.groups.set(key, group);
   }
@@ -132,12 +149,14 @@ function addParts(
         () => tyreMaterial(env, maxAnisotropy),
         placedCopy(geometry, matrix, tyred),
       );
-    else
+    else {
+      const name = lampParts.has(source.name) ? lampMaterial : source.name;
       batches.add(
-        source.name,
-        () => flatMaterial(source, env),
+        name,
+        () => flatMaterial(source, env, name),
         tinted(placedCopy(geometry, matrix, plain), source.color),
       );
+    }
   }
 }
 
@@ -145,10 +164,32 @@ export async function teamModel(
   team: string,
   env: CarEnvironment,
 ): Promise<THREE.Object3D> {
-  const batches = new Batches();
-  addParts(batches, team, await teamParts(team), new THREE.Matrix4(), env);
+  const parts = await teamParts(team);
+  const materials = new Map<string, THREE.Material>();
+  const batches = new Batches(materials);
+  const flapBatches = new Batches(materials);
+  const placed = new THREE.Matrix4();
+  addParts(
+    batches,
+    team,
+    parts.filter((part) => !part.flap),
+    placed,
+    env,
+  );
+  addParts(
+    flapBatches,
+    team,
+    parts.filter((part) => part.flap),
+    placed,
+    env,
+  );
   const model = new THREE.Group();
   model.add(...batches.meshes());
+  const flap = new THREE.Group();
+  flap.name = flapName;
+  const flapMeshes = flapBatches.meshes();
+  if (flapMeshes.length > 0) flap.add(...flapMeshes);
+  model.add(flap);
   await loaded();
   return model;
 }

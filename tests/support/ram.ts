@@ -1,13 +1,13 @@
 import { planWeekend } from "../../apps/client/src/game/weekend.ts";
 import { sessionKind, startField, type Weekend } from "./race-weekend.ts";
 import { frameOf, type Stewarded } from "./stewards.ts";
+import { carStride } from "../../apps/client/src/game/frame-layout.ts";
 
 export interface Rammer extends Weekend, Stewarded {
   _sdCars: (out: number) => void;
   _sdInputSteerDirect: (on: number) => void;
 }
 
-const carStride = 49;
 const steerGain = 2;
 
 function aimAt(frame: Float64Array, rival: Float64Array) {

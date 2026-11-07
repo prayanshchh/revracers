@@ -101,7 +101,7 @@ static const ChaseCam chases[] = {
 };
 static const int chaseCount = sizeof(chases) / sizeof(chases[0]);
 static const Onboard onboards[] = {
-    {-0.224, 0.0, 1.022, -11.27, 48.6, true},
+    {-0.49, 0.0, 1.15, -4.0, 50.0, true},
     {-0.353, 0.0, 1.108, -7.66, 42.9, false},
     {0.15, 0.0, 0.755, -5.8, 43.0, false},
     {0.62, 0.0, 0.96, -6.7, 60.0, true},

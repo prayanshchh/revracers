@@ -23,6 +23,7 @@ import {
   vec2,
   vec4,
 } from "three/tsl";
+import { type CarLamps, lampMaterials } from "./lamps.ts";
 import { carFile } from "./teams.ts";
 import { releaseOnceUploaded } from "./preload.ts";
 import { scraped } from "./car-damage.ts";
@@ -573,7 +574,16 @@ export interface CarMaterials {
 const rev = uniform(0);
 const brakeHeat = uniform(0);
 export const rainLight = uniform(0);
-const rainLightColour = new THREE.Color(9, 0.25, 0.12);
+const lampColour = new THREE.Color(26, 1.4, 1.0);
+const brakeLamp = uniform(0);
+brakeLamp.onObjectUpdate(({ object }) => {
+  brakeLamp.value =
+    (object?.userData as { lamps?: CarLamps } | undefined)?.lamps?.lit ?? 0;
+});
+
+export function lampGlow(material: THREE.MeshStandardNodeMaterial): void {
+  material.emissiveNode = color(lampColour).mul(max(rainLight, brakeLamp));
+}
 
 function brakeGlow(physical: THREE.MeshPhysicalNodeMaterial): void {
   physical.emissiveNode = color(brakeColour).mul(brakeHeat);
@@ -635,9 +645,8 @@ function partMaterial(
     physical.clearcoatRoughness = coatRoughness;
   }
   if (satinParts.test(name)) physical.roughness = satinRoughness;
-  if (name.startsWith("led-") && name !== "led-red") ledGlow(physical);
-  if (name === "led-red")
-    physical.emissiveNode = color(rainLightColour).mul(rainLight);
+  if (lampMaterials.has(name)) lampGlow(physical);
+  else if (name.startsWith("led-")) ledGlow(physical);
   return physical;
 }
 

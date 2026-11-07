@@ -3,9 +3,9 @@ import { describe, expect, test } from "vitest";
 import { HeapHistory } from "../../apps/client/src/game/flashback.ts";
 import { sessionKind, startField } from "../support/race-weekend.ts";
 import { wasm } from "../support/speed-dreams.ts";
+import { carStride } from "../../apps/client/src/game/frame-layout.ts";
 
 const fieldSize = 22;
-const carStride = 49;
 const stepsPerChunk = 10;
 const chunkSeconds = stepsPerChunk / 500;
 

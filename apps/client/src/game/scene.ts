@@ -1052,21 +1052,23 @@ export class Scene {
       this.liveShown = this.presentOnly().map((root) => root.visible);
     }
     this.car.pose(frame);
+    this.car.showPastLamps(frame);
     this.car.setDraw(true, true, false);
     for (const root of this.presentOnly()) root.visible = false;
-    this.field?.update(cars, eye);
+    this.field?.showPast(cars, eye, frame[frameIndex.time] ?? 0);
     this.commitPoses();
   }
 
   posePresent(): void {
     if (!this.liveDraw || !this.liveFrame) return;
     this.car.pose(this.liveFrame);
+    this.car.showLiveLamps();
     this.car.setDraw(...this.liveDraw);
     this.liveDraw = null;
     this.presentOnly().forEach((root, k) => {
       root.visible = this.liveShown[k] ?? true;
     });
-    if (this.cars) this.field?.update(this.cars, this.camera);
+    if (this.cars) this.field?.showPresent(this.cars, this.camera);
     this.commitPoses();
   }
 
@@ -1079,9 +1081,14 @@ export class Scene {
       if (object.visible) object.updateMatrixWorld();
   }
 
+  private stepFieldLamps(time: number): void {
+    if (this.cars) this.field?.stepLamps(this.cars, time);
+  }
+
   update(frame: Float64Array): void {
     this.liveFrame = frame;
     const time = frame[frameIndex.time] ?? 0;
+    this.stepFieldLamps(time);
     if (this.cinematic) this.showPast(time);
     this.car.update(frame);
     this.updateContact(frame);

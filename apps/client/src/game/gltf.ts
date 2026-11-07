@@ -2,6 +2,7 @@ import * as THREE from "three/webgpu";
 import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { float, smoothstep, uv, vec3 } from "three/tsl";
 import { carMaterials, carTextures, mirrorLayout } from "./carpaint.ts";
+import { carLamps, fitLamps, PastLamps, setLamps } from "./lamps.ts";
 import {
   damageable,
   type DamageLook,
@@ -29,6 +30,7 @@ import { frameIndex } from "./frame-layout.ts";
 import { gltfLoader } from "./gltf-loader.ts";
 import { mergedMesh, placedCopy } from "./merge.ts";
 import { bounceMatrix } from "./rumble.ts";
+import { RearFlap } from "./rear-flap.ts";
 import { setTyreShadows, shadowOnlyLayer } from "./road.ts";
 import { carFile } from "./teams.ts";
 import { compounds, type WheelTyre } from "./tyres.ts";
@@ -265,6 +267,10 @@ export class GltfCar {
   readonly damage = newLook();
   pieces: CarPieces = new Map();
   wheelPieces: WheelPiece[] = [];
+  private readonly lamps = carLamps();
+  private readonly pastLamps = new PastLamps();
+  private flap: RearFlap | null = null;
+  private rearTime = 0;
   private readonly model = new THREE.Group();
   private readonly wheels: Wheel[] = [];
   private steeringWheel: THREE.Object3D | null = null;
@@ -357,6 +363,8 @@ export class GltfCar {
     car.dress(gltf.scene, materials, tyres);
     car.zoned = makeDamageable(gltf.scene, car.damage, withinChassis);
     car.pieces = zonePieces(gltf.scene, new Set(car.glass));
+    fitLamps(gltf.scene, car.lamps);
+    car.flap = RearFlap.find(gltf.scene);
     const axes = car.axes;
     axes.matrixAutoUpdate = false;
     axes.matrix.copy(gltfToSdCar);
@@ -665,6 +673,32 @@ export class GltfCar {
   update(frame: Float64Array): void {
     this.pose(frame);
     this.updateDash(frame);
+    this.updateRear(frame);
+  }
+
+  private updateRear(frame: Float64Array): void {
+    const time = frame[frameIndex.time] ?? 0;
+    setLamps(
+      this.lamps,
+      frame[frameIndex.brake] ?? 0,
+      frame[frameIndex.energySignal] ?? 0,
+      time - this.rearTime,
+    );
+    this.rearTime = time;
+    this.flap?.update(frame[frameIndex.rearFlap] ?? 0);
+  }
+
+  showPastLamps(frame: Float64Array): void {
+    this.pastLamps.show(
+      this.lamps,
+      frame[frameIndex.brake] ?? 0,
+      frame[frameIndex.energySignal] ?? 0,
+      frame[frameIndex.time] ?? 0,
+    );
+  }
+
+  showLiveLamps(): void {
+    this.pastLamps.restore(this.lamps);
   }
 
   get drawn(): [boolean, boolean, boolean] {

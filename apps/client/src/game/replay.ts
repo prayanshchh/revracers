@@ -76,6 +76,8 @@ function blendFrame(
     frameWheelStride,
     t,
   );
+  const nearest = t < 0.5 ? a : b;
+  out[frameIndex.energySignal] = nearest[frameIndex.energySignal] ?? 0;
 }
 
 function blendCar(
@@ -92,7 +94,7 @@ function blendCar(
   const wheels = base + carWheelsFrom;
   blendWheels(a, b, wheels, out, wheels, carWheelStride, t);
   const nearest = t < 0.5 ? a : b;
-  for (const k of [carField.compound, carField.visible])
+  for (const k of [carField.compound, carField.visible, carField.energySignal])
     out[base + k] = nearest[base + k] ?? 0;
 }
 

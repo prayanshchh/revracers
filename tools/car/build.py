@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+import bmesh
 import bpy
 import numpy as np
 
@@ -16,7 +17,8 @@ from cockpit import WHEEL_X, WHEEL_Z
 from shapes import PARTS, material, to_blender
 
 LOD_RATIO = 0.07
-LOD_MATERIALS = ("body", "cockpit", "helmet", "tyre", "rim", "carbon-part")
+LOD_MATERIALS = ("body", "cockpit", "helmet", "tyre", "rim", "carbon-part", "led-red", "led-strip", "rain-lens")
+LOD_KEEP = ("led-red", "led-strip", "rain-lens", "lens")
 ATLAS = 8192
 PADDING = 16
 AO_SAMPLES = 64
@@ -45,7 +47,9 @@ def materials(rim):
     material("exhaust", (0.20, 0.17, 0.19), 0.36, 1.0)
     material("caliper", (0.42, 0.03, 0.02), 0.34, 0.6)
     material("titanium", (0.55, 0.53, 0.5), 0.35, 1.0)
-    material("led-red", (0.3, 0.0, 0.0), 0.4, 0, (1.0, 0.02, 0.01), 3)
+    material("led-red", (0.66, 0.64, 0.64), 0.3, 0, (1.0, 0.02, 0.01), 3)
+    material("led-strip", (0.05, 0.045, 0.045), 0.18, 0, (1.0, 0.02, 0.01), 3)
+    material("rain-lens", (0.48, 0.48, 0.50), 0.3, 0.5)
     material("led-green", (0.0, 0.2, 0.0), 0.3, 0, (0.15, 1.0, 0.2), 6)
     material("led-wheel-red", (0.2, 0.0, 0.0), 0.3, 0, (1.0, 0.05, 0.03), 6)
     material("led-purple", (0.1, 0.0, 0.2), 0.3, 0, (0.55, 0.2, 1.0), 6)
@@ -285,29 +289,72 @@ def assemble():
         keep.data.update()
         keep.parent = parent
         keep.location = tuple(centre) if parent is root else (0.0, 0.0, 0.0)
+    flap = bpy.data.objects.get(aero.FLAP_GROUP)
+    if flap is not None:
+        flap.parent = bpy.data.objects["chassis"]
+
+
+def split_kept(obj, wanted=LOD_KEEP):
+    kept = {i for i, slot in enumerate(obj.material_slots) if slot.material and slot.material.name in wanted}
+    if not kept:
+        return None
+    copy = obj.copy()
+    copy.data = obj.data.copy()
+    bpy.context.scene.collection.objects.link(copy)
+    for target, keep_kept in ((obj, False), (copy, True)):
+        bm = bmesh.new()
+        bm.from_mesh(target.data)
+        doomed = [face for face in bm.faces if (face.material_index in kept) != keep_kept]
+        bmesh.ops.delete(bm, geom=doomed, context="FACES")
+        bm.to_mesh(target.data)
+        bm.free()
+    return copy
+
+
+def decimate(obj):
+    modifier = obj.modifiers.new("lod", "DECIMATE")
+    modifier.ratio = LOD_RATIO
+    bpy.context.view_layer.objects.active = obj
+    with bpy.context.temp_override(object=obj, active_object=obj, selected_objects=[obj]):
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+
+def lod_materials(mesh):
+    names = [slot.name for slot in mesh.materials]
+    if "carbon-part" not in names:
+        mesh.materials.append(bpy.data.materials["carbon-part"])
+        names.append("carbon-part")
+    fallback = names.index("carbon-part")
+    indices = [i if n in LOD_MATERIALS else fallback for i, n in enumerate(names)]
+    for polygon in mesh.polygons:
+        polygon.material_index = indices[polygon.material_index]
 
 
 def lod():
     for obj in list(bpy.data.objects):
         if obj.type == "MESH" and (obj.name == "steering-wheel" or obj.name.startswith("steering-wheel")):
             bpy.data.objects.remove(obj)
-    meshes = [o for o in bpy.data.objects if o.type == "MESH"]
-    for obj in meshes:
-        modifier = obj.modifiers.new("lod", "DECIMATE")
-        modifier.ratio = LOD_RATIO
-        bpy.context.view_layer.objects.active = obj
-        with bpy.context.temp_override(object=obj, active_object=obj, selected_objects=[obj]):
-            bpy.ops.object.modifier_apply(modifier=modifier.name)
+    flap = bpy.data.objects.get(aero.FLAP_GROUP)
+    if flap is not None:
+        world = flap.matrix_world.copy()
+        flap.parent = None
+        flap.matrix_world = world
+    meshes = [o for o in bpy.data.objects if o.type == "MESH" and o is not flap]
+    kept = [copy for copy in (split_kept(obj) for obj in meshes) if copy is not None]
+    if flap is not None:
+        fixed = split_kept(flap, {slot.material.name for slot in flap.material_slots if slot.material and slot.material.name != "body"})
+        if fixed is not None:
+            meshes.append(fixed)
+    for obj in meshes + ([flap] if flap is not None else []):
+        decimate(obj)
+    meshes += kept
     keep = meshes[0]
     with bpy.context.temp_override(active_object=keep, selected_editable_objects=meshes, object=keep):
         bpy.ops.object.join()
     keep.name = "car"
-    mesh = keep.data
-    names = [slot.name for slot in mesh.materials]
-    fallback = names.index("carbon-part")
-    indices = [names.index(n) if n in LOD_MATERIALS else fallback for n in names]
-    for polygon in mesh.polygons:
-        polygon.material_index = indices[polygon.material_index]
+    lod_materials(keep.data)
+    if flap is not None:
+        lod_materials(flap.data)
     for obj in list(bpy.data.objects):
         if obj.type == "EMPTY":
             bpy.data.objects.remove(obj)
