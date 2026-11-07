@@ -572,8 +572,10 @@ export class Scene {
   ): void {
     const count = Math.floor(damage.length / partCount);
     const time = frame[frameIndex.time] ?? 0;
-    const quiet = this.pastShown;
-    this.pastShown = false;
+    if (this.pastShown) {
+      this.pastShown = false;
+      this.showLogged(time);
+    }
     if (this.damageState.length !== count * carState)
       this.damageState = new Float64Array(count * carState);
     const state = this.damageState;
@@ -588,14 +590,13 @@ export class Scene {
       );
     }
     this.damageLog.record(time, state, carState);
-    if (!quiet) this.feelHit(time, state);
+    this.feelHit(time, state);
     for (let i = 0; i < count; i++) {
       const changes = this.applyCar(
         i,
         state.subarray(i * carState, (i + 1) * carState),
       );
-      if (quiet || changes.length === 0 || !this.placeDamaged(i, frame))
-        continue;
+      if (changes.length === 0 || !this.placeDamaged(i, frame)) continue;
       for (const change of changes)
         this.debris.spawn(
           time,
@@ -690,10 +691,14 @@ export class Scene {
 
   private showPast(time: number): void {
     this.pastShown = true;
-    for (let i = 0; i < this.damageLog.carCount; i++)
-      this.applyCar(i, this.damageLog.partsAt(i, time) ?? this.noDamage);
+    this.showLogged(time);
     const wheels = this.damageLog.tyresAt(time);
     if (wheels) this.car.setTyreCondition(wheels);
+  }
+
+  private showLogged(time: number): void {
+    for (let i = 0; i < this.damageLog.carCount; i++)
+      this.applyCar(i, this.damageLog.partsAt(i, time) ?? this.noDamage);
   }
 
   setWeather(weather: WeatherInfo): void {
