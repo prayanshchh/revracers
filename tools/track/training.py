@@ -21,6 +21,7 @@ INSIDE_SHARE = 0.6
 MIN_VERGE = 2.5
 KINK = np.radians(15)
 SPEED_TRAP_LEAD = 80.0
+STRAIGHT_MODE_LEAD = 100.0
 ROUND = 4
 STRAIGHT_BELOW = 1e-4
 
@@ -231,7 +232,7 @@ def straights(owner, layout):
     for after, before in layout["straights"]:
         leave = int(np.flatnonzero(owner == after).max()) + 1
         enter = int(np.flatnonzero(owner == before).min())
-        out.append([round(leave * STEP, 1), round(enter * STEP, 1)])
+        out.append([round((leave * STEP + STRAIGHT_MODE_LEAD) % (count * STEP), 1), round(enter * STEP, 1)])
     return out, count
 
 

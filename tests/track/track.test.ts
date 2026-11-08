@@ -160,10 +160,8 @@ describe("Hill Country Speed Dreams track", () => {
   });
 
   test("hill-country.xml and sd-frame.json are generated from the current track.json", () => {
-    copyFileSync(
-      path.join(directory, "track.json"),
-      path.join(scratch, "track.json"),
-    );
+    for (const file of ["track.json", "circuit-map.json"])
+      copyFileSync(path.join(directory, file), path.join(scratch, file));
     const result = run("node", ["tools/sd-track.mjs", scratch]);
     expect(result.code, result.output).toBe(0);
     for (const file of ["hill-country.xml", "sd-frame.json"])

@@ -31,6 +31,7 @@ const speedIndex = 45;
 const lapIndex = 49;
 const distanceIndex = 53;
 const stopAt = 3000;
+const passingStopAt = 2240;
 const stopFor = 4;
 const yellowWithin = 30;
 
@@ -58,7 +59,7 @@ function aboutPlayer(m: Raced, at: number): StewardMessage[] {
   );
 }
 
-async function reachStopPoint() {
+async function reachStopPoint(at = stopAt) {
   const m = (await startField({
     kind: sessionKind.race,
     laps: 3,
@@ -71,7 +72,7 @@ async function reachStopPoint() {
   pilot.driveUntil(
     () =>
       (frameOf(m)[lapIndex] ?? 0) === 1 &&
-      (frameOf(m)[distanceIndex] ?? 0) > stopAt,
+      (frameOf(m)[distanceIndex] ?? 0) > at,
   );
   return { m, pilot };
 }
@@ -89,7 +90,7 @@ async function stopMidRace() {
 }
 
 async function stopUntilYellow() {
-  const { m, pilot } = await reachStopPoint();
+  const { m, pilot } = await reachStopPoint(passingStopAt);
   const giveUp = time(m) + yellowWithin;
   while (!flags(m).some((message) => message.car === 0)) {
     if (time(m) > giveUp)
