@@ -32,6 +32,7 @@ const lapIndex = 49;
 const distanceIndex = 53;
 const stopAt = 3000;
 const stopFor = 4;
+const yellowWithin = 30;
 
 function time(m: Weekend): number {
   return frameOf(m)[0] ?? 0;
@@ -85,6 +86,21 @@ async function stopMidRace() {
     if (speed < 0.5 && stoppedAt < 0) stoppedAt = time(m);
   }
   return { m, pilot, stoppedAt };
+}
+
+async function stopUntilYellow() {
+  const { m, pilot } = await reachStopPoint();
+  const giveUp = time(m) + yellowWithin;
+  while (!flags(m).some((message) => message.car === 0)) {
+    if (time(m) > giveUp)
+      throw new Error(
+        `no yellow flag for the stopped player within ${String(yellowWithin)} s`,
+      );
+    const speed = Math.abs(frameOf(m)[speedIndex] ?? 0);
+    m._sdInputAnalog(1, 0, 0, speed > 0.5 ? 1 : 0);
+    m._sdStep(1);
+  }
+  return { m, pilot };
 }
 
 function rival(m: Raced): Float64Array {
@@ -147,7 +163,7 @@ describe.runIf(existsSync(wasm))("yellow flags", () => {
   }, 600_000);
 
   test("cars may pass the player stopped under its own yellow and keep the place", async () => {
-    const { m, pilot } = await stopMidRace();
+    const { m, pilot } = await stopUntilYellow();
     const before = timingOf(m, fieldCars).map((row) => row.position);
     const behind = before.flatMap((position, car) =>
       position > (before[0] ?? 0) ? [car] : [],

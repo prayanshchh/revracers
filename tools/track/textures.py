@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from scipy.ndimage import gaussian_filter
 
 import brands
 from palette import PALETTE, PALETTE_CELLS, TEAMS, shade
@@ -32,6 +33,23 @@ FACADE = (2048, 896)
 FACADE_METRES = (32.0, 14.0)
 TECPRO = (1024, 256)
 FENCE_METAL = (108, 112, 118)
+TURF_PIXELS = 2048
+TURF_SUPERSAMPLE = 2
+TURF_LAYERS = (
+    (0.0, 110000, (5, 11), (62, 76, 32), (84, 100, 40)),
+    (0.35, 140000, (7, 16), (92, 114, 42), (128, 144, 56)),
+    (0.7, 90000, (8, 19), (130, 148, 58), (176, 180, 84)),
+)
+TURF_STRAW = (0.07, (170, 158, 104), (198, 186, 128))
+TURF_SOIL = (58, 62, 34)
+TURF_CLUMP_PERIODS = (8, 16)
+TURF_CLUMP_SHARE = 0.35
+TURF_SEED = 41
+TURF_QUALITY = 88
+GRAVEL_CAVITY_RADIUS = 5.0
+GRAVEL_CAVITY_GAIN = 6.0
+GRAVEL_CAVITY_RANGE = (0.42, 1.08)
+GRAVEL_QUALITY = 90
 
 
 def load(path, mode="RGB"):
@@ -64,6 +82,53 @@ def kerb(source):
     rubber = np.asarray(Image.open(source / "rubber_streaks.png").convert("RGBA").resize((width, height)), np.float32) / 255.0
     alpha = rubber[..., 3:4] * np.linspace(1.0, 0.25, width)[None, :, None]
     return out * (1 - alpha * 0.9) + rubber[..., :3] * alpha * 0.9
+
+
+def tileable_noise(rng, size, periods):
+    out = np.zeros((size, size), np.float32)
+    for period in periods:
+        coarse = rng.normal(0, 1, (period, period)).astype(np.float32)
+        tiled = np.tile(coarse, (3, 3))
+        image = Image.fromarray(tiled).resize((size * 3, size * 3), Image.BICUBIC)
+        out += np.asarray(image, np.float32)[size : 2 * size, size : 2 * size]
+    return out / out.std()
+
+
+def turf():
+    rng = np.random.default_rng(TURF_SEED)
+    size = TURF_PIXELS * TURF_SUPERSAMPLE
+    colour = Image.new("RGB", (size, size), TURF_SOIL)
+    paint = ImageDraw.Draw(colour)
+    clumps = tileable_noise(rng, TURF_PIXELS, TURF_CLUMP_PERIODS)
+    for base, count, length, low, high in TURF_LAYERS:
+        x, y = rng.uniform(0, size, count), rng.uniform(0, size, count)
+        angle = rng.uniform(0, np.pi, count)
+        reach = rng.uniform(*length, count) * TURF_SUPERSAMPLE
+        cell = clumps[(y / TURF_SUPERSAMPLE).astype(int) % TURF_PIXELS, (x / TURF_SUPERSAMPLE).astype(int) % TURF_PIXELS]
+        shade = np.clip(rng.uniform(0, 1, count) * (1 - TURF_CLUMP_SHARE) + (cell * 0.5 + 0.5) * TURF_CLUMP_SHARE, 0, 1)
+        straw = rng.uniform(0, 1, count) < TURF_STRAW[0]
+        lo, hi = np.array(low, np.float32), np.array(high, np.float32)
+        tones = lo[None] + (hi - lo)[None] * shade[:, None]
+        dead = np.array(TURF_STRAW[1], np.float32) + (np.array(TURF_STRAW[2], np.float32) - np.array(TURF_STRAW[1], np.float32)) * rng.uniform(0, 1, (count, 1))
+        tones = np.where(straw[:, None], dead, tones)
+        widths = rng.integers(2, 4, count)
+        for k in range(count):
+            dx, dy = np.cos(angle[k]) * reach[k], np.sin(angle[k]) * reach[k]
+            tone = tuple(int(v * (0.82 + 0.18 * base)) for v in tones[k])
+            for ox in (0, -size, size) if x[k] < reach[k] or x[k] > size - reach[k] else (0,):
+                for oy in (0, -size, size) if y[k] < reach[k] or y[k] > size - reach[k] else (0,):
+                    a = (x[k] + ox - dx / 2, y[k] + oy - dy / 2)
+                    b = (x[k] + ox + dx / 2, y[k] + oy + dy / 2)
+                    paint.line([a, b], fill=tone, width=int(widths[k]))
+    return colour.resize((TURF_PIXELS, TURF_PIXELS), Image.LANCZOS)
+
+
+def gravel(source):
+    colour = load(source / "gravel_floor_base_color.jpg")
+    height = load(source / "gravel_floor_height.jpg", "L")
+    surround = gaussian_filter(height, GRAVEL_CAVITY_RADIUS, mode="wrap")
+    cavity = np.clip(1 + (height - surround) * GRAVEL_CAVITY_GAIN, *GRAVEL_CAVITY_RANGE)
+    return colour * cavity[..., None]
 
 
 def streaks():
@@ -425,6 +490,10 @@ def main():
     save(grass(source), out / "grass_base_color.jpg")
     save(kerb(source), out / "kerb_base_color.png")
     streaks().save(root / "textures" / "baked" / "asphalt_streaks.png")
+    turf().save(root / "textures" / "baked" / "turf_base_color.jpg", quality=TURF_QUALITY, subsampling=0)
+    Image.fromarray(np.clip(np.round(gravel(source) * 255.0), 0, 255).astype(np.uint8)).save(
+        root / "textures" / "baked" / "gravel_base_color.jpg", quality=GRAVEL_QUALITY, subsampling=0
+    )
     save(brands.boards(build_fonts(out)), out / "boards_base_color.png")
     save(tecpro(), out / "tecpro_base_color.png")
     chainlink().save(out / "chainlink_base_color.png")

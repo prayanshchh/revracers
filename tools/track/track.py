@@ -569,12 +569,15 @@ def dense_centreline(points, n, width, step):
     return dense, np.stack([-tangent[:, 1], tangent[:, 0]], 1), half
 
 
-def dense_kerbs(root, build, dense, normal, half, length, pit_rows, surfaces):
+def dense_kerbs(root, build, dense, normal, half, walls, length, pit_rows, surfaces):
     factor = len(dense) // len(pit_rows)
     blocked = np.repeat(pit_rows, factor)
     step = length / len(dense)
-    spans = aerial.bake(root / "source", dense, normal, half, step, blocked, root / "textures" / "baked", build)
-    return spans or surfaces
+    position = np.arange(len(dense)) / factor
+    count = len(pit_rows)
+    dense_walls = np.stack([np.interp(position, np.arange(count + 1), np.append(w, w[0])) for w in walls], 1)
+    spans, gravel, sealed = aerial.bake(root / "source", dense, normal, half, dense_walls, step, blocked, root / "textures" / "baked", build)
+    return spans or surfaces, gravel, sealed
 
 
 def main():
@@ -617,7 +620,7 @@ def main():
     pit_rows[zone] = True
     build = Path(sys.argv[2] if len(sys.argv) > 2 else "build/hill-country")
     dense, dense_n, dense_half = dense_centreline(points, n, width, step)
-    surfaces = dense_kerbs(root, build, dense, dense_n, dense_half, length, pit_rows, surfaces)
+    surfaces, gravel, sealed = dense_kerbs(root, build, dense, dense_n, dense_half, (wall_left, wall_right), length, pit_rows, surfaces)
     ground_height = Ground(Terrain(root / "source" / "dem.png", osm, GROUND_SMOOTHING), points, n, width, camber, centre, extents)
     track = {
         "id": "hill-country",
@@ -638,6 +641,8 @@ def main():
             for p, h, w, c, wl, wr in zip(points, centre, width, camber, wall_left, wall_right)
         ],
         "surfaces": surfaces,
+        "gravel": gravel,
+        "sealed": sealed,
         "pitLane": {
             **pit_lane(layout, zone, points, n, centre, camber, wall_left, origin_height),
             "garageStart": round(float(garage_rows[0]) * step, 3),

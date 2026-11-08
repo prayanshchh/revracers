@@ -20,6 +20,7 @@ AERIAL_SERVICE = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPP
 AERIAL_METRES_PER_PIXEL = 0.3
 AERIAL_TILE = 4000
 AERIAL_QUALITY = 92
+NEAR_INFRARED_BAND = "3"
 FONT_REPOSITORY = "https://raw.githubusercontent.com/google/fonts/main"
 REGION_SERVICE = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/export"
 REGION_SIZE = 44000
@@ -92,33 +93,36 @@ def fetch_dem(out):
     Image.fromarray(centimetres.astype(np.uint16)).save(out)
 
 
-def aerial_tile(service, xmin, ymin, xmax, ymax, width, height):
+def aerial_tile(service, xmin, ymin, xmax, ymax, width, height, bands="0,1,2", mode="RGB"):
     url = (
         f"{service}?bbox={xmin},{ymin},{xmax},{ymax}&bboxSR=32614&imageSR=32614"
-        f"&size={width},{height}&format=png&pixelType=U8&bandIds=0,1,2&interpolation=RSP_BilinearInterpolation&f=image"
+        f"&size={width},{height}&format=png&pixelType=U8&bandIds={bands}&interpolation=RSP_BilinearInterpolation&f=image"
     )
     for attempt in range(6):
         body = get(url)
         if body[:4] == b"\x89PNG":
-            return Image.open(io.BytesIO(body)).convert("RGB")
+            return Image.open(io.BytesIO(body)).convert(mode)
         time.sleep(5 * (attempt + 1))
     raise RuntimeError(f"imagery service refused tile {xmin},{ymin}")
 
 
-def fetch_aerial(out):
+def fetch_aerial(out, bands="0,1,2", mode="RGB"):
     x0, y0 = DEM_ORIGIN
     span_x, span_y = DEM_SIZE
     width = int(round(span_x / AERIAL_METRES_PER_PIXEL))
     height = int(round(span_y / AERIAL_METRES_PER_PIXEL))
-    image = Image.new("RGB", (width, height))
+    image = Image.new(mode, (width, height))
     for top in range(0, height, AERIAL_TILE):
         for left in range(0, width, AERIAL_TILE):
             w, h = min(AERIAL_TILE, width - left), min(AERIAL_TILE, height - top)
             xmin = x0 + left * AERIAL_METRES_PER_PIXEL
             ymax = y0 - top * AERIAL_METRES_PER_PIXEL
-            tile = aerial_tile(AERIAL_SERVICE, xmin, ymax - h * AERIAL_METRES_PER_PIXEL, xmin + w * AERIAL_METRES_PER_PIXEL, ymax, w, h)
+            tile = aerial_tile(AERIAL_SERVICE, xmin, ymax - h * AERIAL_METRES_PER_PIXEL, xmin + w * AERIAL_METRES_PER_PIXEL, ymax, w, h, bands, mode)
             image.paste(tile, (left, top))
-    image.save(out, quality=AERIAL_QUALITY, subsampling=0)
+    if out.suffix == ".png":
+        image.save(out)
+    else:
+        image.save(out, quality=AERIAL_QUALITY, subsampling=0)
 
 
 def fetch_region(dem_out, aerial_out):
@@ -163,6 +167,8 @@ def main():
         fetch_dem(source / "dem.png")
     if not (source / "aerial.jpg").exists():
         fetch_aerial(source / "aerial.jpg")
+    if not (source / "aerial-nir.png").exists():
+        fetch_aerial(source / "aerial-nir.png", NEAR_INFRARED_BAND, "L")
     if not (source / "region-aerial.jpg").exists():
         fetch_region(source / "region-dem.png", source / "region-aerial.jpg")
 

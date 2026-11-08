@@ -223,6 +223,40 @@
           "modification": "JPEG recompression only; 2048px maintained, normal map is OpenGL +Y"
         }
       }
+    },
+    {
+      "id": "gravel_floor_02",
+      "name": "Gravel Floor 02",
+      "authors": {
+        "Dimitrios Savva": "Photography",
+        "Jenelle van Heerden": "Processing"
+      },
+      "source_url": "https://polyhaven.com/a/gravel_floor_02",
+      "real_size_m": [2.0, 2.0],
+      "maps": {
+        "base_color": {
+          "source_file": "textures/source/gravel_floor_base_color.jpg",
+          "download_url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/gravel_floor_02/gravel_floor_02_diff_2k.jpg",
+          "provider_md5": "db7865191e53523b2b9eabc85a7f73c3",
+          "file": "textures/gravel_floor_base_color.jpg",
+          "sha256": "0fc620352b706762f0c0418129d2dc50e03d08f3653318a976f1743dc6f3a8f7",
+          "size_bytes": 2444489,
+          "pixels": [2048, 2048],
+          "colour_space": "sRGB",
+          "modification": "JPEG recompression only; 2048px maintained"
+        },
+        "height": {
+          "source_file": "textures/source/gravel_floor_height.jpg",
+          "download_url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/gravel_floor_02/gravel_floor_02_disp_2k.jpg",
+          "provider_md5": "3b1b0ad87e97f3723c48d1229eb81870",
+          "file": "textures/gravel_floor_height.jpg",
+          "sha256": "d8e0dc301d0c3328a02027eb1768dc3c1ab721a53bd2a2bb5740cc66f3929f06",
+          "size_bytes": 989674,
+          "pixels": [2048, 2048],
+          "colour_space": "Non-Color",
+          "modification": "JPEG recompression only; 2048px maintained; displacement stored as one grey channel"
+        }
+      }
     }
   ]
 }

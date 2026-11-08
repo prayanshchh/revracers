@@ -37,14 +37,21 @@ import apronBUrl from "../../../../content/tracks/hill-country/textures/baked/ap
 import streaksUrl from "../../../../content/tracks/hill-country/textures/baked/asphalt_streaks.png?url";
 import terrainUrl from "../../../../content/tracks/hill-country/textures/baked/terrain_albedo.jpg?url";
 import grainUrl from "../../../../content/tracks/hill-country/textures/source/asphalt_track_base_color.jpg?url";
+import gravelUrl from "../../../../content/tracks/hill-country/textures/baked/gravel_base_color.jpg?url";
+import gravelHeightUrl from "../../../../content/tracks/hill-country/textures/source/gravel_floor_height.jpg?url";
+import turfUrl from "../../../../content/tracks/hill-country/textures/baked/turf_base_color.jpg?url";
 import { frustumContains, type SphereTest } from "./world-culler.ts";
 import {
   asphaltDetail,
   type AsphaltDetail,
+  gravelBed,
+  type GravelMaps,
   lushGrass,
   mownAlong,
   mownWorld,
+  screenBump,
   shadeKerb,
+  turf,
 } from "./track-surface.ts";
 import { releaseOnceUploaded } from "./preload.ts";
 import { reliefKerbs } from "./kerb-relief.ts";
@@ -68,8 +75,12 @@ const streakAlong = 1 / 24;
 const apronShade = 0.5;
 const grassMean = 0.315;
 const grassDetail = 0.75;
+const growingFrom = 0.004;
+const growingFull = 0.02;
 const terrainGain = 0.62;
 const apronReach = 60;
+const grassTile = 3;
+const detailAnisotropy = 4;
 const maskEdge = 0.012;
 const paintGrain = 0.24;
 const paintRed = vec3(0.44, 0.052, 0.042);
@@ -122,6 +133,7 @@ const mirrorPaint = 0.22;
 const kerbWetDarkening = 0.3;
 const kerbMaterial = "track road kerb";
 const grassWetDarkening = 0.1;
+const gravelWetDarkening = 0.38;
 const sealedWetDarkening = 0.42;
 const rubberDarkening = 0.42;
 const rubberSmoothing = 0.3;
@@ -301,6 +313,7 @@ const withTyreSunlight = ((shadow: ReturnType<typeof tyreSunlight>) =>
 const wetLine = uniform(0).setGroup(renderGroup);
 const wetOff = uniform(0).setGroup(renderGroup);
 const sealedShare = new WeakMap<THREE.Material, THREE.Node<"float">>();
+const gravelShare = new WeakMap<THREE.Material, THREE.Node<"float">>();
 const asphaltDetails = new WeakMap<THREE.Material, AsphaltDetail>();
 
 export function setWetness(line: number, off: number): void {
@@ -530,9 +543,13 @@ function wetGrass(
 ): void {
   const wet = wetOf(wetOff);
   const sealed = sealedShare.get(material);
-  const darkening = sealed
-    ? mix(float(grassWetDarkening), float(sealedWetDarkening), sealed)
+  const gravel = gravelShare.get(material);
+  const loose = gravel
+    ? mix(float(grassWetDarkening), float(gravelWetDarkening), gravel)
     : float(grassWetDarkening);
+  const darkening = sealed
+    ? mix(loose, float(sealedWetDarkening), sealed)
+    : loose;
   material.colorNode = (material.colorNode ?? materialColor).mul(
     float(1).sub(darkening.mul(wet)),
   );
@@ -568,6 +585,19 @@ export interface BakedGround {
   streaks: THREE.Texture;
   terrain: THREE.Texture;
   grain: THREE.Texture;
+  natural?: NaturalGround;
+}
+
+interface NaturalGround {
+  gravel: GravelMaps;
+  turf: THREE.Texture;
+}
+
+interface Ground {
+  colour: THREE.Node<"vec3">;
+  cover: THREE.Node<"float">;
+  roughness: THREE.Node<"float">;
+  relief: THREE.Node<"float"> | null;
 }
 
 function rubber() {
@@ -634,6 +664,49 @@ function grassDetailFrom(source: THREE.MeshStandardMaterial) {
   return mix(float(1), detail, grassDetail);
 }
 
+function plainGrass(
+  source: THREE.MeshStandardMaterial,
+  baked: BakedGround,
+  lateral: THREE.Node<"float">,
+): Ground {
+  const colour = lushGrass(
+    texture(baked.terrain, uv(2)).rgb.mul(terrainGain),
+    float(1),
+  )
+    .mul(grassDetailFrom(source))
+    .mul(mownAlong(lateral));
+  return {
+    colour,
+    cover: float(0),
+    roughness: float(grassRoughness),
+    relief: null,
+  };
+}
+
+function grassAndGravel(
+  natural: NaturalGround,
+  baked: BakedGround,
+  field: THREE.Node<"float">,
+  lateral: THREE.Node<"float">,
+): Ground {
+  const along = uv().y.mul(grassTile);
+  const gravel = gravelBed(natural.gravel, field, lateral, along);
+  const lawn = turf(
+    natural.turf,
+    texture(baked.terrain, uv(2)).rgb.mul(terrainGain),
+  );
+  return {
+    colour: mix(
+      lawn.colour.mul(mownAlong(lateral)),
+      gravel.colour,
+      gravel.cover,
+    ),
+    cover: gravel.cover,
+    roughness: gravel.roughness,
+    relief: mix(lawn.relief, gravel.relief, gravel.cover),
+  };
+}
+
 function crisp(mask: THREE.Node) {
   const field = mask as ReturnType<typeof float>;
   const edge = fwidth(field).max(maskEdge);
@@ -648,7 +721,6 @@ function shadeApron(
   if (!source.map) return;
   const a = texture(baked.apronA, uv(1));
   const b = texture(baked.apronB, uv(1));
-  const detail = grassDetailFrom(source);
   const concrete = crisp(b.r);
   const paved = crisp(b.g);
   const teal = crisp(a.g);
@@ -656,12 +728,9 @@ function shadeApron(
   const red = crisp(a.r);
   const white = crisp(a.a);
   const lateral = uv(1).x.mul(2).sub(1).mul(apronReach);
-  const grass = lushGrass(
-    texture(baked.terrain, uv(2)).rgb.mul(terrainGain),
-    float(1),
-  )
-    .mul(detail)
-    .mul(mownAlong(lateral));
+  const ground = baked.natural
+    ? grassAndGravel(baked.natural, baked, b.a, lateral)
+    : plainGrass(source, baked, lateral);
   const hard = mix(
     float(1),
     texture(baked.grain, uv())
@@ -669,7 +738,7 @@ function shadeApron(
       .div(asphaltMean),
     paintGrain,
   );
-  let color = mix(grass, concreteColor.mul(hard), concrete);
+  let color = mix(ground.colour, concreteColor.mul(hard), concrete);
   color = mix(color, runoffAsphalt.mul(hard), paved);
   color = mix(color, paintTeal.mul(hard), teal);
   color = mix(color, paintBlue.mul(hard), blue);
@@ -677,12 +746,20 @@ function shadeApron(
   color = mix(color, paintWhite.mul(hard), white);
   material.colorNode = color;
   const sealed = concrete.max(paved).max(teal).max(blue).max(red).max(white);
+  const loose = ground.cover.mul(sealed.oneMinus());
   sealedShare.set(material, sealed);
+  gravelShare.set(material, loose);
   material.roughnessNode = mix(
-    float(grassRoughness),
+    mix(float(grassRoughness), ground.roughness, loose),
     float(paintRoughness),
     sealed,
   );
+  if (ground.relief)
+    material.normalNode = mix(
+      screenBump(ground.relief, 1),
+      materialNormal,
+      sealed,
+    ).normalize();
 }
 
 function shadeTerrain(
@@ -691,13 +768,22 @@ function shadeTerrain(
   baked: BakedGround,
 ): void {
   if (!source.map) return;
-  material.colorNode = lushGrass(
-    texture(baked.terrain, uv(1)).rgb.mul(terrainGain),
-    float(0),
-  )
-    .mul(grassDetailFrom(source))
-    .mul(mownWorld());
+  const photo = texture(baked.terrain, uv(1)).rgb.mul(terrainGain);
   material.roughnessNode = float(grassRoughness);
+  if (!baked.natural) {
+    material.colorNode = lushGrass(photo, float(0))
+      .mul(grassDetailFrom(source))
+      .mul(mownWorld());
+    return;
+  }
+  const lawn = turf(baked.natural.turf, photo, false);
+  const growing = smoothstep(
+    float(growingFrom),
+    float(growingFull),
+    photo.g.sub(photo.b),
+  );
+  material.colorNode = mix(photo, lawn.colour.mul(mownWorld()), growing);
+  material.normalNode = screenBump(lawn.relief.mul(growing), 1);
 }
 
 function shadeAsphaltSurface(
@@ -834,16 +920,32 @@ async function loadBaked(
     map.anisotropy = anisotropy;
     return map;
   };
-  const [apronA, apronB, streaks, terrain, grain] = await Promise.all([
-    load(apronAUrl, THREE.NoColorSpace),
-    load(apronBUrl, THREE.NoColorSpace),
-    load(streaksUrl, THREE.NoColorSpace),
-    load(terrainUrl, THREE.SRGBColorSpace),
-    load(grainUrl, THREE.SRGBColorSpace),
-  ]);
-  streaks.wrapS = THREE.RepeatWrapping;
-  grain.wrapS = THREE.RepeatWrapping;
-  return { apronA, apronB, streaks, terrain, grain };
+  const [apronA, apronB, streaks, terrain, grain, gravel, gravelHeight, lawn] =
+    await Promise.all([
+      load(apronAUrl, THREE.NoColorSpace),
+      load(apronBUrl, THREE.NoColorSpace),
+      load(streaksUrl, THREE.NoColorSpace),
+      load(terrainUrl, THREE.SRGBColorSpace),
+      load(grainUrl, THREE.SRGBColorSpace),
+      load(gravelUrl, THREE.SRGBColorSpace),
+      load(gravelHeightUrl, THREE.NoColorSpace),
+      load(turfUrl, THREE.SRGBColorSpace),
+    ]);
+  for (const map of [streaks, grain, gravel, gravelHeight, lawn])
+    map.wrapS = THREE.RepeatWrapping;
+  for (const map of [gravel, gravelHeight, lawn])
+    map.anisotropy = Math.min(anisotropy, detailAnisotropy);
+  return {
+    apronA,
+    apronB,
+    streaks,
+    terrain,
+    grain,
+    natural: {
+      gravel: { albedo: gravel, height: gravelHeight, streaks },
+      turf: lawn,
+    },
+  };
 }
 
 export async function loadRoad(

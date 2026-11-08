@@ -21,7 +21,7 @@ import {
 } from "./car-damage.ts";
 import { Debris, type Ground, type Walls } from "./debris.ts";
 import { DamageLog } from "./damage-log.ts";
-import { carField, carStride } from "./frame-layout.ts";
+import { carField, carStride, carWheel } from "./frame-layout.ts";
 import { GltfCar, placeOnTrack, type TrackFrame } from "./gltf.ts";
 import { GridCars, type GridSlot } from "./grid.ts";
 import {
@@ -63,6 +63,13 @@ import {
 import { useFloodAmbient } from "./sky-ambient.ts";
 import { Crowd, crowdData } from "./crowd.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
+import { TyreStones } from "./tyre-stones.ts";
+import {
+  type CarMotion,
+  GravelSpray,
+  grassSurface,
+  type WheelContact,
+} from "./gravel-spray.ts";
 import { tyreWetness } from "./tyre-paint.ts";
 import { frustumContains, WorldCuller } from "./world-culler.ts";
 import type { TyreInfo } from "./tyres.ts";
@@ -360,6 +367,16 @@ async function parkedGrid(
 }
 
 const defaultTextureLimit = 8192;
+const aiWheelRadius = 0.36;
+const gravelFields = 2;
+const gravelStride = 4 * gravelFields;
+
+function offTrack(gravel: Float64Array, car: number): boolean {
+  for (let i = 0; i < 4; i++)
+    if ((gravel[(car * 4 + i) * gravelFields] ?? 0) >= grassSurface)
+      return true;
+  return false;
+}
 
 export class Scene {
   readonly scene = new THREE.Scene();
@@ -391,6 +408,11 @@ export class Scene {
   private shockPeak = 0;
   private shockAt = -Infinity;
   private pastShown = false;
+  private readonly gravel = new GravelSpray();
+  private readonly tyreStones: TyreStones;
+  private readonly gravelMatrix = new THREE.Matrix4();
+  private readonly gravelPoint = new THREE.Vector3();
+  private readonly gravelForward = new THREE.Vector3();
   private readonly damageMatrix = new THREE.Matrix4();
   private readonly damageVelocity = new THREE.Vector3();
   private weather = dryWeather;
@@ -484,8 +506,10 @@ export class Scene {
       this.farRain.mesh,
       this.spray.root,
       this.debris.root,
+      this.gravel.root,
       ...extras,
     );
+    this.tyreStones = new TyreStones(car.tyreMounts());
     const night = light.night >= 1;
     const lit = sessionLighting(skyBox, night);
     this.cloudLight = lit.cloudLight;
@@ -783,6 +807,8 @@ export class Scene {
 
   cutDebris(time: number): void {
     this.debris.cut(time);
+    this.gravel.clear();
+    this.tyreStones.clear();
     this.damageLog.cut(time);
     this.shockPeak = 0;
     this.playerParts.set(
@@ -800,6 +826,94 @@ export class Scene {
   private showLogged(time: number): void {
     for (let i = 0; i < this.damageLog.carCount; i++)
       this.applyCar(i, this.damageLog.partsAt(i, time) ?? this.noDamage);
+  }
+
+  updateGravel(
+    frame: Float64Array,
+    wheels: readonly { spin: number; radius: number }[],
+    gravel: Float64Array,
+  ): void {
+    const player = this.gravelSource(
+      frame,
+      frameIndex.posMat,
+      frame[frameIndex.speed] ?? 0,
+      (i) => [
+        frame[frameIndex.wheels + i * 7] ?? 0,
+        frame[frameIndex.wheels + i * 7 + 1] ?? 0,
+        frame[frameIndex.wheels + i * 7 + 2] ?? 0,
+      ],
+      gravel,
+      0,
+      (i) => wheels[i]?.radius ?? aiWheelRadius,
+      (i, speed) =>
+        Math.abs(wheels[i]?.spin ?? 0) * (wheels[i]?.radius ?? 0) -
+        Math.abs(speed),
+    );
+    const sources = [player];
+    const cars = this.cars;
+    const count = gravel.length / gravelStride;
+    if (cars)
+      for (let k = 1; k < count; k++) {
+        if (!offTrack(gravel, k)) continue;
+        const at = k * carStride;
+        sources.push(
+          this.gravelSource(
+            cars,
+            at,
+            cars[at + carField.speed] ?? 0,
+            (i) => [
+              cars[at + carWheel.from + i * carWheel.stride] ?? 0,
+              cars[at + carWheel.from + i * carWheel.stride + 1] ?? 0,
+              cars[at + carWheel.from + i * carWheel.stride + 2] ?? 0,
+            ],
+            gravel,
+            k,
+            () => aiWheelRadius,
+            () => 0,
+          ),
+        );
+      }
+    this.gravel.update(frame[frameIndex.time] ?? 0, sources);
+    const stones = [0, 1, 2, 3].map((i) => gravel[i * gravelFields + 1] ?? 0);
+    this.tyreStones.update(
+      stones,
+      [0, 1, 2, 3].map((i) => frame[frameIndex.wheels + i * 7 + 6] ?? 0),
+      player.motion,
+      this.gravel,
+    );
+  }
+
+  private gravelSource(
+    source: Float64Array,
+    at: number,
+    speed: number,
+    wheelAt: (i: number) => [number, number, number],
+    gravel: Float64Array,
+    car: number,
+    radius: (i: number) => number,
+    slip: (i: number, speed: number) => number,
+  ): { key: string; motion: CarMotion; wheels: WheelContact[] } {
+    this.gravelMatrix.fromArray(source, at);
+    this.gravelForward.setFromMatrixColumn(this.gravelMatrix, 0).normalize();
+    const motion = {
+      vx: this.gravelForward.x * speed,
+      vy: this.gravelForward.y * speed,
+      vz: 0,
+      fx: this.gravelForward.x,
+      fy: this.gravelForward.y,
+    };
+    const wheels = [0, 1, 2, 3].map((i): WheelContact => {
+      const [x, y, z] = wheelAt(i);
+      this.gravelPoint.set(x, y, z - radius(i)).applyMatrix4(this.gravelMatrix);
+      return {
+        x: this.gravelPoint.x,
+        y: this.gravelPoint.y,
+        z: this.gravelPoint.z,
+        surface: gravel[(car * 4 + i) * gravelFields] ?? 0,
+        slip: slip(i, speed),
+      };
+    });
+    return { key: String(car), motion, wheels };
   }
 
   setWeather(weather: WeatherInfo): void {

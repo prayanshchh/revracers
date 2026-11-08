@@ -169,7 +169,11 @@ describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
       expect(meta.keepTop).toBeLessThan(0.6);
       expect(meta.skyRadiance).toHaveLength(3);
       expect(Math.max(...meta.sunColor)).toBeCloseTo(1, 5);
-      for (const file of [`${name}.hdr`, `${name}-env.hdr`]) {
+      for (const file of [
+        `${name}.hdr`,
+        `${name}-env.hdr`,
+        `${name}-clear.hdr`,
+      ]) {
         const header = readFileSync(path.join(directory, "sky", file))
           .subarray(0, 64)
           .toString("latin1");

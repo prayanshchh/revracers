@@ -26,6 +26,7 @@ const telemetrySize = 40;
 const barrierValues = 8;
 const weatherFields = 13;
 const telemetryWheels = 8;
+const gravelStride = 8;
 
 export interface WheelGrip {
   slip: number;
@@ -726,6 +727,18 @@ export class Engine {
       tyreCondition: wheels(14),
       tyreTread: wheels(18),
     };
+  }
+
+  carsGravel(limit: number): Float64Array {
+    const pointer = this.module._malloc(limit * gravelStride * 8);
+    const count = this.module._sdCarsGravel(pointer, limit);
+    const values = new Float64Array(
+      this.module.HEAPF64.buffer,
+      pointer,
+      count * gravelStride,
+    ).slice();
+    this.module._free(pointer);
+    return values;
   }
 
   tyreInfo(): TyreInfo {
