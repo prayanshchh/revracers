@@ -32,6 +32,7 @@ const lapIndex = 49;
 const distanceIndex = 53;
 const stopAt = 3000;
 const stopFor = 4;
+const yellowWithin = 30;
 
 function time(m: Weekend): number {
   return frameOf(m)[0] ?? 0;
@@ -89,7 +90,12 @@ async function stopMidRace() {
 
 async function stopUntilYellow() {
   const { m, pilot } = await reachStopPoint();
+  const giveUp = time(m) + yellowWithin;
   while (!flags(m).some((message) => message.car === 0)) {
+    if (time(m) > giveUp)
+      throw new Error(
+        `no yellow flag for the stopped player within ${String(yellowWithin)} s`,
+      );
     const speed = Math.abs(frameOf(m)[speedIndex] ?? 0);
     m._sdInputAnalog(1, 0, 0, speed > 0.5 ? 1 : 0);
     m._sdStep(1);

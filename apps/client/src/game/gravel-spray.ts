@@ -331,7 +331,10 @@ export class GravelSpray {
   }
 
   clear(): void {
-    for (const stone of this.flying) stone.live = false;
+    this.flying.forEach((stone, i) => {
+      stone.live = false;
+      this.stones.setMatrixAt(i, this.matrix.makeScale(0, 0, 0));
+    });
     for (const puff of this.puffs) puff.life = 0;
     this.owed.clear();
     this.lastTime = null;

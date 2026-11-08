@@ -29,6 +29,8 @@ interface Track {
   };
   sectors: number[];
   grid: { distance: number }[];
+  gravel: [number, number, number][];
+  sealed: [number, number, number][];
 }
 
 const directory = path.join(repoRoot, "content/tracks/hill-country");
@@ -141,6 +143,13 @@ describe("Hill Country track.json", () => {
       expect(d).toBeLessThan(track.length);
     }
     expect([...track.sectors].sort((a, b) => a - b)).toEqual(track.sectors);
+  });
+
+  test("puts every gravel and sealed span in the middle of one of the engine's 1 m rows", () => {
+    for (const [distance] of [...track.gravel, ...track.sealed]) {
+      expect(distance - Math.floor(distance)).toBeCloseTo(0.5, 6);
+      expect(distance).toBeLessThan(Math.ceil(track.length));
+    }
   });
 });
 

@@ -132,17 +132,16 @@ def gravel_beds(sample, found, lateral, half, walls, row_metres):
 
 
 def gravel_spans(beds, lateral, row_metres):
-    per = max(1, int(round(GRAVEL_SPAN_ROW / row_metres)))
-    rows = beds.shape[0] // per
-    coarse = beds[: rows * per].reshape(rows, per, -1).mean(1) > 0.5
+    owner = ((np.arange(beds.shape[0]) + 0.5) * row_metres / GRAVEL_SPAN_ROW).astype(int)
+    starts = np.flatnonzero(np.diff(owner, prepend=-1))
+    coarse = np.add.reduceat(beds.astype(np.float32), starts, axis=0) > 0.5 * np.diff(np.append(starts, len(owner)))[:, None]
     spans = []
-    for row in range(rows):
-        line = coarse[row]
+    for row, line in zip(owner[starts], coarse):
         edges = np.flatnonzero(np.diff(np.concatenate([[0], line.astype(np.int8), [0]])))
         for start, end in zip(edges[::2], edges[1::2]):
             near, far = lateral[start] - LATERAL_STEP / 2, lateral[end - 1] + LATERAL_STEP / 2
             if far - near >= GRAVEL_SPAN_MIN:
-                spans.append([round((row + 0.5) * per * row_metres, 2), round(float(near), 2), round(float(far), 2)])
+                spans.append([round((row + 0.5) * GRAVEL_SPAN_ROW, 2), round(float(near), 2), round(float(far), 2)])
     return spans
 
 
