@@ -14,6 +14,7 @@ interface GravelEngine extends SpeedDreams {
     speed: number,
   ) => void;
   _sdCarsGravel: (pointer: number, limit: number) => number;
+  _sdCarsDamage: (pointer: number) => number;
 }
 
 const lateralIndex = 54;
@@ -39,6 +40,14 @@ async function placed(
   };
   place(spot, speed);
   const memory = m._malloc(4 * fields * 8);
+  const parts = m._malloc(64 * 8);
+  const damage = () => {
+    const count = m._sdCarsDamage(parts);
+    return new Float64Array(m.HEAPF64.buffer, parts, count).reduce(
+      (sum, part) => sum + part,
+      0,
+    );
+  };
   const frame = () => new Float64Array(m.HEAPF64.buffer, m._sdFrame(), 88);
   const wheels = () => {
     m._sdCarsGravel(memory, 1);
@@ -64,12 +73,12 @@ async function placed(
       m._sdStep(1);
     }
   };
-  return { place, wheels, drive };
+  return { place, wheels, drive, damage };
 }
 
 describe.runIf(existsSync(wasm))("gravel traps in the engine", () => {
   test("wheels in a gravel bed report gravel and pick up stones that shed on the road", async () => {
-    const { place, wheels, drive } = await placed(gravelBed, 10);
+    const { place, wheels, drive, damage } = await placed(gravelBed, 10);
     drive(300, 0, gravelBed.lateral);
     const inBed = wheels();
     expect(inBed.map((w) => w.surface)).toEqual([
@@ -89,6 +98,7 @@ describe.runIf(existsSync(wasm))("gravel traps in the engine", () => {
       asphalt,
     ]);
     for (const wheel of onRoad) expect(wheel.stones).toBeLessThan(0.2);
+    expect(damage()).toBe(0);
   }, 60_000);
 
   test("grass throws debris but painted run-off does not", async () => {

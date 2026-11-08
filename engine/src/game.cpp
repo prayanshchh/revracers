@@ -999,6 +999,7 @@ EMSCRIPTEN_KEEPALIVE void sdCarPlace(int index, double distance, double lateral,
     trans.clutch.transferValue = 1.0f;
     elt->_gearCmd = gear;
     car->engine.rads = (tdble)std::max((double)car->engine.tickover, wheelRads * trans.curOverallRatio);
+    sdCarStatusTeleported(index);
 }
 
 EMSCRIPTEN_KEEPALIVE double sdTrackLength()
