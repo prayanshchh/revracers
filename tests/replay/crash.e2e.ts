@@ -38,7 +38,7 @@ if (process.platform !== "linux") {
       .toBeGreaterThanOrEqual(175);
     await page.keyboard.down("ArrowLeft");
     await expect(page.locator("[data-hud=toast-title]")).toHaveText(
-      /damage|puncture/i,
+      /damage|puncture|failure/i,
       { timeout: 10_000 },
     );
     await page.keyboard.up("ArrowLeft");

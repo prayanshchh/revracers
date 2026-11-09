@@ -1,7 +1,10 @@
 import wasmUrl from "../../wasm/speed-dreams.wasm?url";
+import { currentDriver, type Driver } from "./api.ts";
 import { carFile, defaultTeam, liteCarFiles } from "./car-files.ts";
 import { circuitFiles, circuitOf, trainingGround } from "./circuits.ts";
 import { fetchEarly } from "./early.ts";
+import { showStill } from "./school-still.ts";
+import { openAudio } from "./sound/open-audio.ts";
 import { trainingTextures } from "./training-files.ts";
 
 const openingKey = "revracers.introPlayed";
@@ -41,12 +44,17 @@ function newcomer(): boolean {
   );
 }
 
+let ahead: boolean | null = null;
+let driver: Promise<Driver | null> | null = null;
+let fresh = false;
+let audio: AudioContext | null = null;
+
 function schoolAhead(params: URLSearchParams): boolean {
-  return (
+  ahead ??=
     newcomer() ||
     params.has("tutorial") ||
-    stored(sessionStorage, "revracers.tutorialRun") === "1"
-  );
+    stored(sessionStorage, "revracers.tutorialRun") === "1";
+  return ahead;
 }
 
 function teamOf(params: URLSearchParams): string {
@@ -80,10 +88,30 @@ export function openingShow(): boolean {
   return show;
 }
 
+export function schoolDriver(): Promise<Driver | null> | null {
+  return driver;
+}
+
+export function freshPlayer(): boolean {
+  return fresh;
+}
+
+export function gameAudio(): AudioContext {
+  audio ??= openAudio();
+  return audio;
+}
+
 export function fetchSchoolEarly(): void {
   if (!schoolFirst()) return;
+  fresh = stored(localStorage, "revracers.player") === null;
+  driver = currentDriver();
+  if ("requestIdleCallback" in globalThis)
+    requestIdleCallback(gameAudio, { timeout: 1000 });
+  else setTimeout(gameAudio, 300);
   const params = new URLSearchParams(location.search);
-  const car = liteCarFiles(teamOf(params));
+  const team = teamOf(params);
+  if (team === defaultTeam) showStill();
+  const car = liteCarFiles(team);
   const geometry = car.filter((url) => url.endsWith(".bin"));
   fetchEarly([wasmUrl, ...circuitFiles(circuitOf(trainingGround))], geometry, [
     ...trainingTextures,

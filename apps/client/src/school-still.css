@@ -1,0 +1,84 @@
+.school-still {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+  background: rgb(30 31 35);
+  color: #fff;
+  font-family: "Saira Variable", "Saira", system-ui, sans-serif;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.school-still.gone {
+  opacity: 0;
+}
+
+body[data-drive-status="error"] .school-still {
+  display: none;
+}
+
+.school-still-frame {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 100%;
+  translate: -50% 0;
+}
+
+.school-still-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 860px;
+  box-sizing: border-box;
+  padding: 24px 34px 28px;
+  text-align: center;
+  translate: -50% -50%;
+  scale: var(--s);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.school-still-card.school-still-in {
+  opacity: 1;
+}
+
+.school-still-title,
+.school-still-body {
+  text-shadow:
+    0 1px 3px rgb(0 0 0 / 80%),
+    0 0 22px rgb(0 0 0 / 70%);
+}
+
+.school-still-title {
+  margin: 0;
+  font-size: 40px;
+  font-stretch: 125%;
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+
+.school-still-body {
+  margin: 10px 0 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.school-still-wait {
+  position: absolute;
+  left: 50%;
+  bottom: calc(48px * var(--s));
+  translate: -50% 0;
+  opacity: 0;
+  animation: school-still-wait 0.6s ease 4s forwards;
+}
+
+@keyframes school-still-wait {
+  to {
+    opacity: 1;
+  }
+}

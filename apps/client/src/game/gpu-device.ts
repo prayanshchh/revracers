@@ -1,0 +1,45 @@
+const wantedFeatures: GPUFeatureName[] = [
+  "core-features-and-limits",
+  "depth-clip-control",
+  "depth32float-stencil8",
+  "texture-compression-bc",
+  "texture-compression-bc-sliced-3d",
+  "texture-compression-etc2",
+  "texture-compression-astc",
+  "texture-compression-astc-sliced-3d",
+  "timestamp-query",
+  "indirect-first-instance",
+  "shader-f16",
+  "rg11b10ufloat-renderable",
+  "bgra8unorm-storage",
+  "float32-filterable",
+  "float32-blendable",
+  "clip-distances",
+  "dual-source-blending",
+  "subgroups",
+  "texture-formats-tier1",
+  "texture-formats-tier2",
+];
+
+let opening: Promise<GPUDevice | null> | null = null;
+
+async function open(): Promise<GPUDevice | null> {
+  const adapter = await navigator.gpu.requestAdapter({
+    featureLevel: "compatibility",
+  });
+  if (!adapter) return null;
+  return adapter.requestDevice({
+    requiredFeatures: wantedFeatures.filter((name) =>
+      adapter.features.has(name),
+    ),
+    requiredLimits: {
+      maxTextureDimension2D: adapter.limits.maxTextureDimension2D,
+    },
+  });
+}
+
+export function gpuDevice(): Promise<GPUDevice | null> {
+  opening ??=
+    "gpu" in navigator ? open().catch(() => null) : Promise.resolve(null);
+  return opening;
+}

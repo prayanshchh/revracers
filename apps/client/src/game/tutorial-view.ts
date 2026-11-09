@@ -51,9 +51,9 @@ export class TutorialScreen {
   private readonly dim = el("div", "tut-dim");
   private readonly spot = el("div", "tut-spot");
   private readonly stack = el("div", "tut-stack");
-  private readonly card = el("section", "tut-card");
+  private readonly card = el("section", "tut-card card-band");
   private readonly coach = el("div", "tut-coach");
-  private readonly alert = el("section", "tut-alert");
+  private readonly alert = el("section", "tut-alert card-band");
   private readonly toast = el("div", "tut-toast");
   private readonly chime = new Chime();
   private shownKey = "";

@@ -1,6 +1,7 @@
 import { mfdPages } from "./mfd.ts";
 import type { PitPhase } from "./pitstop.ts";
 import type { Cue } from "./racing-line.ts";
+import { welcomeCard } from "./school-card.ts";
 import type { Turn } from "./stewards.ts";
 
 type Control = "keyboard" | "phone";
@@ -122,6 +123,7 @@ const reads = {
   finish: 2,
 } as const;
 const tourRead = 1.5;
+const welcomeAfterStill = 1.5;
 const resumeSpeed = 25 / 3.6;
 const rewindSpeed = 15 / 3.6;
 const phoneReads = {
@@ -216,11 +218,7 @@ function welcomeSteps(): Step[] {
       id: "welcome",
       mode: "modal",
       hold: true,
-      card: () =>
-        card(
-          "Driving School",
-          "One lap to learn the basics. Press Esc to skip.",
-        ),
+      card: () => card(welcomeCard.title, welcomeCard.body),
       done: after(reads.welcome),
     },
     {
@@ -733,7 +731,10 @@ export class Tutorial {
   private menuWas = false;
   private result: Finish | null = null;
 
-  constructor(course: Course) {
+  constructor(
+    course: Course,
+    private readonly welcomeSeen = 0,
+  ) {
     this.steps = script(course);
   }
 
@@ -885,7 +886,7 @@ export class Tutorial {
   private begin(s: TutorialSample): void {
     const c = this.context;
     this.begun = true;
-    this.startedAt = s.now;
+    this.startedAt = s.now - this.headStart();
     c.age = 0;
     c.commanded = false;
     c.startCameras = s.cameras;
@@ -895,6 +896,14 @@ export class Tutorial {
     c.heldSince = null;
     c.reversed = 0;
     c.reverseAt = null;
+  }
+
+  private headStart(): number {
+    if (this.current?.id !== "welcome") return 0;
+    return Math.max(
+      0,
+      Math.min(this.welcomeSeen, reads.welcome - welcomeAfterStill),
+    );
   }
 
   private watchPit(s: TutorialSample, events: TutorialEvent[]): boolean {

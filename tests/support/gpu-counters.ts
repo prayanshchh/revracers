@@ -12,7 +12,10 @@ declare global {
 export function countGpuObjects(): void {
   const counters: Counters = { pipelines: 0, buffers: 0 };
   Object.defineProperty(window, "gpuCounters", { value: counters });
-  const count = (method: "createRenderPipeline" | "createBuffer") => {
+  const count = (
+    method:
+      "createRenderPipeline" | "createRenderPipelineAsync" | "createBuffer",
+  ) => {
     const original = Object.getOwnPropertyDescriptor(
       GPUDevice.prototype,
       method,
@@ -26,5 +29,6 @@ export function countGpuObjects(): void {
     });
   };
   count("createRenderPipeline");
+  count("createRenderPipelineAsync");
   count("createBuffer");
 }

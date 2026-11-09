@@ -95,6 +95,10 @@ export class TyreStones {
     });
   }
 
+  get meshes(): THREE.InstancedMesh[] {
+    return this.tyres.map((tyre) => tyre.mesh);
+  }
+
   update(
     loads: readonly number[],
     spins: readonly number[],
