@@ -2,7 +2,7 @@ import { type SpeedDreams, startCircuit } from "./speed-dreams.ts";
 
 export const wheelFields = 15;
 const tyreFields = 64;
-const energyFields = 17;
+const energyFields = 21;
 
 export interface Options {
   compound?: number;
@@ -123,6 +123,8 @@ export function energyReader(m: RaceSystems) {
       armed: v[10] === 1,
       deployLevel: v[15] ?? 0,
       straight: v[16] ?? 0,
+      enabled: v[19] === 1,
+      lowGrip: v[20] === 1,
     };
   };
 }

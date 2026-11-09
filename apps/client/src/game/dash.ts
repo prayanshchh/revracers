@@ -47,6 +47,11 @@ export function ersState(energy: EnergyInfo, previous: ErsState): ErsState {
   return previous === "deploy" ? "deploy" : "harvest";
 }
 
+function straightModeState(energy: EnergyInfo): string {
+  if (energy.straightMode >= 0.5) return "1";
+  return energy.straightEnabled ? "ready" : "";
+}
+
 export function revLeds(fraction: number): number {
   const lit = Math.round(
     ((fraction - revStart) / (revFull - revStart)) * revLedCount,
@@ -339,7 +344,7 @@ export class Dash {
     this.ers = ersState(energy, this.ers);
     const dash = this.find("dash");
     putData(dash, "ers", this.ers);
-    putData(dash, "smode", energy.straightMode >= 0.5 ? "1" : "");
+    putData(dash, "smode", straightModeState(energy));
     putText(this.find("batt"), `${String(Math.round(share * 100))}%`);
     putText(this.find("status"), ersLabels[this.ers]);
     putStyle(

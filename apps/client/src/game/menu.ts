@@ -1039,7 +1039,7 @@ export class Menu {
       ),
       this.toggle(
         "Active Aero Assist",
-        "On, Straight Mode opens by itself at full throttle on straights. Off, press X to arm it. It closes when you brake or lift.",
+        "On, Straight Mode opens by itself at full throttle inside the Straight Mode zones. Off, press X inside a zone to open it. It closes when you brake, lift or reach the end of the zone.",
         () => s.straightAssist,
         (v) => {
           s.straightAssist = v;

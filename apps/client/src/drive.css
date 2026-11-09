@@ -1693,6 +1693,10 @@ button {
   opacity: 1;
 }
 
+.dash[data-smode="ready"] .s-mode-tag {
+  opacity: 0.45;
+}
+
 .boost-prompt {
   position: absolute;
   left: 50%;
