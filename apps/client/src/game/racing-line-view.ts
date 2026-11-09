@@ -44,7 +44,7 @@ export class RacingLineView {
   private readonly shown: boolean;
 
   constructor(
-    private readonly data: RacingLineData,
+    readonly data: RacingLineData,
     private readonly profile: SpeedProfile,
     mode: RacingLineMode,
   ) {

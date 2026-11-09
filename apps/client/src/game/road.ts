@@ -1145,6 +1145,11 @@ export class Sunlight {
       if (shadow) shadow.autoUpdate = false;
   }
 
+  redraw(): void {
+    for (const { shadow } of this.cascades.lights)
+      if (shadow) shadow.needsUpdate = true;
+  }
+
   private schedule(): void {
     this.tick++;
     this.cascades.lights.forEach(({ shadow }, index) => {

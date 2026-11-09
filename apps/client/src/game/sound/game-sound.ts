@@ -2,7 +2,7 @@ import type { CarAudio } from "./sound-state.ts";
 import { soundState } from "./sound-state.ts";
 import startBeep from "./start-beep.json";
 import { renderStartBeep } from "./start-beep.ts";
-import workletUrl from "./worklet.ts?worker&url";
+import { openAudio, soundModule } from "./open-audio.ts";
 
 const fullVolume = 1;
 const suspendDelay = 400;
@@ -15,10 +15,6 @@ const unlockEvents = [
   "click",
   "touchend",
 ];
-
-export function openAudio(): AudioContext {
-  return new AudioContext({ latencyHint: "interactive", sampleRate: 48000 });
-}
 
 export class GameSound {
   private readonly context: AudioContext;
@@ -34,7 +30,7 @@ export class GameSound {
   }
 
   static async start(context = openAudio()): Promise<GameSound> {
-    await context.audioWorklet.addModule(workletUrl);
+    await soundModule(context);
     const node = new AudioWorkletNode(context, "revracers-car-sound", {
       numberOfInputs: 0,
       numberOfOutputs: 1,

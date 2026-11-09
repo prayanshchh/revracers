@@ -266,8 +266,9 @@ export function makeDamageable(
 export class GltfCar {
   readonly root = new THREE.Group();
   readonly damage = newLook();
-  pieces: CarPieces = new Map();
   wheelPieces: WheelPiece[] = [];
+  private pieces: CarPieces | null = null;
+  private readonly loadedParts = new Set<THREE.Object3D>();
   private readonly lamps = carLamps();
   private readonly pastLamps = new PastLamps();
   private flap: RearFlap | null = null;
@@ -364,7 +365,7 @@ export class GltfCar {
     car.sharedTyres = tyres;
     car.dress(gltf.scene, materials, tyres);
     car.zoned = makeDamageable(gltf.scene, car.damage, withinChassis);
-    car.pieces = zonePieces(gltf.scene, new Set(car.glass));
+    gltf.scene.traverse((part) => car.loadedParts.add(part));
     fitLamps(gltf.scene, car.lamps);
     car.flap = RearFlap.find(gltf.scene);
     const axes = car.axes;
@@ -420,6 +421,19 @@ export class GltfCar {
       }
       object.material = materials.build(source);
     });
+  }
+
+  debrisPieces(): CarPieces {
+    const { carScene } = this;
+    if (!carScene) return new Map();
+    if (!this.pieces) {
+      const skip = new Set<THREE.Object3D>(this.glass);
+      carScene.traverse((part) => {
+        if (!this.loadedParts.has(part)) skip.add(part);
+      });
+      this.pieces = zonePieces(carScene, skip);
+    }
+    return this.pieces;
   }
 
   async finish(): Promise<void> {

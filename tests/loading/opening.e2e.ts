@@ -90,6 +90,7 @@ test.describe("opening", () => {
     const trailers = watchTrailer(page);
     await page.goto("/");
     await expect(page.locator(".front-hub")).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator("[data-school-still]")).toHaveCount(0);
     await expect.poll(() => music(page)).toBe("intro");
     expect(trailers).toEqual([]);
   });
