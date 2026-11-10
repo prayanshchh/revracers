@@ -14,6 +14,8 @@ from shapely.ops import unary_union
 import aerial
 import standshape
 from geo import Osm, Terrain
+from noise import value_noise
+from pitlane import BALCONIES
 
 CIRCUIT = 6537729
 STEP = 2.0
@@ -80,6 +82,13 @@ HORIZON_OVERLAP = 180.0
 HORIZON_SKIRT = 500.0
 HORIZON_SINK = 6.0
 CROWD_SEED = 29
+BALCONY_ROWS = (-0.8, -0.15, 0.55)
+BALCONY_SPACING = 0.6
+BALCONY_MARGIN = 0.6
+BALCONY_JITTER = 0.14
+BALCONY_OCCUPANCY = 0.85
+BALCONY_GROUP_SCALE = 1 / 9.0
+BALCONY_GROUP = 0.3
 CROWD_OCCUPANCY = 0.9
 CROWD_ROW_STEP = 2.0
 CROWD_BANKS = ((540.0, 760.0), (1180.0, 1460.0), (1640.0, 1860.0), (2360.0, 2640.0), (3660.0, 4360.0), (4680.0, 4900.0), (5120.0, 5330.0))
@@ -453,20 +462,30 @@ def ground(ground_height, points, origin_height, pit, garage_rows):
     return xs, ys, heights.reshape(gy.shape)
 
 
-def value_noise(points, scale, seed):
-    rng = np.random.default_rng(seed)
-    lattice = rng.random((64, 64))
-    p = points * scale
-    i = np.floor(p).astype(int)
-    f = p - i
-    f = f * f * (3 - 2 * f)
-    at = lambda dx, dy: lattice[(i[:, 0] + dx) % 64, (i[:, 1] + dy) % 64]
-    top = at(0, 0) * (1 - f[:, 0]) + at(1, 0) * f[:, 0]
-    bottom = at(0, 1) * (1 - f[:, 0]) + at(1, 1) * f[:, 0]
-    return top * (1 - f[:, 1]) + bottom * f[:, 1]
+def balcony_crowd(pit, points, normal, centre, camber, origin_height, length):
+    rng = np.random.default_rng(CROWD_SEED + 1)
+    span = (pit["garageEnd"] - pit["garageStart"]) % length
+    count = len(points)
+    rows = []
+    for level in BALCONIES:
+        for offset in BALCONY_ROWS:
+            s = pit["garageStart"] + np.arange(BALCONY_MARGIN, span - BALCONY_MARGIN, BALCONY_SPACING)
+            s = s + rng.normal(0, BALCONY_JITTER, len(s))
+            f = (s % length) / length * count
+            i = np.floor(f).astype(int) % count
+            j = (i + 1) % count
+            t = f - np.floor(f)
+            lateral = pit["garageFront"] + offset + rng.normal(0, BALCONY_JITTER / 2, len(s))
+            blend = lambda values: values[i] * (1 - t) + values[j] * t
+            xy = points[i] * (1 - t)[:, None] + points[j] * t[:, None]
+            xy = xy + (normal[i] * (1 - t)[:, None] + normal[j] * t[:, None]) * lateral[:, None]
+            up = blend(centre) - origin_height + blend(camber) * lateral + level
+            keep = (rng.random(len(s)) < BALCONY_OCCUPANCY) & (value_noise(xy, BALCONY_GROUP_SCALE, CROWD_SEED) > BALCONY_GROUP)
+            rows.append(np.column_stack([xy, up])[keep])
+    return np.concatenate(rows)
 
 
-def crowd(stands, ground_height, points, normal, offsets, origin_height, path):
+def crowd(stands, ground_height, points, normal, offsets, origin_height, path, balconies):
     rng = np.random.default_rng(CROWD_SEED)
     seated = [standshape.seats(stand) for stand in stands]
     seated = np.concatenate(seated)
@@ -493,8 +512,11 @@ def crowd(stands, ground_height, points, normal, offsets, origin_height, path):
     shirts = np.array(CROWD_SHIRTS, float)[rng.integers(0, len(CROWD_SHIRTS), len(positions))]
     shirts *= rng.uniform(0.7, 1.15, (len(positions), 1))
     data = np.column_stack([positions, rng.random(len(positions)), rng.integers(0, 32, len(positions)), shirts])
-    path.write_bytes(data.astype(np.float32).tobytes())
-    return len(seated), len(standing)
+    guests = np.random.default_rng(CROWD_SEED + 2)
+    tops = np.array(CROWD_SHIRTS, float)[guests.integers(0, len(CROWD_SHIRTS), len(balconies))] * guests.uniform(0.7, 1.15, (len(balconies), 1))
+    hosted = np.column_stack([balconies, guests.random(len(balconies)), guests.integers(0, 32, len(balconies)), tops])
+    path.write_bytes(np.concatenate([data, hosted]).astype(np.float32).tobytes())
+    return len(seated), len(standing), len(hosted)
 
 
 def venue(osm, ground_height, points, origin_height):
@@ -675,7 +697,8 @@ def main():
     write_horizon(root, build, osm, origin_height, xs, ys)
     layout_data = venue(osm, ground_height, points, origin_height)
     (build / "venue.json").write_text(json.dumps(layout_data))
-    print("crowd", crowd(layout_data["stands"], ground_height, points, n, offsets, origin_height, root / "crowd.bin"))
+    balconies = balcony_crowd(track["pitLane"], points, n, centre, camber, origin_height, length)
+    print("crowd", crowd(layout_data["stands"], ground_height, points, n, offsets, origin_height, root / "crowd.bin", balconies))
     heading = np.degrees(np.arctan2(tangents[:, 1], tangents[:, 0]))
     jump = np.abs(np.diff(gaussian_filter1d(curvature(points, tangents), 0.5, mode="wrap"))) / step
     print(

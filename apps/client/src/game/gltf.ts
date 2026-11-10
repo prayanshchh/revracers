@@ -7,6 +7,7 @@ import {
   damageable,
   type DamageLook,
   newLook,
+  setLookSpeed,
   tagDamageZones,
   type WheelSlump,
   wheelGone,
@@ -731,6 +732,7 @@ export class GltfCar {
   }
 
   pose(frame: Float64Array): void {
+    setLookSpeed(this.damage, frame[frameIndex.speed] ?? 0);
     this.root.matrix.fromArray(frame, frameIndex.posMat);
     this.root.matrix.elements[14] += this.lift;
     this.root.matrix.multiply(this.bodyBounce(1, this.bounce));

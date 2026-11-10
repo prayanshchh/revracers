@@ -18,6 +18,7 @@ import {
   positionView,
   positionWorld,
   smoothstep,
+  step,
   struct,
   texture,
   uv,
@@ -25,6 +26,8 @@ import {
   vec3,
   vertexStage,
 } from "three/tsl";
+
+import { turfDryness, turfTint } from "./scenery-look.ts";
 
 type FloatNode = THREE.Node<"float">;
 type ColourNode = THREE.Node<"vec3">;
@@ -34,11 +37,15 @@ const patchCell = 46;
 const patchShare = 0.4;
 const patchTone = 0.82;
 const patchSeam = 0.05;
-const crackScale = vec2(0.21, 0.075);
-const crackWidth = 0.018;
-const crackDensity = 0.022;
-const crackTone = 0.42;
-const crackRoughness = 0.3;
+const seamSpacing = 4.6;
+const seamWidth = 0.014;
+const seamWander = 0.011;
+const seamDrift = 0.5;
+const seamBreak = 0.02;
+const seamTone = 0.74;
+const seamRoughness = 0.55;
+const slabLength = 64;
+const slabShare = 0.55;
 const blotchScale = 0.045;
 const blotchStrength = 0.11;
 const mottleScale = 0.6;
@@ -79,11 +86,9 @@ const turfTile = 2;
 const turfSecondTile = 2.9;
 const turfSecondAngle = 1.13;
 const turfMean = 0.1089;
-const turfTint = vec3(1, 1, 1);
 const turfCrevice = 0.4;
 const turfRelief = 0.004;
 const dryScale = 0.045;
-const dryShare = 0.65;
 const dryTint = vec3(1.28, 1.12, 0.8);
 const photoShare = 0.6;
 const photoMean = 0.085;
@@ -158,20 +163,28 @@ function patches(lateral: FloatNode, along: FloatNode) {
   return { inside, seam };
 }
 
-function cracks(lateral: FloatNode, along: FloatNode) {
-  const field = mx_noise_float(
-    vec2(lateral.mul(crackScale.x), along.mul(crackScale.y)).add(2.7),
-  );
-  const width = fwidth(field).mul(1.2).add(crackWidth);
-  const line = float(1).sub(smoothstep(width.mul(0.35), width, field.abs()));
-  const where = smoothstep(
-    0.05,
-    0.25,
-    vertexStage(
-      mx_noise_float(vec2(lateral, along).mul(crackDensity).add(9.1)),
+function seams(lateral: FloatNode, along: FloatNode) {
+  const wander = vertexStage(
+    mx_noise_float(vec2(along.mul(seamWander), 3.1)),
+  ).mul(seamDrift);
+  const lane = lateral.add(wander).div(seamSpacing);
+  const offset = fract(lane).sub(0.5).abs().mul(seamSpacing);
+  const width = fwidth(lateral).mul(0.75).add(seamWidth);
+  const joint = float(1).sub(smoothstep(width.mul(0.4), width, offset));
+  const worn = vertexStage(
+    smoothstep(
+      -0.15,
+      0.35,
+      mx_noise_float(vec2(along.mul(seamBreak), floor(lane).mul(7.3))),
     ),
   );
-  return line.mul(where);
+  const span = along.div(slabLength);
+  const across = fract(span).sub(0.5).abs().mul(slabLength);
+  const edge = fwidth(along).mul(0.75).add(seamWidth);
+  const slab = float(1)
+    .sub(smoothstep(edge.mul(0.4), edge, across))
+    .mul(step(slabShare, hash(floor(span.add(0.5)).add(5.9))));
+  return joint.mul(worn).max(slab);
 }
 
 export interface GravelMaps {
@@ -306,17 +319,17 @@ export function asphaltDetail(grain: THREE.Texture): AsphaltDetail {
     .rgb.dot(vec3(1 / 3))
     .div(0.0152);
   const { inside, seam } = patches(lateral, along);
-  const crack = cracks(lateral, along);
+  const crack = seams(lateral, along);
   const tone = float(1)
     .add(blotch)
     .add(mottle.mul(mottleStrength))
     .mul(mix(float(1), coarse, coarseContrast))
     .mul(mix(float(1), float(patchTone), inside))
     .mul(float(1).sub(seam.mul(0.35)))
-    .mul(mix(float(1), float(crackTone), crack));
+    .mul(mix(float(1), float(seamTone), crack));
   return {
     tone,
-    roughness: mix(float(1), float(crackRoughness / 0.8), crack),
+    roughness: mix(float(1), float(seamRoughness / 0.8), crack),
     mottle,
   };
 }
@@ -422,7 +435,7 @@ export function turf(
   const lift = blades.dot(vec3(1 / 3)).div(turfMean);
   const dry = vertexStage(
     smoothstep(0.3, 0.85, mx_noise_float(world.mul(dryScale).add(7.7))),
-  ).mul(dryShare);
+  ).mul(turfDryness);
   const colour = blades
     .mul(turfTint)
     .mul(mix(vec3(1), dryTint, dry))
