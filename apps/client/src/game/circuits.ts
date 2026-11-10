@@ -5,6 +5,13 @@ import hillTrack from "../../../../content/tracks/hill-country/track.json?url";
 import hillTrees from "../../../../content/tracks/hill-country/trees.bin?url";
 import hillXml from "../../../../content/tracks/hill-country/hill-country.xml?url";
 import hillAi from "../../wasm/hill-country-ai.txt?url";
+import boulevardFrame from "../../../../content/tracks/neon-boulevard/sd-frame.json?url";
+import boulevardMap from "../../../../content/tracks/neon-boulevard/circuit-map.json?url";
+import boulevardLine from "../../../../content/tracks/neon-boulevard/racing-line.json?url";
+import boulevardTrack from "../../../../content/tracks/neon-boulevard/track.json?url";
+import boulevardXml from "../../../../content/tracks/neon-boulevard/neon-boulevard.xml?url";
+import boulevardCity from "../../../../content/tracks/neon-boulevard/city.json?url";
+import boulevardAi from "../../wasm/neon-boulevard-ai.txt?url";
 import trainingFrame from "../../../../content/tracks/training-ground/sd-frame.json?url";
 import trainingMap from "../../../../content/tracks/training-ground/circuit-map.json?url";
 import trainingLine from "../../../../content/tracks/training-ground/racing-line.json?url";
@@ -21,8 +28,26 @@ interface EngineFile {
   url: string;
 }
 
+type CircuitGround = "glb" | "training" | "street";
+
+type Rgb = [number, number, number];
+
+export interface NightLook {
+  zenith: Rgb;
+  horizon: Rgb;
+  glow: Rgb;
+  haze: Rgb;
+  visibility: number;
+  flood: number;
+  tint: Rgb;
+  dome: number;
+  layer: number;
+}
+
 export interface Circuit {
   id: string;
+  ground: CircuitGround;
+  city: string | null;
   engineFiles: EngineFile[];
   frame: string;
   map: string;
@@ -30,6 +55,7 @@ export interface Circuit {
   track: string;
   lessons: Lessons;
   sky: CompactSky | null;
+  night: NightLook | null;
   venue: boolean;
   trees: string | null;
   season: Season;
@@ -40,6 +66,8 @@ export const trainingGround = "training-ground";
 const circuits: Circuit[] = [
   {
     id: "hill-country",
+    ground: "glb",
+    city: null,
     engineFiles: [
       { path: "tracks/circuit/hill-country/hill-country.xml", url: hillXml },
       { path: "tracks/circuit/hill-country/ai.dat", url: hillAi },
@@ -50,12 +78,47 @@ const circuits: Circuit[] = [
     track: hillTrack,
     lessons: { brake: 1, boost: 11, camera: 12 },
     sky: null,
+    night: null,
     venue: true,
     trees: hillTrees,
     season: "autumn",
   },
   {
+    id: "neon-boulevard",
+    ground: "street",
+    city: boulevardCity,
+    engineFiles: [
+      {
+        path: "tracks/circuit/neon-boulevard/neon-boulevard.xml",
+        url: boulevardXml,
+      },
+      { path: "tracks/circuit/neon-boulevard/ai.dat", url: boulevardAi },
+    ],
+    frame: boulevardFrame,
+    map: boulevardMap,
+    racingLine: boulevardLine,
+    track: boulevardTrack,
+    lessons: { brake: 1, boost: 12, camera: 13 },
+    sky: null,
+    night: {
+      zenith: [0.012, 0.012, 0.013],
+      horizon: [0.026, 0.024, 0.022],
+      glow: [0.03, 0.026, 0.02],
+      haze: [0.13, 0.124, 0.112],
+      visibility: 1000,
+      flood: 5.5,
+      tint: [1, 0.98, 0.89],
+      dome: 0.12,
+      layer: 26,
+    },
+    venue: true,
+    trees: null,
+    season: "autumn",
+  },
+  {
     id: trainingGround,
+    ground: "training",
+    city: null,
     engineFiles: [],
     frame: trainingFrame,
     map: trainingMap,
@@ -68,6 +131,7 @@ const circuits: Circuit[] = [
       env: trainingEnv,
       meta: trainingSky,
     },
+    night: null,
     venue: false,
     trees: null,
     season: "summer",
@@ -93,6 +157,7 @@ export function circuitFiles(circuit: Circuit): string[] {
     circuit.map,
     circuit.racingLine,
     circuit.track,
+    ...(circuit.city ? [circuit.city] : []),
     ...sky,
   ];
 }

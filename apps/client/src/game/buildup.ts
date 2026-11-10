@@ -13,13 +13,15 @@ import {
   type GridSpot,
   gridPairShot,
   poseAt,
-  shots,
   type TrackPoint,
   walkShot,
 } from "./buildup-shots.ts";
-import { CircuitMap, type MapPose, mixPose } from "./circuit-map.ts";
+import { GridBoard } from "./buildup-board.ts";
+import type { BuildUpVenue, MapStage } from "./buildup-venues.ts";
+import { CircuitMap, mixPose } from "./circuit-map.ts";
 import { renderDisplay } from "./display.ts";
 import { el, prompt } from "./dom.ts";
+import { loadPortraits } from "./driver-portraits.ts";
 import { flagUrl } from "./flags.ts";
 import { putStyle } from "./hud-dom.ts";
 import type { Scene } from "./scene.ts";
@@ -28,75 +30,24 @@ import type { GridEntry } from "./teams.ts";
 import { teams } from "./teams.ts";
 import { WavingFlag } from "./waving-flag.ts";
 
-const mapCentre: [number, number, number] = [780, 0, -130];
 const fadeSeconds = 0.4;
 const stageEase = 1.1;
 const partners = 10;
 const miles = 0.621371;
-const eventName = "Hill Country Grand Prix 2026";
-const eventCountry = "US";
-const eventPlace = "Austin - USA";
 const tagHeight = 1.2;
 const tagMargin = 1.15;
-
-const mapPoses: Record<string, [MapPose, MapPose]> = {
-  "map-sectors": [
-    {
-      azimuth: 2.14,
-      elevation: 0.68,
-      distance: 2500,
-      target: mapCentre,
-      fov: 34,
-    },
-    {
-      azimuth: 2.24,
-      elevation: 0.62,
-      distance: 2380,
-      target: mapCentre,
-      fov: 34,
-    },
-  ],
-  "map-zones": [
-    {
-      azimuth: -1.22,
-      elevation: 0.56,
-      distance: 2500,
-      target: [880, 0, -230],
-      fov: 34,
-    },
-    {
-      azimuth: -1.32,
-      elevation: 0.5,
-      distance: 2400,
-      target: [880, 0, -230],
-      fov: 34,
-    },
-  ],
-  "map-turns": [
-    {
-      azimuth: -1.02,
-      elevation: 0.26,
-      distance: 2500,
-      target: [800, 30, -60],
-      fov: 30,
-    },
-    {
-      azimuth: -0.86,
-      elevation: 0.2,
-      distance: 2380,
-      target: [800, 40, -60],
-      fov: 30,
-    },
-  ],
-};
+const boardOpens = 2.5;
+const signShows = 0.8;
 
 export interface Weather {
   temperature: number;
   label: string;
-  icon: "sun" | "cloud" | "rain";
+  icon: "sun" | "moon" | "cloud" | "rain";
 }
 
 export interface BuildUpOptions {
+  venue: BuildUpVenue;
+  mapUrl: string;
   renderer: THREE.WebGPURenderer;
   world: Scene;
   drawWorld: () => void;
@@ -129,14 +80,17 @@ function chevrons(): [HTMLElement, HTMLElement] {
 function weatherIcon(icon: Weather["icon"]): HTMLElement {
   const box = el("div", `bu-weather-icon ${icon}`);
   box.innerHTML =
-    icon === "sun"
-      ? '<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="14"/><g stroke-width="5" stroke-linecap="round"><path d="M32 4v8M32 52v8M4 32h8M52 32h8M12 12l6 6M46 46l6 6M12 52l6-6M46 18l6-6"/></g></svg>'
-      : '<svg viewBox="0 0 64 64"><path d="M18 46a12 12 0 0 1-1-24 16 16 0 0 1 30 3 10.500 10.500 0 0 1-1 21Z"/><g stroke-width="4" stroke-linecap="round"><path d="M22 52l-3 7M34 52l-3 7M46 52l-3 7"/></g></svg>';
+    icon === "moon"
+      ? '<svg viewBox="0 0 64 64"><path d="M38 6a26 26 0 1 0 20 42A21 21 0 0 1 38 6Z"/></svg>'
+      : icon === "sun"
+        ? '<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="14"/><g stroke-width="5" stroke-linecap="round"><path d="M32 4v8M32 52v8M4 32h8M52 32h8M12 12l6 6M46 46l6 6M12 52l6-6M46 18l6-6"/></g></svg>'
+        : '<svg viewBox="0 0 64 64"><path d="M18 46a12 12 0 0 1-1-24 16 16 0 0 1 30 3 10.500 10.500 0 0 1-1 21Z"/><g stroke-width="4" stroke-linecap="round"><path d="M22 52l-3 7M34 52l-3 7M46 52l-3 7"/></g></svg>';
   return box;
 }
 
 class BuildUpView {
   readonly root = el("div", "buildup");
+  readonly stage = el("div", "stage");
   readonly title = el("section", "bu-card title");
   readonly weather = el("section", "bu-card weather");
   readonly mapUi = el("div", "bu-map-ui");
@@ -152,11 +106,11 @@ class BuildUpView {
   readonly skip: HTMLElement;
 
   constructor(host: HTMLElement, options: BuildUpOptions, skip: () => void) {
-    const stage = el("div", "stage");
+    const { stage } = this;
     this.title.append(
       ...chevrons(),
       logoMark(),
-      el("h1", "", eventName.toUpperCase()),
+      el("h1", "", options.venue.event.toUpperCase()),
     );
     const reading = el("div", "bu-weather");
     const numbers = el("div", "");
@@ -168,16 +122,16 @@ class BuildUpView {
     this.weather.append(...chevrons(), logoMark(), reading);
     const place = el("header", "bu-place");
     const flag = el("img", "flag");
-    flag.src = flagUrl(eventCountry);
+    flag.src = flagUrl(options.venue.country);
     flag.alt = "";
-    place.append(el("b", "", eventPlace.toUpperCase()), flag);
-    this.buildStats(options.trackLength);
+    place.append(el("b", "", options.venue.place.toUpperCase()), flag);
+    this.buildStats(options.trackLength, options.venue.turns);
     this.buildPartners();
     this.mapUi.append(place, this.tags, this.stats, this.partners);
     this.flagSign.append(el("small", "", "Starting"), el("b", "", "Grid"));
     const heading = el("header", "bu-grid-event");
     heading.append(
-      el("b", "", eventName.toUpperCase()),
+      el("b", "", options.venue.event.toUpperCase()),
       el("small", "", "Starting Grid"),
     );
     this.gridBox.append(heading, ...this.gridTags);
@@ -200,7 +154,7 @@ class BuildUpView {
     host.append(this.root);
   }
 
-  private buildStats(length: number): void {
+  private buildStats(length: number, turnCount: number): void {
     const km = length / 1000;
     const distance = el("div", "");
     distance.append(
@@ -212,7 +166,7 @@ class BuildUpView {
       ),
     );
     const turns = el("div", "");
-    turns.append(el("b", "", "Turns"), el("strong", "", "20"));
+    turns.append(el("b", "", "Turns"), el("strong", "", String(turnCount)));
     this.stats.append(distance, turns);
   }
 
@@ -274,6 +228,7 @@ class Director {
   private readonly handlers: Record<StageId, (at: StagePosition) => void>;
   private map: CircuitMap | null = null;
   private flag: WavingFlag | null = null;
+  private board: GridBoard | null = null;
   private shownStage: StageId | null = null;
   private readonly probe = new THREE.Vector3();
   readonly view: BuildUpView;
@@ -292,6 +247,7 @@ class Director {
     this.stages = buildUpStages(
       options.kind,
       Math.ceil(options.grid.length / 2),
+      options.venue.featureSeconds,
     );
     this.clock = options.seek;
     this.view = new BuildUpView(host, options, () => {
@@ -302,11 +258,11 @@ class Director {
         this.drawBlack();
       },
       title: (at) => {
-        this.world(poseAt(shots.title, at.progress, options.track));
+        this.world(poseAt(options.venue.title, at.progress, options.track));
         this.show(this.view.title, at.time > 1.8 && at.time < 8.2);
       },
       weather: (at) => {
-        this.world(poseAt(shots.weather, at.progress, options.track));
+        this.world(poseAt(options.venue.weather, at.progress, options.track));
         this.show(this.view.weather, at.time > 2.6 && at.time < 7);
       },
       "map-sectors": (at) => {
@@ -318,14 +274,21 @@ class Director {
       "map-turns": (at) => {
         this.mapStage("map-turns", at);
       },
-      hill: (at) => {
-        this.world(poseAt(shots.hill, at.progress, options.track));
+      feature: (at) => {
+        this.world(poseAt(options.venue.feature, at.progress, options.track));
       },
       flag: (at) => {
         this.drawFlag();
-        this.show(this.view.flagSign, at.time > 0.8);
+        const opening = this.board !== null && at.time > boardOpens;
+        this.show(this.view.flagSign, at.time > signShows && !opening);
+        if (this.board && opening) this.show(this.board.root, true);
       },
       grid: (at) => {
+        if (this.board) {
+          this.drawFlag();
+          this.boardStage(this.board, at);
+          return;
+        }
         this.world(this.gridShot(at));
         this.gridStage(at);
       },
@@ -346,13 +309,20 @@ class Director {
   }
 
   async prepare(): Promise<void> {
-    const [map, flag] = await Promise.all([
-      CircuitMap.load(),
-      WavingFlag.load(flagUrl(eventCountry)),
+    const { options } = this;
+    const cards = options.venue.gridCards && options.kind === "race";
+    const [map, flag, portraits] = await Promise.all([
+      CircuitMap.load(options.mapUrl, options.venue.mapLook),
+      WavingFlag.load(flagUrl(options.venue.country)),
+      cards ? loadPortraits(options.grid) : null,
     ]);
     this.map = map;
     this.flag = flag;
     this.buildLabels(map);
+    if (portraits) {
+      this.board = new GridBoard(options.venue.event, options.grid, portraits);
+      this.view.stage.insertBefore(this.board.root, this.view.caption);
+    }
   }
 
   private skip(): void {
@@ -440,10 +410,10 @@ class Director {
     });
   }
 
-  private mapStage(id: string, at: StagePosition): void {
+  private mapStage(id: MapStage, at: StagePosition): void {
     const map = this.map;
-    const poses = mapPoses[id];
-    if (!map || !poses) return;
+    const poses = this.options.venue.maps[id];
+    if (!map) return;
     const lifting = id === "map-turns";
     map.lift.value = lifting
       ? Math.min(1, Math.max(0, (at.time - 0.2) / stageEase))
@@ -501,6 +471,12 @@ class Director {
     this.view.gridBox.classList.toggle("leaving", at.progress > 0.9);
   }
 
+  private boardStage(board: GridBoard, at: StagePosition): void {
+    board.update(at.stage.index, at.time);
+    const last = at.stage.index === Math.ceil(this.options.grid.length / 2) - 1;
+    this.show(board.root, !last || at.progress < 0.92);
+  }
+
   private placeTags(pair: number): void {
     const { spots, track, world } = this.options;
     const across = this.view.gridTags.map((tag, k) => {
@@ -539,17 +515,10 @@ class Director {
       box.classList.add("fact");
       const head = el("header", "");
       const flag = el("img", "flag");
-      flag.src = flagUrl(eventCountry);
+      flag.src = flagUrl(this.options.venue.country);
       flag.alt = "";
-      head.append(el("b", "", "AUSTIN"), flag);
-      box.replaceChildren(
-        head,
-        el(
-          "p",
-          "",
-          "Turn 1 sits at the top of a steep climb from the grid, with a wide apex that invites several lines into the corner.",
-        ),
-      );
+      head.append(el("b", "", this.options.venue.city.toUpperCase()), flag);
+      box.replaceChildren(head, el("p", "", this.options.venue.fact));
       return;
     }
     const slot = this.options.playerSlot;
@@ -572,7 +541,10 @@ class Director {
     const { world } = this.options;
     setOn(this.view.wipe, true);
     if (at.progress > 0.5) world.setCinematic(null);
-    else world.setCinematic(poseAt(shots.hill, 1, this.options.track));
+    else
+      world.setCinematic(
+        poseAt(this.options.venue.feature, 1, this.options.track),
+      );
     world.update(this.options.frame);
     this.options.drawWorld();
   }
@@ -592,6 +564,7 @@ class Director {
       v.flagSign,
       v.gridBox,
       v.caption,
+      ...(this.board ? [this.board.root] : []),
     ]) {
       const on = this.lit.has(node);
       if (isOn(node) !== on) setOn(node, on);
@@ -601,11 +574,20 @@ class Director {
 
   private fade(at: StagePosition): void {
     const left = at.stage.end - at.stage.start - at.time;
-    const cut = at.stage.id === "grid" || at.stage.id === "wipe";
-    const edge = Math.min(at.time, left) / fadeSeconds;
-    this.view.fade.style.opacity = cut
-      ? "0"
-      : String(Math.max(0, 1 - Math.min(1, edge)));
+    const { id, index } = at.stage;
+    const cards = this.board !== null;
+    const pairs = Math.ceil(this.options.grid.length / 2);
+    const fadesIn = id !== "wipe" && id !== "grid";
+    const fadesOut =
+      (id === "grid" ? cards && index === pairs - 1 : id !== "wipe") &&
+      !(cards && id === "flag");
+    const edge = Math.min(
+      fadesIn ? at.time : Infinity,
+      fadesOut ? left : Infinity,
+    );
+    this.view.fade.style.opacity = String(
+      Math.max(0, 1 - Math.min(1, edge / fadeSeconds)),
+    );
   }
 
   private tick(now: number): void {

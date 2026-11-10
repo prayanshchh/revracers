@@ -437,11 +437,9 @@ def crew_kit(team):
     }
 
 
-def crew_suit(kit=CREW_KIT):
+def atlas_pen(draw):
     width, height = CREW_ATLAS
     half = width // 2
-    image = Image.new("RGB", CREW_ATLAS, kit["suit"])
-    draw = ImageDraw.Draw(image)
 
     def to(side, x, z):
         return (side * half + half / 2 + x / CREW_WIDTH * half, height - z / CREW_HEIGHT * height)
@@ -455,6 +453,16 @@ def crew_suit(kit=CREW_KIT):
         cx, cy = to(side, x, z)
         box = draw.textbbox((0, 0), text, font=face)
         draw.text((cx - (box[2] + box[0]) / 2, cy - (box[3] + box[1]) / 2), text, font=face, fill=colour)
+
+    return to, band, label
+
+
+def crew_suit(kit=CREW_KIT):
+    width, height = CREW_ATLAS
+    half = width // 2
+    image = Image.new("RGB", CREW_ATLAS, kit["suit"])
+    draw = ImageDraw.Draw(image)
+    to, band, label = atlas_pen(draw)
 
     def upright(side, x, z, text, size, colour, turn):
         face = font(size, 760)

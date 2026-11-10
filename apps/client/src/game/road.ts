@@ -185,6 +185,7 @@ const shadowCasters =
   /^(wall|fence_steel|stand_seats|stand_concrete|roofs|rooftops|columns|tower_plates|tower_core|veil|gantry|light_panel|paddock|billboard|prop)/;
 const depthOffsets: Record<string, number> = {
   "track road paint": -1,
+  "track lane road paint": -1,
   "track road kerb": -1,
   "track pit decals": -2,
   "track track marks": -1.5,

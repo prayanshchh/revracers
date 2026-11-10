@@ -12,7 +12,6 @@ import {
   uv,
   vec3,
 } from "three/tsl";
-import mapUrl from "../../../../content/tracks/hill-country/circuit-map.json?url";
 
 const pink = new THREE.Color(0.86, 0.26, 0.3);
 const teal = new THREE.Color(0.2, 0.45, 0.54);
@@ -26,11 +25,18 @@ const zoneWidth = 18;
 const elevationScale = 4.6;
 const elevationBase = 4;
 const horizonRadii = [5300, 5650, 6050];
-const horizonCentre = new THREE.Vector2(780, -130);
-const buildingTop = new THREE.Color(0.15, 0.27, 0.32);
-const buildingSide = new THREE.Color(0.055, 0.11, 0.14);
-const parkingColour = new THREE.Color(0.035, 0.07, 0.085);
-const waterColour = new THREE.Color(0.02, 0.05, 0.08);
+const groundFade = 0.55;
+const sunward = new THREE.Vector2(0.6, 0.8).normalize();
+
+export interface MapLook {
+  centre: [number, number];
+  top: [number, number, number];
+  lit: [number, number, number];
+  shadow: [number, number, number];
+  parking: [number, number, number];
+  water: [number, number, number];
+  ground: [number, number, number] | null;
+}
 const zoneGreen = new THREE.Color(0.44, 0.95, 0.2);
 const detectionPurple = new THREE.Color(0.86, 0.2, 0.92);
 
@@ -166,10 +172,30 @@ function flatArea(
   return new THREE.Mesh(geometry, material);
 }
 
-function buildingsMesh(data: CircuitData): THREE.Mesh {
+function sideShade(
+  a: [number, number, number],
+  b: [number, number, number],
+  centre: THREE.Vector2,
+): number {
+  const nx = b[2] - a[2];
+  const nz = a[0] - b[0];
+  const size = Math.hypot(nx, nz) || 1;
+  const outward = (a[0] - centre.x) * nx + (a[2] - centre.y) * nz >= 0 ? 1 : -1;
+  return Math.max(0, ((nx * sunward.x + nz * sunward.y) / size) * outward);
+}
+
+function colourOf(rgb: [number, number, number]): THREE.Color {
+  return new THREE.Color(rgb[0], rgb[1], rgb[2]);
+}
+
+function buildingsMesh(data: CircuitData, look: MapLook): THREE.Mesh {
   const positions: number[] = [];
   const colours: number[] = [];
   const indices: number[] = [];
+  const top = colourOf(look.top);
+  const lit = colourOf(look.lit);
+  const shadow = colourOf(look.shadow);
+  const side = new THREE.Color();
   const vertex = (x: number, y: number, z: number, c: THREE.Color) => {
     positions.push(x, y, z);
     colours.push(c.r, c.g, c.b);
@@ -178,16 +204,20 @@ function buildingsMesh(data: CircuitData): THREE.Mesh {
   for (const { height, footprint } of data.buildings) {
     const ring = pathOf(footprint);
     const contour = ring.map(([x, , z]) => new THREE.Vector2(x, z));
-    const top = height * 1.7;
+    const centre = contour
+      .reduce((sum, point) => sum.add(point), new THREE.Vector2())
+      .divideScalar(Math.max(1, contour.length));
+    const roof = height * 1.7;
     const base = positions.length / 3;
-    for (const point of contour) vertex(point.x, top, point.y, buildingTop);
+    for (const point of contour) vertex(point.x, roof, point.y, top);
     capFaces(contour, base, indices);
-    ring.forEach(([x, , z], index) => {
-      const [nx = 0, , nz = 0] = ring[(index + 1) % ring.length] ?? [];
-      const a = vertex(x, 0, z, buildingSide);
-      const b = vertex(nx, 0, nz, buildingSide);
-      const c = vertex(nx, top, nz, buildingSide);
-      const d = vertex(x, top, z, buildingSide);
+    ring.forEach((point, index) => {
+      const next = ring[(index + 1) % ring.length] ?? point;
+      side.copy(shadow).lerp(lit, sideShade(point, next, centre));
+      const a = vertex(point[0], 0, point[2], side);
+      const b = vertex(next[0], 0, next[2], side);
+      const c = vertex(next[0], roof, next[2], side);
+      const d = vertex(point[0], roof, point[2], side);
       indices.push(a, b, c, a, c, d);
     });
   }
@@ -203,6 +233,19 @@ function buildingsMesh(data: CircuitData): THREE.Mesh {
     vertexColors: true,
   });
   return new THREE.Mesh(geometry, material);
+}
+
+function groundDisc(look: MapLook, rgb: [number, number, number]): THREE.Mesh {
+  const radius = horizonRadii[0] ?? 5300;
+  const material = new THREE.MeshBasicNodeMaterial();
+  const reach = uv().sub(0.5).length().mul(2);
+  material.colorNode = vec3(rgb[0], rgb[1], rgb[2]).mul(
+    smoothstep(float(1), float(groundFade), reach),
+  );
+  const mesh = new THREE.Mesh(new THREE.CircleGeometry(radius, 96), material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(look.centre[0], -1.5, look.centre[1]);
+  return mesh;
 }
 
 function ringMesh(
@@ -255,7 +298,10 @@ export class CircuitMap {
   readonly fade = uniform(1);
   private readonly points: THREE.Vector3[];
 
-  private constructor(readonly data: CircuitData) {
+  private constructor(
+    readonly data: CircuitData,
+    private readonly look: MapLook,
+  ) {
     this.points = this.centreline();
     this.scene.background = new THREE.Color(0, 0, 0);
     this.buildGround();
@@ -263,10 +309,10 @@ export class CircuitMap {
     this.buildZones();
   }
 
-  static async load(): Promise<CircuitMap> {
-    const response = await fetch(mapUrl);
+  static async load(url: string, look: MapLook): Promise<CircuitMap> {
+    const response = await fetch(url);
     if (!response.ok) throw new Error("failed to load the circuit map");
-    return new CircuitMap((await response.json()) as CircuitData);
+    return new CircuitMap((await response.json()) as CircuitData, look);
   }
 
   private centreline(): THREE.Vector3[] {
@@ -308,13 +354,14 @@ export class CircuitMap {
   }
 
   private buildGround(): void {
-    const { data } = this;
+    const { data, look } = this;
     const add = (mesh: THREE.Mesh, order: number) => {
       mesh.renderOrder = order;
       this.scene.add(mesh);
     };
-    add(flatArea(data.parking, parkingColour, -1), 0);
-    add(flatArea(data.water, waterColour, -0.8), 0);
+    if (look.ground) add(groundDisc(look, look.ground), 0);
+    add(flatArea(data.parking, colourOf(look.parking), -1), 0);
+    add(flatArea(data.water, colourOf(look.water), -0.8), 0);
     add(
       new THREE.Mesh(
         ribbonOf(data.aisles, aisleWidth),
@@ -336,16 +383,16 @@ export class CircuitMap {
       ),
       2,
     );
-    add(buildingsMesh(data), 3);
+    add(buildingsMesh(data, look), 3);
     const arcs = new Ribbon();
     for (const radius of horizonRadii) {
       const path: Path = [];
       for (let i = 0; i <= 240; i++) {
         const angle = (i / 240) * Math.PI * 2;
         path.push([
-          horizonCentre.x + Math.cos(angle) * radius,
+          look.centre[0] + Math.cos(angle) * radius,
           0,
-          horizonCentre.y + Math.sin(angle) * radius,
+          look.centre[1] + Math.sin(angle) * radius,
         ]);
       }
       arcs.add(path, 150, false);

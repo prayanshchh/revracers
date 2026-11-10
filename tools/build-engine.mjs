@@ -328,7 +328,8 @@ stage(
   path.join(root, "engine/data/local/drivers/human/cars"),
   path.join(data, "/sd/data/aisetup"),
 );
-writeTrackData(root, path.join(out, "hill-country-ai.txt"));
+for (const id of ["hill-country", "neon-boulevard"])
+  writeTrackData(root, id, path.join(out, `${id}-ai.txt`));
 
 const exported = [
   "_sdInit",

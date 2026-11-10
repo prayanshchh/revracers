@@ -1,7 +1,8 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const bayRows = 14;
+const garageBays = 25;
 const firstFreeBay = 2;
 const gridSetback = 2;
 
@@ -46,21 +47,26 @@ function kerbMask(track, side, count) {
   return mask;
 }
 
-export function writeTrackData(root, target) {
-  const directory = path.join(root, "content/tracks/hill-country");
+export function writeTrackData(root, id, target) {
+  const directory = path.join(root, "content/tracks", id);
   const read = (file) =>
     JSON.parse(readFileSync(path.join(directory, file), "utf8"));
+  const optional = (file, fallback) =>
+    existsSync(path.join(directory, file)) ? read(file) : fallback;
   const track = read("track.json");
   const line = read("racing-line.json");
   const frame = read("sd-frame.json");
-  const calibration = read("ai-calibration.json");
-  const kerbs = { length: track.length, ...read("ai-kerbs.json") };
+  const calibration = optional("ai-calibration.json", { gain: [1] });
+  const kerbs = {
+    length: track.length,
+    ...optional("ai-kerbs.json", { surfaces: track.surfaces }),
+  };
   const centre = track.centerline;
   const pit = track.pitLane;
   const span =
     ((pit.garageEnd - pit.garageStart) % track.length) + track.length;
   const wrapped = span % track.length;
-  const bays = Math.floor(wrapped / bayRows);
+  const bays = Math.max(garageBays, Math.floor(wrapped / bayRows));
   const spacing = wrapped / bays;
   const body = [
     section("frame", [...frame.origin, frame.heading]),

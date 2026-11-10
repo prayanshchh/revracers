@@ -1,4 +1,4 @@
-import { ersModes, fuelMixes, nominalFuelPerLap } from "./energy.ts";
+import { ersModes, fuelMixes } from "./energy.ts";
 import { el } from "./dom.ts";
 import { carArt } from "./mfd.ts";
 import { ParamDoc } from "./params.ts";
@@ -6,6 +6,7 @@ import { compounds } from "./tyres.ts";
 import { raceLapOptions, raceLaps } from "./weekend.ts";
 import {
   autoFuelLaps,
+  lapFuel,
   applyWeather,
   carOf,
   cars,
@@ -1015,7 +1016,7 @@ export class Menu {
         },
         format: (v) =>
           v > 0
-            ? `${String(v)} kg (${(v / nominalFuelPerLap).toFixed(1)} Laps)`
+            ? `${String(v)} kg (${(v / lapFuel(s)).toFixed(1)} Laps)`
             : `Auto (${String(autoFuelLaps(s, stageOf(s, "race")))} Laps)`,
         range: `Min 0 - ${String(tank)} Max`,
       },

@@ -21,7 +21,7 @@ const toneColumns = 8;
 const toneBase = 0.26;
 const toneSwing = 0.09;
 
-type Maps = Record<
+export type Maps = Record<
   | "asphalt"
   | "asphaltNormal"
   | "asphaltRoughness"
@@ -64,7 +64,7 @@ function better(map: THREE.Texture, url: string): THREE.Texture {
   return map;
 }
 
-function loadMaps(anisotropy: number, after: Promise<unknown>): Maps {
+export function loadMaps(anisotropy: number, after: Promise<unknown>): Maps {
   const load = (url: string, colour: boolean) => {
     const map = releaseOnceUploaded(later(url, after));
     map.flipY = false;
@@ -154,7 +154,7 @@ function asphaltTone(row: number, rows: number): number {
   return toneBase + toneSwing * wave;
 }
 
-function bakedGround(maps: Maps): BakedGround {
+export function bakedGround(maps: Maps): BakedGround {
   const apronA = maskTexture(new Uint8Array(4 * 4 * 4), 4, 4);
   const tone = new Uint8Array(toneColumns * toneRows * 4);
   for (let row = 0; row < toneRows; row++) {
@@ -172,7 +172,9 @@ function bakedGround(maps: Maps): BakedGround {
   };
 }
 
-function sources(maps: Maps): Record<string, THREE.MeshStandardMaterial> {
+export function sources(
+  maps: Maps,
+): Record<string, THREE.MeshStandardMaterial> {
   const make = (name: string, params: THREE.MeshStandardMaterialParameters) =>
     new THREE.MeshStandardMaterial({ name, roughness: 1, ...params });
   return {
@@ -216,7 +218,7 @@ function sources(maps: Maps): Record<string, THREE.MeshStandardMaterial> {
   };
 }
 
-function meshOf(part: Part, material: THREE.Material): THREE.Mesh {
+export function meshOf(part: Part, material: THREE.Material): THREE.Mesh {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
