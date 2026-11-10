@@ -4,7 +4,6 @@ import type { CarStatus } from "./mfd.ts";
 import type { PadLink } from "./pad.ts";
 import { LineReader, type RacingLineData } from "./racing-line.ts";
 import type { PitPhase } from "./pitstop.ts";
-import { fetchJson } from "./scene.ts";
 import { SlowClock } from "./slow-clock.ts";
 import {
   type Command,
@@ -43,7 +42,7 @@ export interface TutorialLive {
 export interface TutorialTrack {
   turns: CourseTurn[];
   lessons: Lessons;
-  racingLine: string;
+  racingLine: RacingLineData;
 }
 
 type Held = Record<"left" | "right" | "up" | "down", boolean>;
@@ -83,12 +82,12 @@ function strongest(a: number, b: number): number {
 }
 
 export class TutorialRun {
-  static async load(
+  static start(
     hooks: TutorialHooks,
     track: TutorialTrack,
-  ): Promise<TutorialRun> {
-    const data = await fetchJson<RacingLineData>(track.racingLine);
-    return new TutorialRun(hooks, data, track);
+    welcomeSeen = 0,
+  ): TutorialRun {
+    return new TutorialRun(hooks, track.racingLine, track, welcomeSeen);
   }
 
   private readonly machine: Tutorial;
@@ -114,6 +113,7 @@ export class TutorialRun {
     private readonly hooks: TutorialHooks,
     data: RacingLineData,
     track: TutorialTrack,
+    welcomeSeen: number,
   ) {
     this.length = hooks.engine.trackLength();
     this.reader = new LineReader(
@@ -121,11 +121,14 @@ export class TutorialRun {
       data.length,
       data.length / this.length,
     );
-    this.machine = new Tutorial({
-      length: this.length,
-      turns: track.turns,
-      lessons: track.lessons,
-    });
+    this.machine = new Tutorial(
+      {
+        length: this.length,
+        turns: track.turns,
+        lessons: track.lessons,
+      },
+      welcomeSeen,
+    );
     this.clock.hold();
     this.screen = new TutorialScreen(hooks.root);
     window.addEventListener(

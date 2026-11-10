@@ -206,7 +206,7 @@ describe("circuit map content", () => {
   test("straights and the speed trap sit on the long straights", () => {
     const turn = (n: number) =>
       map.turns.find((t) => t.number === n)?.distance ?? 0;
-    const [back, main] = map.straights;
+    const [main, back] = map.straights;
     expect(back?.[0]).toBeGreaterThan(turn(11));
     expect(back?.[1]).toBeLessThan(turn(12));
     expect(main?.[0]).toBeGreaterThan(turn(20));

@@ -54,6 +54,8 @@ import {
   expectDownloads,
   releaseUploadedImages,
   uploadEverything,
+  uploadLater,
+  warmLater,
 } from "./preload.ts";
 import { PitGate } from "./pit-gate.ts";
 import type { PitControl, PitLayout } from "./pitstop.ts";
@@ -545,6 +547,7 @@ export class Scene {
   };
   private readonly viewMatrix = new THREE.Matrix4();
   private warming = false;
+  private debrisCars = false;
   private crewOut = false;
   private compound = 1;
   private fittedCompound = 1;
@@ -601,15 +604,16 @@ export class Scene {
       skyBox.mesh,
       track,
       car.root,
-      this.smoke.root,
-      this.rain.mesh,
-      this.farRain.mesh,
-      this.spray.root,
-      this.debris.root,
-      this.gravel.root,
+      warmLater(this.smoke.root),
+      warmLater(this.rain.mesh),
+      warmLater(this.farRain.mesh),
+      warmLater(this.spray.root),
+      warmLater(this.debris.root),
+      warmLater(this.gravel.root),
       ...extras,
     );
     this.tyreStones = new TyreStones(car.tyreMounts());
+    this.tyreStones.meshes.forEach(warmLater);
     const night = light.night >= 1;
     const lit = sessionLighting(skyBox, night, look);
     this.clearSight = night && look ? look.visibility : clearVisibility;
@@ -634,8 +638,8 @@ export class Scene {
     this.scene.add(
       this.marks.mesh,
       ...presentRoots(this.crew),
-      this.gate.mesh,
-      this.safetyCar.root,
+      warmLater(this.gate.mesh),
+      warmLater(this.safetyCar.root),
     );
     this.moving = [
       skyBox.mesh,
@@ -644,7 +648,6 @@ export class Scene {
       this.safetyCar.root,
       ...extras,
     ];
-    this.addDebrisCars(field);
     culler.narrowViews();
     car.focusMirror = (view) => {
       culler.focus(view);
@@ -844,8 +847,11 @@ export class Scene {
     }
   }
 
-  private addDebrisCars(field: FieldCars | null): void {
-    this.debris.addCar(0, this.car.pieces);
+  private addDebrisCars(): void {
+    if (this.debrisCars) return;
+    this.debrisCars = true;
+    const { field } = this;
+    this.debris.addCar(0, this.car.debrisPieces());
     this.debris.addWheels(0, this.car.wheelPieces);
     for (let i = 1; ; i++) {
       const pieces = field?.piecesOf(i);
@@ -1417,14 +1423,31 @@ export class Scene {
   ): Promise<void> {
     this.warming = true;
     this.crew?.bake();
-    await uploadEverything(renderer, this.scene, () => {
-      draw();
-      this.sunlight.freeze();
-      if (mirrors) this.warmMirrors(renderer);
-    });
+    if (mirrors) this.addDebrisCars();
+    await uploadEverything(
+      renderer,
+      this.scene,
+      () => {
+        draw();
+        this.sunlight.freeze();
+        if (mirrors) this.warmMirrors(renderer);
+      },
+      !mirrors,
+    );
     this.warming = false;
     releaseCpuCopies(this.road, this.culler.retained());
     releaseUploadedImages(renderer, this.scene);
+  }
+
+  get racingLineData(): RacingLineData {
+    return this.racingLine.data;
+  }
+
+  warmRest(renderer: THREE.WebGPURenderer, draw: () => void): Promise<void> {
+    this.addDebrisCars();
+    return uploadLater(renderer, this.scene, draw, () => {
+      this.sunlight.redraw();
+    });
   }
 
   updateTyres(frame: Float64Array, tyres: TyreInfo): void {

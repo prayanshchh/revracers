@@ -185,6 +185,11 @@ double sdWeatherFutureLine(double seconds)
     return water;
 }
 
+bool sdWeatherLowGrip()
+{
+    return lineWater >= slickLimit;
+}
+
 bool sdWeatherWetCompound(int compound)
 {
     return compound >= 3;

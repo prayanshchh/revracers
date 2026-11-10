@@ -131,27 +131,6 @@
   text-align: center;
 }
 
-.tut-card::before,
-.tut-alert::before {
-  content: "";
-  position: absolute;
-  inset: -90px -100vw;
-  z-index: -1;
-  background: linear-gradient(
-    to bottom,
-    rgb(0 0 0 / 0%),
-    rgb(0 0 0 / 8%) 12%,
-    rgb(0 0 0 / 24%) 26%,
-    rgb(0 0 0 / 44%) 40%,
-    rgb(0 0 0 / 54%) 50%,
-    rgb(0 0 0 / 44%) 60%,
-    rgb(0 0 0 / 24%) 74%,
-    rgb(0 0 0 / 8%) 88%,
-    rgb(0 0 0 / 0%)
-  );
-  pointer-events: none;
-}
-
 .tutorial-tour .menu,
 .tutorial-tour .menu * {
   pointer-events: none;

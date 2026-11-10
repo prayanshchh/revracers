@@ -69,7 +69,7 @@ import { Atmosphere } from "./game/atmosphere.ts";
 import { RaceLog } from "./game/race-log.ts";
 import { loadReference, rememberReference } from "./game/reference.ts";
 import { fetchJson, Scene } from "./game/scene.ts";
-import { GameSound, openAudio } from "./game/sound/game-sound.ts";
+import { GameSound } from "./game/sound/game-sound.ts";
 import { Music } from "./game/sound/music.ts";
 import { LightCue, StartLights } from "./game/start-lights.ts";
 import {
@@ -132,7 +132,15 @@ import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
 import { type Circuit, circuitOf } from "./game/circuits.ts";
 import { dropEarly } from "./game/early.ts";
-import { schoolFirst } from "./game/school-early.ts";
+import {
+  freshPlayer,
+  gameAudio,
+  schoolDriver,
+  schoolFirst,
+} from "./game/school-early.ts";
+import { gpuDevice } from "./game/gpu-device.ts";
+import { handOverStill, stillSeen, stillSkipped } from "./game/school-still.ts";
+import { fitStage } from "./game/stage.ts";
 import { releaseUploadedImages } from "./game/preload.ts";
 import { warmGame } from "./game/warm-cache.ts";
 import { loadShow } from "./game/opening.ts";
@@ -225,12 +233,19 @@ function entryScript(html: string): string | undefined {
   return /<script type="module"[^>]*\ssrc="([^"]+)"/.exec(html)?.[1];
 }
 
-async function redeployed(tutorial: boolean): Promise<boolean> {
-  const ours = entryScript(document.documentElement.outerHTML);
-  const live = await fetch("/", { cache: "no-store" })
+function liveEntry(): Promise<string | undefined> {
+  return fetch("/", { cache: "no-store" })
     .then((response) => (response.ok ? response.text() : ""))
-    .catch(() => "");
-  const theirs = entryScript(live);
+    .catch(() => "")
+    .then(entryScript);
+}
+
+async function redeployed(
+  tutorial: boolean,
+  live = liveEntry(),
+): Promise<boolean> {
+  const ours = entryScript(document.documentElement.outerHTML);
+  const theirs = await live;
   if (!ours || !theirs || ours === theirs) return false;
   if (sessionStorage.getItem(redeployKey) === theirs) return false;
   sessionStorage.setItem(redeployKey, theirs);
@@ -334,11 +349,6 @@ function trackMap(engine: Engine): TrackMap {
     return [x, y] as [number, number];
   });
   return { points, length };
-}
-
-function fitStage(): void {
-  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-  document.documentElement.style.setProperty("--s", String(scale));
 }
 
 function drawer(renderer: THREE.WebGPURenderer, scene: Scene): () => void {
@@ -619,12 +629,26 @@ async function pitLayout(
   return field ? { ...pit, boxDistance: engine.playerBox() } : pit;
 }
 
+function afterFrames(count: number): Promise<void> {
+  return new Promise((resolve) => {
+    const tick = (left: number) => {
+      if (left <= 0) resolve();
+      else
+        requestAnimationFrame(() => {
+          tick(left - 1);
+        });
+    };
+    tick(count);
+  });
+}
+
 function warmInBackground(
   tutorial: boolean,
   mirrorsWarm: boolean,
   team: string,
   renderer: THREE.WebGPURenderer,
   scene: Scene,
+  draw: () => void,
 ): void {
   const release = () => {
     requestAnimationFrame(() => {
@@ -633,7 +657,11 @@ function warmInBackground(
       });
     });
   };
-  if (!mirrorsWarm) void scene.compileMirrors(renderer).catch(() => undefined);
+  if (!mirrorsWarm)
+    void afterFrames(2)
+      .then(() => scene.warmRest(renderer, draw))
+      .then(() => scene.compileMirrors(renderer))
+      .catch(() => undefined);
   void scene
     .finishCar()
     .then(() => warmGame(team, release, tutorial))
@@ -662,15 +690,13 @@ function poseOf(frame: Float64Array) {
 async function createRenderer(
   target: HTMLCanvasElement,
 ): Promise<THREE.WebGPURenderer> {
-  const adapter = await navigator.gpu.requestAdapter();
+  const device = await gpuDevice();
   const renderer = new THREE.WebGPURenderer({
     canvas: target,
     reversedDepthBuffer: true,
     depth: false,
     alpha: false,
-    requiredLimits: adapter
-      ? { maxTextureDimension2D: adapter.limits.maxTextureDimension2D }
-      : {},
+    ...(device ? { device } : {}),
   });
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -888,6 +914,12 @@ interface Entry {
   tutorial: boolean;
 }
 
+interface Started {
+  driver: Promise<Driver | null>;
+  tutorial: boolean;
+  autostart: boolean;
+}
+
 function newcomer(driver: Driver | null): boolean {
   return tutorialStatus() === null && driver?.onboarded !== true;
 }
@@ -937,7 +969,7 @@ async function signIn(
   menu: Menu,
   music: Music,
 ): Promise<Entry> {
-  const known = await currentDriver();
+  const known = await (schoolDriver() ?? currentDriver());
   if (known?.onboarded === true && tutorialStatus() === null)
     rememberTutorial("skipped");
   if (autostart) return { driver: known, tutorial: false };
@@ -947,19 +979,44 @@ async function signIn(
   return entry;
 }
 
+function never<T>(): Promise<T> {
+  return new Promise(() => undefined);
+}
+
+function schoolEntry(early: Promise<Driver | null>, asked: boolean): Started {
+  const live = liveEntry();
+  const driver = early.then(async (known) => {
+    if (!asked && !newcomer(known)) {
+      rememberTutorial("skipped");
+      toHub();
+      return never<Driver | null>();
+    }
+    if (await redeployed(true, live)) return never<Driver | null>();
+    return known;
+  });
+  return { driver, tutorial: true, autostart: true };
+}
+
 async function enter(
   params: URLSearchParams,
   renderer: THREE.WebGPURenderer,
   settings: Settings,
   menu: Menu,
   music: Music,
-): Promise<Entry & { autostart: boolean }> {
+): Promise<Started> {
   const autostart = consumeAutostart(params);
-  const entry = consumeTutorial(params)
-    ? { driver: await currentDriver(), tutorial: true }
+  const asked = consumeTutorial(params);
+  const early = schoolDriver();
+  if (early && (asked || !autostart)) return schoolEntry(early, asked);
+  const entry = asked
+    ? { driver: await (early ?? currentDriver()), tutorial: true }
     : await signIn(autostart, renderer, settings, menu, music);
-  if (await redeployed(entry.tutorial)) return new Promise(() => undefined);
-  return { ...entry, autostart: autostart || entry.tutorial };
+  if (await redeployed(entry.tutorial)) return never();
+  return {
+    driver: Promise.resolve(entry.driver),
+    tutorial: entry.tutorial,
+    autostart: autostart || entry.tutorial,
+  };
 }
 
 function startTutorial(
@@ -1005,12 +1062,17 @@ function schoolHud(options: HudOptions, tutorial: boolean): HudOptions {
     : options;
 }
 
-async function schoolRun(
+function schoolRun(
   tutorial: boolean,
   hooks: TutorialHooks,
   track: TutorialTrack,
-): Promise<TutorialRun | null> {
-  return tutorial ? TutorialRun.load(hooks, track) : null;
+): TutorialRun | null {
+  return tutorial ? TutorialRun.start(hooks, track, stillSeen()) : null;
+}
+
+function leaveStill(coach: TutorialRun | null): void {
+  if (coach && stillSkipped()) coach.skip();
+  handOverStill();
 }
 
 function debugHooks(
@@ -1051,10 +1113,8 @@ async function main(): Promise<void> {
   scoreLoadShow(music);
 
   const entry = await enter(params, renderer, settings, menu, music);
-  const { driver, autostart } = entry;
+  const { autostart } = entry;
   startTutorial(entry.tutorial, settings, menu);
-  const audio = openAudio();
-  const soundStart = GameSound.start(audio);
 
   const track = trackOf(settings);
   const circuit = circuitOf(track.id);
@@ -1062,12 +1122,14 @@ async function main(): Promise<void> {
   const seek = params.get("buildup");
   if (wantsBuildUp(settings, setup, autostart, seek)) music.preload("buildup");
   const { stage, field, plan } = setup;
-  const log = raceLog(driver, settings, stage);
   const lights = chooseLights(stage, params, entry.tutorial);
   const car = carOf(settings);
-  const seat = playerSeat(driver, car.id);
   applySettings(source, settings, stage);
-  const referenceLoad = loadReference(driver, settings.track, car.car);
+  const referenceLoad = entry.driver.then((known) =>
+    entry.tutorial && freshPlayer()
+      ? null
+      : loadReference(known, settings.track, car.car),
+  );
   await installTrack(module, circuit.engineFiles);
   setStatus(`Loading ${track.label}…`);
   statusBar.reset();
@@ -1083,7 +1145,7 @@ async function main(): Promise<void> {
     raceSystems(settings, stage, lights, interventions),
     plan,
   );
-  const scene = await Scene.load(
+  const sceneLoad = Scene.load(
     engine,
     car.id,
     renderer,
@@ -1093,6 +1155,11 @@ async function main(): Promise<void> {
     settings.clouds,
     circuit,
   );
+  const soundStart = GameSound.start(gameAudio());
+  const scene = await sceneLoad;
+  const driver = await entry.driver;
+  const log = raceLog(driver, settings, stage);
+  const seat = playerSeat(driver, car.id);
   const draw = drawer(renderer, scene);
   debugHooks(params, engine, scene, renderer);
 
@@ -1286,7 +1353,14 @@ async function main(): Promise<void> {
         );
   };
   document.body.dataset["driveStatus"] = "running";
-  warmInBackground(entry.tutorial, circuit.venue, car.id, renderer, scene);
+  warmInBackground(
+    entry.tutorial,
+    circuit.venue,
+    car.id,
+    renderer,
+    scene,
+    draw,
+  );
 
   const startFuel = engine.hudInfo().fuel;
   let padBrakeWas = false;
@@ -1544,7 +1618,7 @@ async function main(): Promise<void> {
   }
   music.stop();
   hudRoot.hidden = false;
-  coach = await schoolRun(
+  coach = schoolRun(
     entry.tutorial,
     {
       root: element("[data-tutorial=root]"),
@@ -1564,8 +1638,13 @@ async function main(): Promise<void> {
         toHub();
       },
     },
-    { turns, lessons: circuit.lessons, racingLine: circuit.racingLine },
+    {
+      turns,
+      lessons: circuit.lessons,
+      racingLine: scene.racingLineData,
+    },
   );
+  leaveStill(coach);
   waiting = readyFirst(params, coach);
   if (waiting)
     void readyCard(element("[data-ready=root]"), pad).then(() => {

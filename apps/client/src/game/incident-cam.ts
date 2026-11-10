@@ -2,6 +2,7 @@ import * as THREE from "three/webgpu";
 import { pass } from "three/tsl";
 import { carStride, frameIndex } from "./frame-layout.ts";
 import { putHidden, putText } from "./hud-dom.ts";
+import { startPipelines } from "./preload.ts";
 import type { ReplayTape } from "./replay.ts";
 import { ReplayCamera, type Station } from "./replay-camera.ts";
 import type { Scene } from "./scene.ts";
@@ -79,7 +80,9 @@ export class IncidentCam {
     this.camera.up.set(0, 0, 1);
     root.hidden = true;
     this.target.setSize(16, 9, false);
-    this.draw();
+    void startPipelines(renderer, () => {
+      this.draw();
+    }).catch(() => undefined);
   }
 
   play(

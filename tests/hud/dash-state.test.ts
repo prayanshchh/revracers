@@ -25,6 +25,7 @@ function energy(patch: Partial<EnergyInfo>): EnergyInfo {
     straightMode: 0,
     differential: 60,
     straightArmed: false,
+    straightEnabled: false,
     ...patch,
   };
 }

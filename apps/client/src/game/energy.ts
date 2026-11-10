@@ -32,6 +32,7 @@ export interface EnergyInfo {
   straightMode: number;
   differential: number;
   straightArmed: boolean;
+  straightEnabled: boolean;
 }
 
 export function nextErsMode(mode: number, previous: number): number {

@@ -1,10 +1,14 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const directory = process.argv[2] ?? "content/tracks/hill-country";
 const track = JSON.parse(
   readFileSync(path.join(directory, "track.json"), "utf8"),
 );
+const mapFile = path.join(directory, "circuit-map.json");
+const straightModeZones = existsSync(mapFile)
+  ? JSON.parse(readFileSync(mapFile, "utf8")).straights
+  : [];
 
 const width = track.width;
 const half = width / 2;
@@ -368,6 +372,16 @@ function spanSection(name, list) {
   return `<section name="${name}">${num("count", spans.length)}${entries.join("")}</section>`;
 }
 
+function straightModeSection() {
+  if (!straightModeZones.length) return "";
+  const zones = straightModeZones.map(
+    ([start, end], i) =>
+      `<section name="${String(i + 1)}">${num("start", start, "m")}${num("end", end, "m")}</section>`,
+  );
+  return `
+<section name="Straight Mode Zones">${zones.join("")}</section>`;
+}
+
 function gravelSections() {
   if (!gravelSpans.length) return "";
   return `
@@ -487,7 +501,7 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 &default-surfaces;
 ${["l", "r"].map(kerbSurface).join("\n")}
 ${grassSurface()}${gravelSurface()}
-</section>${gravelSections()}
+</section>${gravelSections()}${straightModeSection()}
 <section name="Header">
 ${str("name", track.name)}
 ${str("category", "circuit")}
