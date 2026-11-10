@@ -372,7 +372,13 @@ export function autoFuelLaps(settings: Settings, stage: Stage | null): number {
 function startFuel(settings: Settings, stage: Stage | null): number {
   return settings.fuel > 0
     ? settings.fuel
-    : autoFuelLaps(settings, stage) * nominalFuelPerLap;
+    : autoFuelLaps(settings, stage) * lapFuel(settings);
+}
+
+export function lapFuel(settings: Settings): number {
+  return (
+    nominalFuelPerLap * Math.max(1, trackOf(settings).length / tracks[0].length)
+  );
 }
 
 export function saveSettings(settings: Settings): void {
