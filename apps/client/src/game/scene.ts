@@ -73,7 +73,7 @@ import {
   type TrackPoint,
 } from "./floodlights.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
-import { Crowd, crowdData } from "./crowd.ts";
+import { Crowd, crowdAtlas, crowdData, standing } from "./crowd.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
 import { TyreStones } from "./tyre-stones.ts";
 import {
@@ -298,7 +298,7 @@ function venueDownloads(
     rivals.length > 0 ? [team, ...rivals] : teams.map((each) => each.id);
   const ground =
     circuit.ground === "street"
-      ? [...trainingTextures, ...streetFiles, crewUrl]
+      ? [...trainingTextures, ...streetFiles, ...crowdAtlas, crewUrl]
       : [roadUrl, crewUrl, crowdData];
   return [
     ...ground,
@@ -329,6 +329,7 @@ interface SharedLoads {
   radiance: Promise<SkyRadiance>;
   track: Promise<TrackData>;
   line: Promise<RacingLineData>;
+  city: Promise<CityData> | null;
 }
 
 function sharedLoads(
@@ -359,6 +360,10 @@ function sharedLoads(
     ),
     track: fetchJson<TrackData>(circuit.track),
     line: fetchJson<RacingLineData>(circuit.racingLine),
+    city:
+      circuit.ground === "street" && circuit.city
+        ? fetchJson<CityData>(circuit.city)
+        : null,
   };
 }
 
@@ -369,9 +374,8 @@ function groundOf(
   after: Promise<unknown>,
 ): Promise<THREE.Object3D> {
   const anisotropy = renderer.getMaxAnisotropy();
-  if (circuit.ground === "street" && circuit.city) {
-    const city = fetchJson<CityData>(circuit.city);
-    return Promise.all([loads.track, loads.line, city]).then(
+  if (loads.city) {
+    return Promise.all([loads.track, loads.line, loads.city]).then(
       ([data, line, cityData]) =>
         buildStreetCircuit(
           data as unknown as StreetTrack,
@@ -404,12 +408,16 @@ async function venueExtras(
   circuit: Circuit,
   anisotropy: number,
   team: string,
-  env: Promise<CarEnvironment>,
+  loads: SharedLoads,
 ): Promise<{ people: Crowd | null; crew: PitCrew | null }> {
   if (!circuit.venue) return { people: null, crew: null };
   const [people, crew] = await Promise.all([
-    circuit.ground === "glb" ? Crowd.load() : null,
-    env.then((loaded) => PitCrew.load(crewUrl, anisotropy, loaded, team)),
+    loads.city
+      ? loads.city.then((city) => Crowd.load(standing(city.spectators)))
+      : circuit.ground === "glb"
+        ? Crowd.load()
+        : null,
+    loads.env.then((loaded) => PitCrew.load(crewUrl, anisotropy, loaded, team)),
   ]);
   return { people, crew };
 }
@@ -575,6 +583,8 @@ export class Scene {
     glowMirror: 0,
     sheen: 0,
     shock: 0,
+    layer: 0,
+    layerBase: 0,
   };
 
   private constructor(
@@ -617,6 +627,7 @@ export class Scene {
     const night = light.night >= 1;
     const lit = sessionLighting(skyBox, night, look);
     this.clearSight = night && look ? look.visibility : clearVisibility;
+    this.atmosphere.layer = night && look ? look.layer : 0;
     this.cloudLight = lit.cloudLight;
     this.airLight = lit.air;
     this.sunlight = new Sunlight(
@@ -705,7 +716,7 @@ export class Scene {
     ] = await Promise.all([
       loads.sky,
       frameLoad,
-      venueExtras(circuit, anisotropy, team, loads.env),
+      venueExtras(circuit, anisotropy, team, loads),
       roadLoad,
       loads.line,
       carLoad,
@@ -756,6 +767,7 @@ export class Scene {
       coverOf(clouds),
       circuit.night,
     );
+    scene.atmosphere.layerBase = start[2];
     scene.useGround(
       (x, y) => engine.groundHeight(x, y),
       (x, y) => engine.barriers(x, y),

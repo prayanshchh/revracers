@@ -1,20 +1,29 @@
 import * as THREE from "three/webgpu";
 import {
   dot,
+  exp,
   float,
+  floor,
+  fract,
+  fwidth,
+  mix,
   mx_fractal_noise_float,
+  mx_noise_float,
   normalViewGeometry,
   positionViewDirection,
-  mix,
+  sin,
   smoothstep,
+  step,
   texture,
   uv,
+  vec2,
   vec3,
 } from "three/tsl";
 import wrapsUrl from "../../../../content/tracks/neon-boulevard/textures/wraps.webp?url";
 import leavesUrl from "../../../../content/tracks/neon-boulevard/textures/leaves.webp?url";
 import frondUrl from "../../../../content/tracks/neon-boulevard/textures/frond.webp?url";
 import fenceUrl from "../../../../content/tracks/neon-boulevard/textures/fence.webp?url";
+import screensUrl from "../../../../content/tracks/neon-boulevard/textures/screens.webp?url";
 import { releaseOnceUploaded } from "./preload.ts";
 import { type SkyRadiance, surface } from "./road.ts";
 import {
@@ -31,6 +40,7 @@ import {
   streetParts,
 } from "./street-layout.ts";
 import { buildCity, type CityData, cityGlow } from "./street-city.ts";
+import { entranceMesh } from "./street-entrances.ts";
 import { buildLandmarks } from "./street-landmarks.ts";
 import {
   crowdMaterial,
@@ -43,28 +53,54 @@ import {
 } from "./street-materials.ts";
 import type { CrewSpot, GarageCar } from "./street-pit.ts";
 
-export const streetFiles = [wrapsUrl, frondUrl, leavesUrl, fenceUrl];
+export const streetFiles = [
+  wrapsUrl,
+  frondUrl,
+  leavesUrl,
+  fenceUrl,
+  screensUrl,
+];
 
 const lampColour = new THREE.Color(0.93, 0.96, 1);
-const lampPeak = 90;
+const lampPeak = 55;
 const fenceColour = new THREE.Color(0.8, 0.82, 0.85);
-const fenceDensity = 0.72;
-const fenceSpill = 0.08;
-const steelSpill = 0.22;
+const fenceDensity = 0.86;
+const fenceSpill = 0.1;
+const steelSpill = 0.12;
 const wrapGlow = 0.3;
 const shaftRadius = 4.6;
-const shaftStrength = 0.2;
+const shaftStrength = 0.07;
 const shaftTop = 0.2;
 const shaftFade = 0.6;
 const shaftSegments = 10;
 const roofGlow = 0.12;
-const grimeAcross = 4;
-const grimeAlong = 0.08;
-const grimeStrength = 0.3;
+const roadTile = 2;
+const grimeAcross = 2;
+const grimeAlong = 0.04;
+const grimeStrength = 0.26;
+const rubberReach = 3;
+const rubberComb = 6;
+const rubberRun = 0.012;
+const rubberStreak = 0.32;
+const rubberFilm = 0.16;
+const laneWidth = 3.7;
+const jointWidth = 0.035;
+const jointRun = 0.011;
+const jointShade = 0.32;
+const dripReach = 0.42;
+const dripRun = 0.035;
+const dripShade = 0.13;
+const coverAcross = 4.6;
+const coverAlong = 64;
+const coverSpread = 0.7;
+const coverShare = 0.45;
+const coverRadius = 0.42;
+const coverShade = 0.5;
+const coverRim = 0.22;
 const runoffPaint = new THREE.Color(0.17, 0.44, 0.31);
 const runoffCover = 0.82;
-const patchAcross = 0.33;
-const patchAlong = 0.11;
+const patchAcross = 0.165;
+const patchAlong = 0.055;
 const patchShade = 0.86;
 const laneWear = new THREE.Color(0.36, 0.36, 0.35);
 
@@ -111,7 +147,7 @@ function streetSources(
       metalness: 0.2,
     }),
     "track fence steel": make("track fence steel", {
-      color: new THREE.Color(0.78, 0.79, 0.8),
+      color: new THREE.Color(0.5, 0.51, 0.52),
       roughness: 0.5,
       metalness: 0.2,
     }),
@@ -125,7 +161,7 @@ function streetSources(
       metalness: 0.2,
     }),
     "track pole steel": make("track pole steel", {
-      color: new THREE.Color(0.7, 0.71, 0.72),
+      color: new THREE.Color(0.52, 0.53, 0.54),
       roughness: 0.5,
       metalness: 0.25,
     }),
@@ -179,22 +215,90 @@ const decorations: Record<string, Decorate> = {
   "track pole steel": steelGlow,
 };
 
+function cellRoll(cell: THREE.Node<"vec2">, salt: number): THREE.Node<"float"> {
+  return fract(sin(cell.dot(vec2(12.9898, 78.233)).add(salt)).mul(43758.5453));
+}
+
+function laidRubber(
+  across: THREE.Node<"float">,
+  along: THREE.Node<"float">,
+): THREE.Node<"float"> {
+  const line = uv(1);
+  const lane = exp(line.x.div(rubberReach).pow(2).negate());
+  const combed = mx_fractal_noise_float(
+    vec3(across.mul(rubberComb), along.mul(rubberRun), 3),
+    2,
+  );
+  return lane
+    .mul(line.y)
+    .mul(smoothstep(-0.3, 0.4, combed).mul(rubberStreak).add(rubberFilm));
+}
+
+function pavingJoints(
+  across: THREE.Node<"float">,
+  along: THREE.Node<"float">,
+): THREE.Node<"float"> {
+  const lane = across.div(laneWidth);
+  const gap = fract(lane.add(0.5)).sub(0.5).abs().mul(laneWidth);
+  const width = fwidth(across).add(jointWidth);
+  const kept = smoothstep(
+    -0.2,
+    0,
+    mx_noise_float(vec2(floor(lane.add(0.5)).mul(7.7), along.mul(jointRun))),
+  );
+  return smoothstep(width, width.mul(0.4), gap).mul(kept);
+}
+
+function drips(
+  across: THREE.Node<"float">,
+  along: THREE.Node<"float">,
+): THREE.Node<"float"> {
+  const centre = fract(across.div(laneWidth)).sub(0.5).abs().mul(laneWidth);
+  const pooled = mx_noise_float(vec2(across.mul(0.4), along.mul(dripRun)))
+    .mul(0.5)
+    .add(0.5);
+  return exp(centre.div(dripReach).pow(2).negate()).mul(pooled);
+}
+
+function manholes(
+  across: THREE.Node<"float">,
+  along: THREE.Node<"float">,
+): THREE.Node<"float"> {
+  const size = vec2(coverAcross, coverAlong);
+  const at = vec2(across, along).div(size);
+  const cell = floor(at);
+  const centre = vec2(cellRoll(cell, 1.7), cellRoll(cell, 5.3))
+    .sub(0.5)
+    .mul(coverSpread);
+  const reach = fract(at).sub(0.5).sub(centre).mul(size).length();
+  const present = step(cellRoll(cell, 9.1), coverShare);
+  const lid = smoothstep(coverRadius, coverRadius - 0.04, reach).mul(present);
+  const rim = smoothstep(coverRadius * 0.72, coverRadius * 0.8, reach);
+  return lid.mul(mix(float(coverShade), float(coverRim), rim));
+}
+
 function streetGrime(): THREE.Node<"float"> {
+  const across = uv().x.mul(roadTile);
+  const along = uv().y.mul(roadTile);
   const streaks = mx_fractal_noise_float(
-    vec3(uv().x.mul(grimeAcross), uv().y.mul(grimeAlong), 0),
+    vec3(across.mul(grimeAcross), along.mul(grimeAlong), 0),
     3,
   );
   const patch = smoothstep(
     0.25,
     0.32,
     mx_fractal_noise_float(
-      vec3(uv().x.mul(patchAcross), uv().y.mul(patchAlong), 7),
+      vec3(across.mul(patchAcross), along.mul(patchAlong), 7),
       2,
     ),
   );
   return float(1)
     .add(streaks.mul(grimeStrength))
-    .mul(mix(float(1), float(patchShade), patch));
+    .mul(mix(float(1), float(patchShade), patch))
+    .mul(float(1).sub(laidRubber(across, along)))
+    .mul(float(1).sub(pavingJoints(across, along).mul(jointShade)))
+    .mul(float(1).sub(drips(across, along).mul(dripShade)))
+    .mul(float(1).sub(manholes(across, along)));
 }
 
 function lightShafts(poles: StreetPole[]): THREE.InstancedMesh {
@@ -264,7 +368,7 @@ export async function buildStreetCircuit(
   const maps = loadMaps(anisotropy, after);
   const byName = streetSources(maps, anisotropy);
   const sky = await skyLoad;
-  const baked = bakedGround(maps);
+  const baked = { ...bakedGround(maps), cracked: false };
   const materials = new Map<string, THREE.Material>();
   const lamp = lampMaterial();
   const special: Record<string, THREE.Material> = {
@@ -306,9 +410,13 @@ export async function buildStreetCircuit(
   const foliage = image(leavesUrl, true, anisotropy);
   foliage.wrapS = THREE.ClampToEdgeWrapping;
   foliage.wrapT = THREE.ClampToEdgeWrapping;
+  const screens = image(screensUrl, true, anisotropy);
+  screens.wrapS = THREE.ClampToEdgeWrapping;
+  screens.wrapT = THREE.ClampToEdgeWrapping;
   root.add(
-    buildCity(city, frond, foliage),
-    buildLandmarks(city.landmarks),
+    buildCity(city, frond, foliage, screens),
+    entranceMesh(city.entrances),
+    buildLandmarks(city.landmarks, screens),
     lightShafts(poles),
   );
   root.userData["poles"] = poles;

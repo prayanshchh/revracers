@@ -38,6 +38,8 @@ export interface NightLook {
   visibility: number;
   flood: number;
   tint: Rgb;
+  dome: number;
+  layer: number;
 }
 
 export interface Circuit {
@@ -100,6 +102,8 @@ const circuits: Circuit[] = [
       visibility: 1000,
       flood: 5.5,
       tint: [1, 0.98, 0.89],
+      dome: 0.12,
+      layer: 26,
     },
     venue: true,
   },

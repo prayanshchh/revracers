@@ -299,6 +299,7 @@ export class SkyBox {
   private readonly nightZenith: THREE.Vector3;
   private readonly nightHorizon: THREE.Vector3;
   private readonly nightGlow: THREE.Vector3;
+  private readonly nightDome: number;
 
   readonly environment: THREE.Texture;
   private readonly envOvercast = uniform(0);
@@ -324,6 +325,7 @@ export class SkyBox {
       ? new THREE.Vector3(...look.horizon)
       : nightHorizon;
     this.nightGlow = look ? new THREE.Vector3(...look.glow) : nightGlow;
+    this.nightDome = look ? look.dome : 1;
     const { width, height } = clearEnvironment.image as {
       width: number;
       height: number;
@@ -365,7 +367,11 @@ export class SkyBox {
     });
     const clip = modelViewProjection as unknown as THREE.Node<"vec4">;
     material.vertexNode = vec4(clip.xy, 0, clip.w);
-    material.colorNode = this.radiance(normalize(positionLocal));
+    const shown = this.radiance(normalize(positionLocal));
+    material.colorNode =
+      this.nightDome === 1
+        ? shown
+        : shown.mul(mix(float(1), float(this.nightDome), this.night));
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(domeRadius, 64, 32),
       material,

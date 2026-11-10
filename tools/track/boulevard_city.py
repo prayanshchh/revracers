@@ -88,9 +88,87 @@ FRONTAGE_TALL_SHARE = 0.18
 FRONTAGE_GAP_SHARE = 0.12
 FRONTAGE_STEP = 8.0
 FRONTAGE_TRIES = 6
+FRONTAGE_STYLES = ("casino", "arcade", "mall", "arcade", "stucco")
 STAND_ROW_DEPTH = 0.85
 STAND_CLEARANCE = 9.0
 SEED = 23
+STYLE_SPOTS = (
+    (36.1228, -115.1685, 230.0, "cream"),
+    (36.1280, -115.1652, 220.0, "bronze"),
+    (36.1296, -115.1726, 120.0, "gold"),
+    (36.1348, -115.1662, 200.0, "crimson"),
+    (36.1247, -115.1719, 160.0, "terracotta"),
+    (36.1213, -115.1752, 200.0, "ivory"),
+    (36.1195, -115.1705, 110.0, "violet"),
+    (36.1184, -115.1707, 60.0, "white"),
+    (36.1165, -115.1715, 130.0, "rose"),
+    (36.1138, -115.1700, 150.0, "slab"),
+    (36.1125, -115.1705, 90.0, "sand"),
+    (36.1101, -115.1714, 130.0, "pier"),
+    (36.1088, -115.1685, 110.0, "azure"),
+    (36.1160, -115.1762, 230.0, "white"),
+    (36.1122, -115.1768, 200.0, "cream"),
+    (36.1099, -115.1750, 150.0, "azure"),
+    (36.1082, -115.1772, 190.0, "glass"),
+    (36.1074, -115.1747, 70.0, "gold"),
+    (36.1068, -115.1666, 140.0, "gold"),
+    (36.1074, -115.1693, 150.0, "emerald"),
+    (36.1162, -115.1866, 200.0, "crimson"),
+    (36.1142, -115.1975, 250.0, "violet"),
+    (36.1024, -115.1748, 130.0, "sand"),
+    (36.1024, -115.1702, 130.0, "ivory"),
+    (36.1047, -115.1761, 120.0, "white"),
+)
+STYLE_POOL = {
+    "tower": ("cream", "ivory", "sand", "slab", "charcoal", "glass", "white", "slab", "charcoal"),
+    "podium": ("casino", "mall", "casino"),
+    "parking": ("deck",),
+    "low": ("shop", "stucco", "depot", "shop"),
+}
+MARQUEE_REACH = 650.0
+MARQUEE_HEIGHT = 55.0
+MARQUEE_WIDTH = (16.0, 46.0)
+MARQUEE_SHARE = 0.62
+MARQUEE_ASPECT = 5.33
+MARQUEE_INSET = 2.5
+MARQUEE_LIFT = 1.2
+MARQUEE_NAMES = 24
+FASCIA_REACH = 60.0
+FASCIA_EDGE = 16.0
+FASCIA_WIDTH = (7.0, 18.0)
+FASCIA_SHARE = 0.5
+FASCIA_LIFT = (5.2, 8.5)
+FASCIA_OUT = 0.35
+FASCIA_FACING = 0.55
+ENTRANCE_REACH = 260.0
+ENTRANCE_EDGE = 22.0
+ENTRANCE_WIDTH = (14.0, 34.0)
+ENTRANCE_SHARE = 0.42
+ENTRANCE_DEPTH = (6.0, 13.0)
+ENTRANCE_HEIGHT = (6.5, 9.0)
+ENTRANCE_CLEAR = 1.5
+ENTRANCE_CLASSICAL = frozenset(("cream", "ivory", "sand", "white", "terracotta", "arcade", "casino"))
+CANOPY_SLAB = 0.9
+CANOPY_SIGN_SHARE = 0.7
+FRIEZE_LIFT = 0.72
+FRIEZE_LETTER = 1.2
+SPECTATOR_SETBACK = (1.3, 3.6)
+SPECTATOR_GROUP = (6, 30)
+SPECTATOR_GAP = (8.0, 42.0)
+SPECTATOR_PITCH = 0.42
+SPECTATOR_CLEAR = 0.9
+SCREEN_REACH = 150.0
+SCREEN_EDGE = 26.0
+SCREEN_WIDTH = (12.0, 30.0)
+SCREEN_SHARE = 0.45
+SCREEN_SHIFT = 0.25
+SCREEN_BASE = 11.5
+SCREEN_TOP = 1.2
+SCREEN_TALL = (5.5, 22.0)
+SCREEN_OUT = 0.6
+SCREEN_ASPECT = 1.78
+BALCONY_REACH = 420.0
+BALCONY_STYLES = frozenset(("rose", "terracotta", "azure", "charcoal", "ivory"))
 ROADS = {"primary", "secondary", "tertiary", "primary_link", "secondary_link", "unclassified", "residential", "motorway", "motorway_link"}
 
 
@@ -192,6 +270,201 @@ def kind_of(item):
     if item["polygon"].area > PODIUM_AREA:
         return "podium"
     return "low"
+
+
+def style_of(osm, spots, polygon, kind):
+    centre = np.array(polygon.centroid.coords[0])
+    best = None
+    for index, (spot, reach, style) in enumerate(spots):
+        distance = float(np.linalg.norm(centre - spot))
+        if distance <= reach and (best is None or distance < best[0]):
+            best = (distance, style, index)
+    if best is not None and kind != "parking":
+        return best[1], best[2]
+    pool = STYLE_POOL[kind]
+    pick = int(abs(centre[0] * 7.31 + centre[1] * 3.17)) % len(pool)
+    return pool[pick], None
+
+
+def marquee_of(polygon, top, toward, index):
+    centre = np.array(polygon.centroid.coords[0])
+    direction = toward - centre
+    direction /= np.linalg.norm(direction)
+    across = np.array([-direction[1], direction[0]])
+    ring = np.array(polygon.exterior.coords) - centre
+    front = float((ring @ direction).max())
+    span = float(np.ptp(ring @ across))
+    width = float(np.clip(span * MARQUEE_SHARE, *MARQUEE_WIDTH))
+    height = width / MARQUEE_ASPECT
+    at = centre + direction * (front - MARQUEE_INSET)
+    return {
+        "x": round(float(at[0]), 1),
+        "y": round(top + MARQUEE_LIFT + height / 2, 1),
+        "z": round(float(-at[1]), 1),
+        "facing": round(float(np.arctan2(direction[1], direction[0])), 3),
+        "width": round(width, 1),
+        "height": round(height, 1),
+        "name": index % MARQUEE_NAMES,
+    }
+
+
+def facing_edges(polygon, toward):
+    ring = np.array(polygon.exterior.coords)
+    turn = 1.0 if polygon.exterior.is_ccw else -1.0
+    centre = np.array(polygon.centroid.coords[0])
+    aim = toward - centre
+    aim /= np.linalg.norm(aim)
+    out = []
+    for a, b in zip(ring[:-1], ring[1:]):
+        span = float(np.linalg.norm(b - a))
+        if span < 1e-6:
+            continue
+        along = (b - a) / span
+        normal = np.array([along[1], -along[0]]) * turn
+        out.append((span, float(normal @ aim), (a + b) / 2, normal))
+    return out
+
+
+def wall_sign(polygon, base, height, toward, index, rng):
+    best = max(
+        (e for e in facing_edges(polygon, toward) if e[0] >= FASCIA_EDGE and e[1] >= FASCIA_FACING),
+        key=lambda e: e[0] * e[1],
+        default=None,
+    )
+    if best is None:
+        return None
+    span, _, middle, normal = best
+    width = float(np.clip(span * FASCIA_SHARE, *FASCIA_WIDTH))
+    tall = width / MARQUEE_ASPECT
+    lift = min(float(rng.uniform(*FASCIA_LIFT)), height - tall / 2 - 0.6)
+    if lift < 3.0:
+        return None
+    at = middle + normal * FASCIA_OUT
+    return {
+        "x": round(float(at[0]), 1),
+        "y": round(base + lift, 1),
+        "z": round(float(-at[1]), 1),
+        "facing": round(float(np.arctan2(normal[1], normal[0])), 3),
+        "width": round(width, 1),
+        "height": round(tall, 1),
+        "name": index % MARQUEE_NAMES,
+    }
+
+
+def wall_screen(polygon, base, height, toward, rng):
+    best = max(
+        (e for e in facing_edges(polygon, toward) if e[0] >= SCREEN_EDGE and e[1] >= FASCIA_FACING),
+        key=lambda e: e[0] * e[1],
+        default=None,
+    )
+    room = height - SCREEN_BASE - SCREEN_TOP
+    if best is None or room < SCREEN_TALL[0]:
+        return None
+    span, _, middle, normal = best
+    along = np.array([-normal[1], normal[0]])
+    width = float(np.clip(span * SCREEN_SHARE, *SCREEN_WIDTH))
+    panels = int(rng.choice((1, 1, 2, 3)))
+    tall = float(np.clip(width / SCREEN_ASPECT * panels, SCREEN_TALL[0], min(room, SCREEN_TALL[1])))
+    side = 1.0 if rng.random() < 0.5 else -1.0
+    at = middle + along * span * SCREEN_SHIFT * side + normal * SCREEN_OUT
+    return {
+        "x": round(float(at[0]), 1),
+        "y": round(base, 1),
+        "z": round(float(-at[1]), 1),
+        "facing": round(float(np.arctan2(normal[1], normal[0])), 3),
+        "width": round(width, 1),
+        "height": round(tall, 1),
+        "lift": round(SCREEN_BASE + float(rng.uniform(0, max(0.0, min(room - tall, 6.0)))), 1),
+        "seed": round(float(rng.random()), 3),
+        "wall": True,
+    }
+
+
+def entrance_of(polygon, style, base, toward, blocked, rng):
+    best = max(
+        (e for e in facing_edges(polygon, toward) if e[0] >= ENTRANCE_EDGE and e[1] >= FASCIA_FACING),
+        key=lambda e: e[0] * e[1],
+        default=None,
+    )
+    if best is None:
+        return None
+    span, _, middle, normal = best
+    along = np.array([-normal[1], normal[0]])
+    width = float(np.clip(span * ENTRANCE_SHARE, *ENTRANCE_WIDTH))
+    depth = float(rng.uniform(*ENTRANCE_DEPTH))
+    while depth >= ENTRANCE_DEPTH[0]:
+        corners = [
+            middle + along * width / 2 + normal * 0.4,
+            middle - along * width / 2 + normal * 0.4,
+            middle - along * width / 2 + normal * (depth + ENTRANCE_CLEAR),
+            middle + along * width / 2 + normal * (depth + ENTRANCE_CLEAR),
+        ]
+        if not Polygon(corners).intersects(blocked):
+            break
+        depth -= 1.5
+    if depth < ENTRANCE_DEPTH[0]:
+        return None
+    return {
+        "x": round(float(middle[0]), 1),
+        "y": round(base, 1),
+        "z": round(float(-middle[1]), 1),
+        "facing": round(float(np.arctan2(normal[1], normal[0])), 3),
+        "width": round(width, 1),
+        "depth": round(depth, 1),
+        "height": round(float(rng.uniform(*ENTRANCE_HEIGHT)), 1),
+        "kind": "portico" if style in ENTRANCE_CLASSICAL else "canopy",
+    }
+
+
+def crown(sign, entrance):
+    facing = entrance["facing"]
+    if entrance["kind"] == "canopy":
+        width = min(sign["width"], entrance["width"] * CANOPY_SIGN_SHARE)
+        height = width / MARQUEE_ASPECT
+        lift = entrance["height"] + CANOPY_SLAB + 0.15 + height / 2
+        out = entrance["depth"] - 0.4
+    else:
+        height = FRIEZE_LETTER
+        width = height * MARQUEE_ASPECT
+        lift = entrance["height"] + FRIEZE_LIFT
+        out = entrance["depth"] + 0.2
+    sign.update({
+        "x": round(entrance["x"] + float(np.cos(facing)) * out, 1),
+        "y": round(entrance["y"] + lift, 1),
+        "z": round(entrance["z"] - float(np.sin(facing)) * out, 1),
+        "facing": facing,
+        "width": round(width, 1),
+        "height": round(height, 1),
+    })
+
+
+def spectators(track, footprints_tree, polygons, paddock, terrain_at):
+    rng = np.random.default_rng(SEED + 11)
+    centre, left, walls = side_frame(track)
+    tree = cKDTree(centre)
+    length = track["length"]
+    count = len(centre)
+    people = []
+    for side in (1, -1):
+        d = rng.uniform(*SPECTATOR_GAP)
+        while d < length:
+            size = int(rng.integers(*SPECTATOR_GROUP))
+            for _ in range(size):
+                s = d + rng.uniform(0, size * SPECTATOR_PITCH)
+                i = int(s / length * count) % count
+                lateral = walls[i, 0 if side > 0 else 1] + rng.uniform(*SPECTATOR_SETBACK)
+                point = centre[i] + left[i] * lateral * side
+                spot = Point(point)
+                gap, _ = tree.query(point)
+                if gap < lateral - 0.5 or in_stand(s, side, length) or paddock.contains(spot):
+                    continue
+                if any(polygons[k].distance(spot) < SPECTATOR_CLEAR for k in footprints_tree.query(spot.buffer(SPECTATOR_CLEAR))):
+                    continue
+                people.append(point)
+            d += size * SPECTATOR_PITCH + rng.uniform(*SPECTATOR_GAP)
+    points = np.array(people) if people else np.zeros((0, 2))
+    ground = terrain_at(points) if len(points) else np.zeros(0)
+    return [v for p, g in zip(points, ground) for v in (round(float(p[0]), 1), round(float(g), 2), round(float(-p[1]), 1))]
 
 
 def side_frame(track):
@@ -476,6 +749,7 @@ def frontages(track, footprints_tree, polygons, roads, terrain_at):
                 base = float(terrain_at(polygon.representative_point().coords[:1])[0])
                 out.append({
                     "kind": "podium",
+                    "style": FRONTAGE_STYLES[len(out) % len(FRONTAGE_STYLES)],
                     "base": round(base, ROUND),
                     "height": round(height, ROUND),
                     "ring": [round(float(v), ROUND) for v in frame(ring).ravel()],
@@ -529,7 +803,11 @@ def build(root):
         [Point(c).buffer(w + TRACK_CLEARANCE, 8) for c, w in zip(centre[::3], walls[::3])] + [paddock]
     )
     middle = centre.mean(0)
+    spots = [(osm.local([(lat, lon)])[0], reach, style) for lat, lon, reach, style in STYLE_SPOTS]
+    near_track = cKDTree(centre)
     buildings = []
+    tallest = {}
+    nearest_of = []
     for item in footprints(osm):
         polygon = item["polygon"]
         distance = Point(middle).distance(polygon)
@@ -547,12 +825,23 @@ def build(root):
                 continue
         ring = np.array(polygon.exterior.coords)[:-1]
         base = float(terrain(polygon.representative_point().coords[:1])[0]) - origin_height
+        kind = kind_of(item)
+        style, spot = style_of(osm, spots, polygon, kind)
         buildings.append({
-            "kind": kind_of(item),
+            "kind": kind,
+            "style": style,
             "base": round(base + item["base"], ROUND),
             "height": round(item["height"] - item["base"], ROUND),
             "ring": [round(float(v), ROUND) for v in frame(ring).ravel()],
         })
+        gap, nearest = near_track.query(np.array(polygon.centroid.coords[0]))
+        nearest_of.append((polygon.distance(Point(centre[nearest])), centre[nearest], spot))
+        if kind == "tower" and style in BALCONY_STYLES and gap < BALCONY_REACH:
+            buildings[-1]["balcony"] = True
+        named = spot is not None and kind == "tower" and item["height"] >= MARQUEE_HEIGHT and gap < MARQUEE_REACH and polygon.area > 900
+        if named and item["height"] > tallest.get(spot, (0.0,))[0]:
+            tallest[spot] = (item["height"], polygon, base + item["height"], centre[nearest])
+    marquees = [marquee_of(polygon, top, toward, index) for index, (_, polygon, top, toward) in enumerate(tallest[spot] for spot in sorted(tallest))]
     rails = monorail_shift([densify(osm.local(way["geometry"]), MONORAIL_STEP) for way in osm.tagged("railway", "monorail")], track)
     monorail = []
     for line in rails:
@@ -620,6 +909,37 @@ def build(root):
     footprints_tree = STRtree(polygons)
     planted = street_trees(track, footprints_tree, polygons, terrain_at)
     signs = street_signs(track, terrain_at)
+    detail = np.random.default_rng(SEED + 7)
+    display = np.random.default_rng(SEED + 13)
+    blocked = unary_union([corridor, paddock])
+    entrances = []
+    for index, (building, polygon) in enumerate(zip(buildings, polygons)):
+        if building["kind"] == "parking":
+            continue
+        if index < len(nearest_of):
+            gap, toward, spot = nearest_of[index]
+        else:
+            gap, at = near_track.query(np.array(polygon.centroid.coords[0]))
+            toward, spot = centre[at], None
+            gap = polygon.distance(Point(toward))
+        sign = None
+        if gap < FASCIA_REACH and building["kind"] != "tower":
+            sign = wall_sign(polygon, building["base"], building["height"], toward, len(marquees), detail)
+            if sign is not None:
+                marquees.append(sign)
+        if gap < SCREEN_REACH and not building.get("balcony"):
+            screen = wall_screen(polygon, building["base"], building["height"], toward, display)
+            if screen is not None:
+                signs.append(screen)
+        grand = spot is not None or building["style"] in ("casino", "arcade", "mall")
+        if grand and gap < ENTRANCE_REACH and building["height"] >= 12:
+            others = unary_union([blocked] + [polygons[k].buffer(-0.5) for k in footprints_tree.query(polygon.buffer(20)) if k != index])
+            entrance = entrance_of(polygon, building["style"], building["base"], toward, others, detail)
+            if entrance is not None:
+                entrances.append(entrance)
+                if sign is not None:
+                    crown(sign, entrance)
+    watchers = spectators(track, footprints_tree, polygons, paddock, terrain_at)
     low = centre.min(0) - GROUND_MARGIN
     high = centre.max(0) + GROUND_MARGIN
     columns = int(np.ceil((high[0] - low[0]) / GROUND_STEP)) + 1
@@ -653,6 +973,9 @@ def build(root):
         "water": water,
         "streetTrees": planted,
         "signs": signs,
+        "marquees": marquees,
+        "entrances": entrances,
+        "spectators": watchers,
         "venue": {
             "stands": [{"from": a, "to": b, "side": side, "rows": rows} for a, b, side, rows in STANDS],
             "paddock": {

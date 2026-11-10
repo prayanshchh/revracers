@@ -26,6 +26,8 @@ const garageDepth = 12;
 const floorHeight = 3.6;
 const mullion = 1.6;
 const garageTop = 8.5;
+const hallStrip = 1.6;
+const hallRoom = 0.12;
 
 function hash(p: THREE.Node<"vec2">): THREE.Node<"float"> {
   return fract(sin(p.dot(vec2(127.1, 311.7))).mul(43758.5453));
@@ -249,9 +251,11 @@ export function hallMaterial(): THREE.MeshStandardNodeMaterial {
     .min(1);
   const floorIndex = floor(h.div(floorHeight));
   const room = floor(s.div(mullion * 6));
-  const lit = step(hash(vec2(room, floorIndex)), 0.82);
-  const glow = vec3(1.0, 0.88, 0.7)
-    .mul(lit.mul(0.9).add(0.12))
+  const mood = hash(vec2(room, floorIndex)).mul(0.5).add(0.5);
+  const strip = smoothstep(0.7, 0.74, level).mul(smoothstep(0.84, 0.8, level));
+  const glow = vec3(1.0, 0.9, 0.76)
+    .mul(strip.mul(hallStrip).add(hallRoom))
+    .mul(mood)
     .mul(float(1).sub(slab))
     .mul(float(1).sub(frame.mul(0.8)));
   const top = step(garageTop - 0.1, h);

@@ -587,6 +587,7 @@ export interface BakedGround {
   terrain: THREE.Texture;
   grain: THREE.Texture;
   natural?: NaturalGround;
+  cracked?: boolean;
 }
 
 interface NaturalGround {
@@ -630,7 +631,7 @@ function shadeRoad(
     smoothstep(0.08, 0.42, photo),
   );
   const band = rubber();
-  const detail = asphaltDetail(baked.grain);
+  const detail = asphaltDetail(baked.grain, baked.cracked ?? true);
   asphaltDetails.set(material, detail);
   material.colorNode = asphaltGrain(source)
     .mul(tone)

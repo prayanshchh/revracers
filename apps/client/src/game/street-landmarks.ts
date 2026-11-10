@@ -5,6 +5,7 @@ import {
   atan,
   clamp,
   cos,
+  exp,
   float,
   floor,
   fract,
@@ -17,12 +18,15 @@ import {
   positionLocal,
   sin,
   smoothstep,
+  sqrt,
   step,
   time,
   vec2,
   vec3,
 } from "three/tsl";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { cityGlow, Quads } from "./street-city.ts";
+import { slide } from "./street-screens.ts";
 
 interface Spot {
   x: number;
@@ -65,11 +69,24 @@ type Node3 = THREE.Node<"vec3">;
 const sceneTime = 11;
 const sceneCount = 4;
 const fade = 0.09;
+const broadcastPanels = 3;
+const broadcastBand = 0.42;
+const broadcastLift = 0.17;
+const broadcastSeconds = 5.5;
 const ledColumns = 1100;
 const ledRows = 520;
 const wheelCabins = 28;
 const wheelSegments = 96;
-const towerSegments = 14;
+const wheelTurn = (2 * Math.PI) / 240;
+const wheelGauge = 2.1;
+const wheelFlange = 5;
+const wheelHub = 1.8;
+const wheelStance = 8;
+const wheelBraces = [0.44, 0.64];
+const towerSegments = 22;
+const towerDeckShares = [0.175, 0.35, 0.84];
+const towerGlowLow = 0.26;
+const towerGlowHigh = 0.12;
 const towerFlare = 0.4;
 const up = new THREE.Vector3(0, 1, 0);
 
@@ -133,15 +150,18 @@ function planet(p: Node, q: Node): Node3 {
   return mix(banded, storm, smoothstep(0.42, 0.3, spot));
 }
 
-function flag(p: Node, q: Node): Node3 {
-  const wave = sin(p.mul(7).sub(time.mul(2.4))).mul(0.05);
-  const u = p.mul(9);
-  const v = q.add(wave).mul(9);
-  const check = abs(step(0.5, fract(u)).sub(step(0.5, fract(v))));
-  const shade = cos(p.mul(7).sub(time.mul(2.4)))
-    .mul(0.25)
-    .add(0.8);
-  return mix(vec3(0.04), vec3(0.95), check).mul(shade);
+function aurora(p: Node, q: Node): Node3 {
+  const flow = mx_noise_float(
+    vec3(p.mul(2.4).add(time.mul(0.03)), q.mul(1.6), time.mul(0.05)),
+  );
+  const veil = mx_noise_float(
+    vec3(p.mul(6).sub(time.mul(0.02)), q.mul(3.5).add(flow), time.mul(0.04)),
+  );
+  const deep = vec3(0.02, 0.03, 0.12);
+  const teal = vec3(0.05, 0.6, 0.62);
+  const rose = vec3(0.85, 0.12, 0.5);
+  const ribbon = smoothstep(-0.2, 0.7, veil.add(flow.mul(0.6)));
+  return mix(deep, mix(teal, rose, smoothstep(-0.5, 0.6, flow)), ribbon);
 }
 
 function lights(p: Node, q: Node): Node3 {
@@ -166,32 +186,37 @@ function lights(p: Node, q: Node): Node3 {
   return colour;
 }
 
-function neon(p: Node, q: Node): Node3 {
-  const top = vec3(0.98, 0.1, 0.62);
-  const middle = vec3(0.45, 0.08, 0.85);
-  const bottom = vec3(0.05, 0.2, 0.9);
-  const sky = mix(
-    mix(bottom, middle, smoothstep(-0.8, 0, q)),
-    top,
-    smoothstep(0, 0.8, q),
+function broadcast(p: Node, q: Node, atlas: THREE.Texture): Node3 {
+  const around = p.mul(broadcastPanels / 2).add(0.5);
+  const u = fract(around);
+  const height = q.sub(broadcastLift);
+  const v = clamp(height.div(broadcastBand).mul(0.5).add(0.5), 0, 1);
+  const index = floor(around)
+    .mul(5)
+    .add(floor(time.div(broadcastSeconds)).mul(3))
+    .add(64)
+    .mod(16);
+  const framed = step(abs(height), broadcastBand)
+    .mul(smoothstep(0, 0.012, u))
+    .mul(smoothstep(1, 0.988, u));
+  const backdrop = mix(
+    vec3(0.22, 0.1, 0.42),
+    vec3(0.55, 0.12, 0.5),
+    smoothstep(broadcastBand, 1, abs(height)),
   );
-  const run = fract(p.mul(5).add(abs(q).mul(2.5)).sub(time.mul(0.9)));
-  const chevron = smoothstep(0.08, 0.02, abs(run.sub(0.5))).mul(
-    smoothstep(0.42, 0.36, abs(q)),
-  );
-  return mix(sky, vec3(1), chevron.mul(0.9));
+  return mix(backdrop, sqrt(slide(atlas, vec2(u, v), index)), framed);
 }
 
-function globeMaterial(): THREE.MeshBasicNodeMaterial {
+function globeMaterial(atlas: THREE.Texture): THREE.MeshBasicNodeMaterial {
   const material = new THREE.MeshBasicNodeMaterial();
   const dir = normalize(positionLocal);
   const p = atan(dir.z.negate(), dir.x).div(Math.PI);
   const q = asin(clamp(dir.y, -1, 1)).div(Math.PI / 2);
   const content = planet(p, q)
     .mul(sceneWeight(0))
-    .add(flag(p, q).mul(sceneWeight(1)))
+    .add(aurora(p, q).mul(sceneWeight(1)))
     .add(lights(p, q).mul(sceneWeight(2)))
-    .add(neon(p, q).mul(sceneWeight(3)));
+    .add(broadcast(p, q, atlas).mul(sceneWeight(3)));
   const cell = vec2(p.mul(ledColumns), q.mul(ledRows));
   const dot = smoothstep(0.5, 0.25, length(fract(cell).sub(0.5)));
   const blur = clamp(max(fwidth(cell.x), fwidth(cell.y)).mul(0.9), 0, 1);
@@ -203,14 +228,14 @@ function globeMaterial(): THREE.MeshBasicNodeMaterial {
   return material;
 }
 
-function ledGlobe(spot: GlobeSpot): THREE.Object3D {
+function ledGlobe(spot: GlobeSpot, atlas: THREE.Texture): THREE.Object3D {
   const centreY = spot.y + spot.height - spot.radius;
   const cut = Math.acos(
     Math.max(-1, Math.min(1, (spot.y - 1 - centreY) / spot.radius)),
   );
   const shell = new THREE.Mesh(
     new THREE.SphereGeometry(spot.radius, 160, 96, 0, Math.PI * 2, 0, cut),
-    globeMaterial(),
+    globeMaterial(atlas),
   );
   shell.position.set(spot.x, centreY, spot.z);
   shell.rotation.y = -spot.facing;
@@ -308,7 +333,7 @@ function towerLegs(boxes: Boxes, frame: TowerFrame): void {
     const h1 = (frame.deck * (k + 1)) / towerSegments;
     const lower = legCorners(frame, h0);
     const upper = legCorners(frame, h1);
-    const size = 1.6 * (1 - h0 / frame.spot.height) + 0.5;
+    const size = 1.1 * (1 - h0 / frame.spot.height) + 0.4;
     const joined = legGap(frame, h0) === 0;
     lower.forEach((low, c) => {
       const high = upper[c] ?? [];
@@ -332,7 +357,7 @@ function loop(boxes: Boxes, points: THREE.Vector3[], size: number): void {
 }
 
 function towerDecks(boxes: Boxes, frame: TowerFrame): void {
-  for (const share of [0.175, 0.35, 0.84]) {
+  for (const share of towerDeckShares) {
     const w = towerProfile(share, frame.spot.base) * 1.12;
     loop(
       boxes,
@@ -371,23 +396,28 @@ function towerArches(boxes: Boxes, frame: TowerFrame): void {
 
 function towerMaterial(spot: TowerSpot): THREE.MeshStandardNodeMaterial {
   const material = new THREE.MeshStandardNodeMaterial();
-  material.colorNode = vec3(0.16, 0.11, 0.07);
+  material.colorNode = vec3(0.12, 0.085, 0.055);
   material.roughnessNode = float(0.7);
   const height = positionLocal.y.sub(spot.y).div(spot.height);
   const sparkle = step(
-    0.985,
+    0.993,
     fract(
       sin(
-        floor(positionLocal.x.mul(0.7))
-          .add(floor(positionLocal.y.mul(0.7)).mul(13.1))
-          .add(floor(time.mul(6)))
+        floor(positionLocal.x.mul(0.9))
+          .add(floor(positionLocal.y.mul(0.9)).mul(13.1))
+          .add(floor(time.mul(5)))
           .mul(91.7),
       ).mul(43758.5),
     ),
   );
-  const gold = vec3(1, 0.52, 0.14).mul(mix(float(1.2), float(0.7), height));
-  material.emissiveNode = gold
-    .add(vec3(1, 0.95, 0.85).mul(sparkle).mul(3))
+  let decks: Node = float(0);
+  for (const share of towerDeckShares)
+    decks = decks.add(exp(abs(height.sub(share)).mul(-70)));
+  const lit = vec3(0.8, 0.5, 0.22).mul(
+    mix(float(towerGlowLow), float(towerGlowHigh), height).add(decks.mul(0.5)),
+  );
+  material.emissiveNode = lit
+    .add(vec3(1, 0.9, 0.7).mul(sparkle).mul(1.6))
     .mul(cityGlow);
   return material;
 }
@@ -401,6 +431,28 @@ function towerMesh(found: TowerSpot): THREE.Object3D {
   const mesh = new THREE.Mesh(boxes.geometry(), towerMaterial(frame.spot));
   mesh.name = "landmark_tower";
   return mesh;
+}
+
+function spun(centre: THREE.Vector3, axle: THREE.Vector3): THREE.Node<"vec3"> {
+  const origin = vec3(centre.x, centre.y, centre.z);
+  const axis = vec3(axle.x, axle.y, axle.z);
+  const arm = positionLocal.sub(origin);
+  const angle = time.mul(wheelTurn);
+  return origin
+    .add(arm.mul(cos(angle)))
+    .add(axis.cross(arm).mul(sin(angle)))
+    .add(axis.mul(axis.dot(arm)).mul(float(1).sub(cos(angle))));
+}
+
+function wheelPaint(
+  colour: [number, number, number],
+  shine: number,
+  turning: THREE.Node<"vec3"> | null,
+): THREE.MeshBasicNodeMaterial {
+  const material = new THREE.MeshBasicNodeMaterial();
+  material.colorNode = vec3(...colour).mul(cityGlow.mul(shine).add(0.03));
+  if (turning) material.positionNode = turning;
+  return material;
 }
 
 function wheelMesh(spot: WheelSpot): THREE.Object3D {
@@ -418,76 +470,99 @@ function wheelMesh(spot: WheelSpot): THREE.Object3D {
       .addScaledVector(plane, Math.cos(angle) * r)
       .addScaledVector(up, Math.sin(angle) * r)
       .addScaledVector(axle, offset);
-  const frame = new Boxes();
   const rim = new Boxes();
-  for (const offset of [-3.2, 3.2]) {
-    for (let k = 0; k < wheelSegments; k++) {
-      const a0 = (k / wheelSegments) * Math.PI * 2;
-      const a1 = ((k + 1) / wheelSegments) * Math.PI * 2;
-      rim.beam(point(a0, radius, offset), point(a1, radius, offset), 1.4);
-      frame.beam(
-        point(a0, radius - 4, offset * 0.6),
-        point(a1, radius - 4, offset * 0.6),
-        0.9,
+  const cables = new Boxes();
+  const leds = new Boxes();
+  for (let k = 0; k < wheelSegments; k++) {
+    const a0 = (k / wheelSegments) * Math.PI * 2;
+    const a1 = ((k + 1) / wheelSegments) * Math.PI * 2;
+    for (const offset of [-wheelGauge, wheelGauge])
+      rim.beam(point(a0, radius, offset), point(a1, radius, offset), 0.6);
+    leds.beam(point(a0, radius + 0.7, 0), point(a1, radius + 0.7, 0), 0.5);
+    for (const share of wheelBraces)
+      cables.beam(
+        point(a0, radius * share, 0),
+        point(a1, radius * share, 0),
+        0.28,
       );
-    }
+    if (k % 2 === 0)
+      rim.beam(
+        point(a0, radius, -wheelGauge),
+        point(a0, radius, wheelGauge),
+        0.45,
+      );
   }
   for (let k = 0; k < wheelCabins * 2; k++) {
     const angle = (k / (wheelCabins * 2)) * Math.PI * 2;
-    for (const offset of [-3.2, 3.2])
-      frame.beam(point(0, 3, offset * 1.6), point(angle, radius, offset), 0.25);
+    const flange = k % 2 === 0 ? wheelFlange : -wheelFlange;
+    cables.beam(
+      point(angle + 0.5, wheelHub, flange),
+      point(angle, radius, -Math.sign(flange) * wheelGauge),
+      0.2,
+    );
   }
-  frame.beam(point(0, 0, -9), point(0, 0, 9), 3.4);
-  for (const lean of [-1, 1]) {
-    const foot = centre
-      .clone()
-      .addScaledVector(plane, lean * radius * 0.42)
-      .addScaledVector(axle, 14);
-    foot.y = spot.y;
-    frame.beam(foot, point(0, 0, 9), 3.2);
-  }
-  const cabins = new Boxes();
-  for (let k = 0; k < wheelCabins; k++) {
-    const angle = (k / wheelCabins) * Math.PI * 2;
-    const c = point(angle, radius + 3.2, 0);
-    const half = new THREE.Vector3(2.6, 2.2, 3.4);
-    const a = c.clone().addScaledVector(plane, -half.x);
-    const b = c.clone().addScaledVector(plane, half.x);
-    cabins.beam(a, b, half.y * 2);
-  }
-  const steel = new THREE.MeshStandardNodeMaterial();
-  steel.colorNode = vec3(0.5, 0.52, 0.56);
-  steel.roughnessNode = float(0.5);
-  steel.emissiveNode = vec3(0.35, 0.36, 0.42).mul(cityGlow.mul(0.25));
-  const rimMaterial = new THREE.MeshBasicNodeMaterial();
-  const turn = atan(
+  rim.beam(point(0, 0, -wheelFlange), point(0, 0, wheelFlange), wheelHub * 2);
+  const frame = new Boxes();
+  frame.beam(point(0, 0, -wheelStance), point(0, 0, wheelStance), 2.4);
+  for (const side of [-1, 1])
+    for (const lean of [-1, 1]) {
+      const foot = centre
+        .clone()
+        .addScaledVector(plane, lean * radius * 0.4)
+        .addScaledVector(axle, side * (wheelStance + 9));
+      foot.y = spot.y;
+      frame.beam(foot, point(0, 0, side * wheelStance), 1.5);
+    }
+  const turning = spun(centre, axle);
+  const basis = new THREE.Matrix4().makeBasis(plane, up, axle);
+  const pods = Array.from({ length: wheelCabins }, (_, k) =>
+    new THREE.SphereGeometry(1, 10, 6).applyMatrix4(
+      basis
+        .clone()
+        .scale(new THREE.Vector3(2.7, 1.9, 2.2))
+        .setPosition(point((k / wheelCabins) * Math.PI * 2, radius + 3.6, 0)),
+    ),
+  );
+  const cabins = new THREE.Mesh(
+    mergeGeometries(pods),
+    wheelPaint([0.9, 0.93, 1], 0.3, turning),
+  );
+  const sweep = atan(
     positionLocal.y.sub(centre.y),
     positionLocal.x
       .sub(centre.x)
       .mul(plane.x)
       .add(positionLocal.z.sub(centre.z).mul(plane.z)),
   ).div(Math.PI * 2);
-  const hue = fract(turn.mul(3).add(time.mul(0.08)));
-  const pink = vec3(1, 0.12, 0.45);
-  const blue = vec3(0.15, 0.35, 1);
-  const red = vec3(1, 0.08, 0.06);
-  const colour = mix(
-    mix(pink, blue, smoothstep(0, 0.5, hue)),
-    red,
-    smoothstep(0.5, 1, hue),
+  const chase = sin(sweep.mul(Math.PI * 2 * 3).sub(time.mul(0.6)))
+    .mul(0.5)
+    .add(0.5);
+  const led = new THREE.MeshBasicNodeMaterial();
+  led.colorNode = mix(vec3(0.55, 0.7, 1), vec3(0.95, 0.97, 1), chase).mul(
+    cityGlow.mul(0.5).add(0.03),
   );
-  rimMaterial.colorNode = colour.mul(cityGlow.mul(2.6).add(0.4));
-  const cabinMaterial = new THREE.MeshStandardNodeMaterial();
-  cabinMaterial.colorNode = vec3(0.7, 0.75, 0.8);
-  cabinMaterial.roughnessNode = float(0.15);
-  cabinMaterial.emissiveNode = vec3(0.95, 0.9, 0.8).mul(cityGlow.mul(0.9));
+  led.positionNode = turning;
+  const steel = new THREE.MeshBasicNodeMaterial();
+  const lift = smoothstep(spot.y + spot.height, spot.y, positionLocal.y);
+  steel.colorNode = vec3(0.56, 0.63, 0.74).mul(
+    cityGlow.mul(lift.mul(0.16).add(0.07)).add(0.02),
+  );
   const group = new THREE.Group();
   group.name = "landmark_wheel";
-  group.add(
+  const parts = [
+    new THREE.Mesh(
+      rim.geometry(),
+      wheelPaint([0.62, 0.7, 0.84], 0.17, turning),
+    ),
+    new THREE.Mesh(
+      cables.geometry(),
+      wheelPaint([0.6, 0.65, 0.74], 0.1, turning),
+    ),
+    new THREE.Mesh(leds.geometry(), led),
+    cabins,
     new THREE.Mesh(frame.geometry(), steel),
-    new THREE.Mesh(rim.geometry(), rimMaterial),
-    new THREE.Mesh(cabins.geometry(), cabinMaterial),
-  );
+  ];
+  group.add(...parts);
   return group;
 }
 
@@ -534,26 +609,27 @@ function balloonMaterial(): THREE.MeshStandardNodeMaterial {
   const around = atan(positionLocal.z, positionLocal.x)
     .div(Math.PI * 2)
     .add(0.5);
-  const stripe = step(0.5, fract(around.mul(12)));
+  const rib = smoothstep(0.06, 0.02, abs(fract(around.mul(16)).sub(0.5)));
   const band = smoothstep(0.08, 0.06, abs(positionLocal.y.div(20).sub(0.05)));
   const colour = mix(
-    mix(vec3(0.95, 0.35, 0.05), vec3(0.45, 0.1, 0.7), stripe),
-    vec3(0.95, 0.85, 0.3),
+    mix(vec3(0.03, 0.08, 0.32), vec3(0.9, 0.72, 0.36), rib),
+    vec3(0.95, 0.85, 0.5),
     band,
   );
   material.colorNode = colour;
   material.roughnessNode = float(0.5);
-  material.emissiveNode = colour.mul(cityGlow.mul(1.4));
+  material.emissiveNode = colour.mul(cityGlow.mul(0.55));
   return material;
 }
 
 export function buildLandmarks(
   landmarks: Landmarks | undefined,
+  screens: THREE.Texture,
 ): THREE.Object3D {
   const group = new THREE.Group();
   group.name = "landmarks";
   if (!landmarks) return group;
-  if (landmarks.globe) group.add(ledGlobe(landmarks.globe));
+  if (landmarks.globe) group.add(ledGlobe(landmarks.globe, screens));
   if (landmarks.tower) group.add(towerMesh(landmarks.tower));
   if (landmarks.wheel) group.add(wheelMesh(landmarks.wheel));
   if (landmarks.balloon) group.add(balloonMesh(landmarks.balloon));

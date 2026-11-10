@@ -18,10 +18,19 @@ const track = read("track.json") as { centerline: Point[] };
 const city = read("city.json") as {
   monorail: number[][];
   monorailColumns: number[];
+  spectators: number[];
+  entrances: {
+    x: number;
+    z: number;
+    facing: number;
+    width: number;
+    depth: number;
+  }[];
 };
 const columnHalf = 0.7;
 const beamDepth = 1.7;
 const headroom = 6;
+const personHalf = 0.5;
 
 function nearest(x: number, z: number) {
   const points = track.centerline;
@@ -56,6 +65,38 @@ describe("street city around the circuit", () => {
       if (Math.abs(lateral) < wall + columnHalf) inside.push([x, z, lateral]);
     }
     expect(city.monorailColumns.length).toBeGreaterThan(0);
+    expect(inside).toEqual([]);
+  });
+
+  test("no spectator stands between the walls", () => {
+    const inside: number[][] = [];
+    for (let i = 0; i + 3 <= city.spectators.length; i += 3) {
+      const [x = 0, , z = 0] = city.spectators.slice(i, i + 3);
+      const { lateral, wall } = nearest(x, z);
+      if (Math.abs(lateral) < wall + personHalf) inside.push([x, z, lateral]);
+    }
+    expect(city.spectators.length).toBeGreaterThan(0);
+    expect(inside).toEqual([]);
+  });
+
+  test("no hotel entrance reaches over the walls", () => {
+    const inside: number[][] = [];
+    for (const entrance of city.entrances) {
+      const out = [Math.cos(entrance.facing), -Math.sin(entrance.facing)];
+      for (const side of [-1, 0, 1]) {
+        const x =
+          entrance.x +
+          (out[0] ?? 0) * entrance.depth +
+          ((out[1] ?? 0) * side * entrance.width) / 2;
+        const z =
+          entrance.z +
+          (out[1] ?? 0) * entrance.depth -
+          ((out[0] ?? 0) * side * entrance.width) / 2;
+        const { lateral, wall } = nearest(x, z);
+        if (Math.abs(lateral) < wall) inside.push([x, z, lateral]);
+      }
+    }
+    expect(city.entrances.length).toBeGreaterThan(0);
     expect(inside).toEqual([]);
   });
 

@@ -30,6 +30,7 @@ import { releaseOnceUploaded } from "./preload.ts";
 
 export const crowdFiles = [albedoUrl, crowdUrl, maskUrl];
 export const crowdData = crowdUrl;
+export const crowdAtlas = [albedoUrl, maskUrl];
 import {
   alphaCutoff,
   atlasColumns,
@@ -297,6 +298,18 @@ function flags(values: Float32Array): THREE.InstancedMesh {
   return mesh;
 }
 
+export function standing(spots: number[]): Float32Array {
+  const count = Math.floor(spots.length / 3);
+  const values = new Float32Array(count * stride);
+  for (let i = 0; i < count; i++) {
+    values[i * stride] = spots[i * 3] ?? 0;
+    values[i * stride + 1] = -(spots[i * 3 + 2] ?? 0);
+    values[i * stride + 2] = spots[i * 3 + 1] ?? 0;
+    values[i * stride + 4] = Math.floor(roll(i, 5) * atlasColumns * atlasRows);
+  }
+  return values;
+}
+
 export class Crowd {
   readonly root = new THREE.Group();
   private readonly inverse = new THREE.Matrix4();
@@ -304,8 +317,9 @@ export class Crowd {
 
   private constructor() {}
 
-  static async load(): Promise<Crowd> {
+  static async load(placed?: Float32Array): Promise<Crowd> {
     const crowd = new Crowd();
+    crowd.root.name = "crowd";
     const loader = new THREE.TextureLoader();
     const atlas = async (url: string, colorSpace: string) => {
       const map = releaseOnceUploaded(await loader.loadAsync(url));
@@ -313,17 +327,19 @@ export class Crowd {
       map.colorSpace = colorSpace;
       return map;
     };
-    const [albedo, mask, response] = await Promise.all([
+    const [albedo, mask, values] = await Promise.all([
       atlas(albedoUrl, THREE.SRGBColorSpace),
       atlas(maskUrl, THREE.NoColorSpace),
-      fetch(crowdUrl),
+      placed ??
+        fetch(crowdUrl)
+          .then((response) => response.arrayBuffer())
+          .then((buffer) => new Float32Array(buffer)),
     ]);
     const image = albedo.image as Atlas;
     const boxes = uniformArray(
       spriteBounds(alphaOf(image), image.width, image.height),
       "vec4",
     );
-    const values = new Float32Array(await response.arrayBuffer());
     const tiles = new Map<string, number[]>();
     for (let i = 0; i < values.length; i += stride) {
       const key = `${String(Math.floor((values[i] ?? 0) / tileSize))}|${String(Math.floor((values[i + 1] ?? 0) / tileSize))}`;

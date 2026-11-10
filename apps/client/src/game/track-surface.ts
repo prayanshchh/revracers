@@ -294,7 +294,10 @@ export function screenBump(
   return det.abs().mul(normalView).sub(gradient).normalize();
 }
 
-export function asphaltDetail(grain: THREE.Texture): AsphaltDetail {
+export function asphaltDetail(
+  grain: THREE.Texture,
+  cracked = true,
+): AsphaltDetail {
   const lateral = uv().x.mul(asphaltTile);
   const along = uv().y.mul(asphaltTile);
   const world = positionWorld.xy;
@@ -306,7 +309,7 @@ export function asphaltDetail(grain: THREE.Texture): AsphaltDetail {
     .rgb.dot(vec3(1 / 3))
     .div(0.0152);
   const { inside, seam } = patches(lateral, along);
-  const crack = cracks(lateral, along);
+  const crack = cracked ? cracks(lateral, along) : float(0);
   const tone = float(1)
     .add(blotch)
     .add(mottle.mul(mottleStrength))
