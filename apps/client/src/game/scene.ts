@@ -64,6 +64,8 @@ import {
 } from "./floodlights.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
 import { Crowd, crowdData } from "./crowd.ts";
+import { treeDownloads, Trees } from "./scenery-trees.ts";
+import { setCloudShadows } from "./scenery-look.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
 import { TyreStones } from "./tyre-stones.ts";
 import {
@@ -88,7 +90,7 @@ const kelvinOffset = 273.15;
 const cinematicNear = 0.5;
 const cinematicFar = 41000;
 const upAxis = new THREE.Vector3(0, 0, 1);
-const clearVisibility = 16000;
+const clearVisibility = 5000;
 const rainVisibility = 150;
 const rainFogCurve = 1.5;
 const overcastSun = 0.86;
@@ -253,6 +255,7 @@ function venueDownloads(
     roadUrl,
     crewUrl,
     crowdData,
+    ...(circuit.trees ? [circuit.trees, ...treeDownloads()] : []),
     ...circuitFiles(circuit),
     carFile(team, "car.glb"),
     ...[...new Set(fleet)].map((each) => carFile(each, "lod.glb")),
@@ -393,6 +396,7 @@ export class Scene {
   private shake: Shake | null = null;
   private lastFeel = 0;
   private readonly eye = new THREE.Vector3();
+  private readonly sunShine = new THREE.Color();
   private readonly carPosition = new THREE.Vector3();
   private viewMirrored = false;
   private cinematic: CameraPose | null = null;
@@ -482,6 +486,7 @@ export class Scene {
     private readonly sky: SdSky,
     private readonly skyBox: SkyBox,
     private readonly people: Crowd | null,
+    private readonly trees: Trees | null,
     private readonly car: GltfCar,
     private readonly grid: GridCars | null,
     track: THREE.Object3D,
@@ -593,6 +598,7 @@ export class Scene {
       skyBox,
       frame,
       { people, crew },
+      trees,
       road,
       data,
       car,
@@ -603,6 +609,7 @@ export class Scene {
       loads.sky,
       fetchJson<TrackFrame>(circuit.frame),
       venueExtras(venue, anisotropy, team, loads.env),
+      circuit.trees ? Trees.load(circuit.trees, anisotropy) : null,
       groundOf(circuit, renderer, loads, carLoad),
       loads.line,
       carLoad,
@@ -624,13 +631,16 @@ export class Scene {
     const track = new THREE.Group();
     track.add(
       placed,
-      ...presentRoots(people).map((root) => placeOnTrack(root, frame, start)),
+      ...presentRoots(people, trees).map((root) =>
+        placeOnTrack(root, frame, start),
+      ),
       placeOnTrack(racingLine.root, frame, start),
     );
     const scene = new Scene(
       new SdSky(local),
       skyBox,
       people,
+      trees,
       car,
       grid,
       track,
@@ -953,6 +963,7 @@ export class Scene {
     this.sunlight.dim(
       (1 - overcastSun * shaded) * (1 - brokenSun * broken * this.cloudLight),
     );
+    setCloudShadows(broken * this.cloudLight * (1 - overcast), time);
     this.scene.environmentIntensity = 1 - overcastAmbient * shaded;
     this.atmosphere.exposure =
       this.baseExposure * (1 + overcastExposure * shaded);
@@ -1238,6 +1249,13 @@ export class Scene {
     setStartLights(this.cinematic ? 0 : lit);
     this.updateSky(time, eyeX, eyeY, eyeZ);
     this.people?.update(this.eye.set(eyeX, eyeY, eyeZ));
+    this.trees?.update(
+      this.eye,
+      this.sunlight.direction,
+      this.sunShine
+        .copy(this.sunlight.sun.color)
+        .multiplyScalar(this.sunlight.sun.intensity),
+    );
     this.applyWeather(frame, onboard);
     this.debris.update(time);
   }

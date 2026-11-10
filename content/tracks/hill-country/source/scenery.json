@@ -1,0 +1,40 @@
+{
+  "trees": {
+    "sink": 0.15,
+    "shadowReach": 190,
+    "canopy": {
+      "pixel": 2,
+      "ndvi": 0.2,
+      "luminance": 0.42,
+      "spacingAt": [0, 250, 600, 1200],
+      "spacing": [7.5, 9, 12, 16],
+      "heightScale": [1, 1, 1.15, 1.3],
+      "heightBase": 5.5,
+      "heightPerDepth": 0.55,
+      "heightMin": 3.2,
+      "heightMax": 13
+    },
+    "groves": [
+      { "from": 0, "to": 5477, "side": "outside", "near": 14, "far": 130, "density": 0.5, "bias": 1.4, "height": [7.5, 12.5], "gaps": 0.44, "clump": 48, "seed": 3 },
+      { "from": 0, "to": 5477, "side": "outside", "near": 10, "far": 60, "density": 0.25, "height": [2.2, 3.6], "gaps": 0.5, "clump": 26, "seed": 9, "species": "shrub" },
+      { "from": 0, "to": 5477, "side": "inside", "near": 30, "far": 110, "density": 0.035, "height": [7, 11], "gaps": 0.55, "clump": 60, "seed": 5 }
+    ],
+    "species": { "elm": 0.62, "ash": 0.16, "tallFrom": 5, "tallTo": 8, "shrubBelow": 4 },
+    "clearance": {
+      "wall": 7,
+      "crownShare": 0.42,
+      "pit": 60,
+      "reach": 2400,
+      "building": 5,
+      "parking": 2,
+      "water": 2,
+      "roads": 7,
+      "lanes": 4.5,
+      "aisles": 3.5,
+      "stand": 8,
+      "tower": 40,
+      "crowd": 7,
+      "spacing": 4.2
+    }
+  }
+}

@@ -130,6 +130,7 @@ import {
 import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
 import { type Circuit, circuitOf } from "./game/circuits.ts";
+import { seasonOf, useSeason } from "./game/scenery-look.ts";
 import { dropEarly } from "./game/early.ts";
 import {
   freshPlayer,
@@ -1086,6 +1087,7 @@ async function main(): Promise<void> {
 
   const track = trackOf(settings);
   const circuit = circuitOf(track.id);
+  useSeason(seasonOf(settings.season, circuit.season));
   const setup = prepareSession(settings);
   const seek = params.get("buildup");
   if (wantsBuildUp(settings, setup, autostart, seek)) music.preload("buildup");
