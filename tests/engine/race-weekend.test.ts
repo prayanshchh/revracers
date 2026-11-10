@@ -34,10 +34,12 @@ const firstSegmentCars = 16;
 const lastSegmentCars = 10;
 const lapSeconds = 125;
 const untimedRun = 440;
+const swingInRun = 30;
 const boxDepth = 1;
 
 interface CircuitTrack {
   length: number;
+  pitLane: { garageStart: number };
   centerline: { x: number; z: number }[];
   grid: { distance: number; offset: number }[];
 }
@@ -179,6 +181,7 @@ describe.runIf(existsSync(wasm))("race weekend on the real engine", () => {
       plan.entrants.length,
       layout.length,
       layout.boxLateral - layout.shift,
+      circuitFrame().track.pitLane.garageStart + swingInRun,
     );
     runUntilComplete(m, (laps + 1) * lapSeconds, undefined, boxes.look);
     for (const car of timingOf(m, plan.entrants.length)) {

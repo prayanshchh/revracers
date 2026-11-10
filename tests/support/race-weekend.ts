@@ -321,6 +321,7 @@ export interface BoxLines {
 }
 
 interface BoxVisit {
+  box: number;
   shared: boolean;
   parkedAt: number;
   arriving: number;
@@ -337,6 +338,7 @@ export function watchBoxes(
   cars: number,
   trackLength: number,
   boxLine: number,
+  straightFrom: number,
 ): { lines: BoxLines; look: () => void } {
   const lines: BoxLines = { stops: 0, arriving: 0, parked: 0, leaving: 0 };
   const visits = new Map<number, BoxVisit>();
@@ -349,6 +351,7 @@ export function watchBoxes(
     const visit = visits.get(car);
     visits.delete(car);
     if (!visit || visit.shared || visit.parked < 0) return;
+    if (ahead(straightFrom, visit.box) > trackLength / 2) return;
     lines.stops += 1;
     lines.arriving = Math.max(lines.arriving, visit.arriving);
     lines.parked = Math.max(lines.parked, visit.parked);
@@ -382,6 +385,7 @@ export function watchBoxes(
         continue;
       }
       const visit = visits.get(car) ?? {
+        box: box(car),
         shared: false,
         parkedAt: boxLine,
         arriving: 0,

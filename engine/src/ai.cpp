@@ -97,6 +97,8 @@ const double pitReleaseClear = 45.0;
 const double stopRun = 34.0;
 const double turnRun = 54.0;
 const double boxStraight = 10.0;
+const double garageApproach = 6.0;
+const double openingRun = 30.0;
 const double tightRun = 14.0;
 const double tightStraight = 3.0;
 const double busyBefore = 34.0;
@@ -1362,11 +1364,11 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
             driver.pit = PIT_EXIT;
             return;
         }
-        bool tight = boxesBusy(index, s, wrap(box - busyBefore - busyFrom), busyBefore);
+        bool tight = delta(p.garageStart, box) < openingRun || boxesBusy(index, s, wrap(box - busyBefore - busyFrom), busyBefore);
         if (toBox < (tight ? stopRun : turnRun))
         {
             driver.tightEntry = tight;
-            driver.turnLead = tight ? tightRun : std::min(turnRun, std::max(tightRun, delta(p.garageStart, box)));
+            driver.turnLead = tight ? tightRun : std::min(turnRun, std::max(tightRun, delta(p.garageStart, box) + garageApproach));
             driver.pit = PIT_BOXING;
         }
         steerAndGo(index, driver, car, s, lanePath, limit, toBox < stopRun + 8.0 ? sqrt(2.0 * stopDecel * std::max(0.0, toBox)) : limit, dt);
