@@ -1,5 +1,6 @@
 import type { Shot, ShotPoint } from "./buildup-shots.ts";
 import type { MapLook, MapPose } from "./circuit-map.ts";
+import type { Season } from "./scenery-look.ts";
 
 export type MapStage = "map-sectors" | "map-zones" | "map-turns";
 
@@ -11,7 +12,7 @@ export interface BuildUpVenue {
   turns: number;
   country: string;
   temperatures: Record<string, number>;
-  season: string;
+  season: Season;
   title: Shot;
   weather: Shot;
   feature: Shot;

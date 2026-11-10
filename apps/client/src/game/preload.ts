@@ -226,6 +226,21 @@ function pixelData(data: unknown): data is { width: number; height: number } {
   );
 }
 
+function drawnCanvas(
+  data: unknown,
+): data is OffscreenCanvas | HTMLCanvasElement {
+  return (
+    (typeof OffscreenCanvas !== "undefined" &&
+      data instanceof OffscreenCanvas) ||
+    (typeof HTMLCanvasElement !== "undefined" &&
+      data instanceof HTMLCanvasElement)
+  );
+}
+
+function freeable(data: unknown): data is { width: number; height: number } {
+  return fileImage(data) || pixelData(data) || drawnCanvas(data);
+}
+
 function slotTextures(scene: THREE.Scene): void {
   scene.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
@@ -253,9 +268,13 @@ export function releaseUploadedImages(
       continue;
     if (record.version !== texture.version) continue;
     const data: unknown = texture.source.data;
-    if (!fileImage(data) && !pixelData(data)) continue;
+    if (!freeable(data)) continue;
     texture.source.data = { width: data.width, height: data.height };
     if (data instanceof ImageBitmap) data.close();
+    if (drawnCanvas(data)) {
+      data.width = 0;
+      data.height = 0;
+    }
   }
   releasable.clear();
 }

@@ -25,6 +25,13 @@ from the same sources, so they stay aligned.
 - Skies: Poly Haven, CC0 (`sky/`): Kloofendal 48d Partly Cloudy Pure Sky for the
   circuit's own time of day, and Qwantani Dawn, Mid Morning, Noon, Afternoon,
   Dusk 2 and Night Pure Sky for the other time-of-day settings.
+- Trees: four Poly Haven models, CC0 (Island Tree 02, Jacaranda Tree, Tree
+  Small 02, Searsia Burchellii), rendered to the pictures in
+  `content/scenery/trees`, which every circuit shares. Where each tree stands
+  comes from the aerial photograph: growing canopy is where near-infrared is
+  well above red, and `source/scenery.json` holds the thresholds, the planted
+  groves and the clearances from the track, pit lane, buildings, roads and
+  stands.
 - Advertising boards use twelve fictional brands (Northwind, Voltara, Aurenne,
   Kestrel, Marlowe Outfitters, Torqua, Cordave Rail, Verdale, Albaren Air,
   Nimbara Cloud, Maison Luce, Halden) set in Anton, Oswald, Playfair Display,
@@ -51,6 +58,15 @@ from the same sources, so they stay aligned.
    bakes the crowd sprites; `tools/track/sky.py` crops a sky and bakes its environment.
 7. `blender -b --factory-startup -P tools/track/scan.py -- content/tracks/hill-country build/hill-country`
    checks the whole lap for trackside and ground problems.
+8. `uv run --project tools/track python tools/scenery/trees.py content/tracks/hill-country build/hill-country`
+   writes `trees.bin`: position, height, kind and shadow flag of every tree,
+   from `source/scenery.json`, the aerial photograph and the venue layout.
+
+The tree pictures are shared by all circuits and only need rebuilding when a
+model changes: `blender -b --factory-startup -P tools/scenery/impostor.py -- <model.gltf> <out prefix> <pixels>`
+renders one model from twelve directions at two heights, and
+`uv run --project tools/track python tools/scenery/pack.py <bake dir> content/scenery/trees`
+packs the renders and writes `trees.json`.
 
 ## Accuracy
 

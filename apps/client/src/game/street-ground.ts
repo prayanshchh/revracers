@@ -5,7 +5,6 @@ import {
   float,
   floor,
   fract,
-  fwidth,
   mix,
   mx_fractal_noise_float,
   mx_noise_float,
@@ -84,9 +83,6 @@ const rubberRun = 0.012;
 const rubberStreak = 0.32;
 const rubberFilm = 0.16;
 const laneWidth = 3.7;
-const jointWidth = 0.035;
-const jointRun = 0.011;
-const jointShade = 0.32;
 const dripReach = 0.42;
 const dripRun = 0.035;
 const dripShade = 0.13;
@@ -234,21 +230,6 @@ function laidRubber(
     .mul(smoothstep(-0.3, 0.4, combed).mul(rubberStreak).add(rubberFilm));
 }
 
-function pavingJoints(
-  across: THREE.Node<"float">,
-  along: THREE.Node<"float">,
-): THREE.Node<"float"> {
-  const lane = across.div(laneWidth);
-  const gap = fract(lane.add(0.5)).sub(0.5).abs().mul(laneWidth);
-  const width = fwidth(across).add(jointWidth);
-  const kept = smoothstep(
-    -0.2,
-    0,
-    mx_noise_float(vec2(floor(lane.add(0.5)).mul(7.7), along.mul(jointRun))),
-  );
-  return smoothstep(width, width.mul(0.4), gap).mul(kept);
-}
-
 function drips(
   across: THREE.Node<"float">,
   along: THREE.Node<"float">,
@@ -296,7 +277,6 @@ function streetGrime(): THREE.Node<"float"> {
     .add(streaks.mul(grimeStrength))
     .mul(mix(float(1), float(patchShade), patch))
     .mul(float(1).sub(laidRubber(across, along)))
-    .mul(float(1).sub(pavingJoints(across, along).mul(jointShade)))
     .mul(float(1).sub(drips(across, along).mul(dripShade)))
     .mul(float(1).sub(manholes(across, along)));
 }
@@ -368,7 +348,7 @@ export async function buildStreetCircuit(
   const maps = loadMaps(anisotropy, after);
   const byName = streetSources(maps, anisotropy);
   const sky = await skyLoad;
-  const baked = { ...bakedGround(maps), cracked: false };
+  const baked = bakedGround(maps);
   const materials = new Map<string, THREE.Material>();
   const lamp = lampMaterial();
   const special: Record<string, THREE.Material> = {

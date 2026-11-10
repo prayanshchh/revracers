@@ -27,6 +27,7 @@ COCKPIT = np.array([0.022, 0.022, 0.025])
 ROUGH_PAINT = 0.30
 ROUGH_CARBON = 0.34
 ROUGH_MATTE = 0.62
+ROUGH_SATIN = 0.56
 PAINTED = re.compile(r"^(monocoque|cockpit-pad|halo-collar|nose-tip|sidepod|inlet-lip|cockpit-rim|airbox-lip|halo-hoop|halo-pillar|mirror-housing|helmet|cockpit-winglet|engine-fin|roll-hoop-blade|rw-endplate|fw-endplate|fw-flap2|rw-flap|rw-main|t-cam)")
 MATTE = re.compile(r"^(tub|floor$|floor\.|plank|diffuser)")
 
@@ -332,7 +333,7 @@ def along_decal(atlas, albedo, text, y, x, length, colour, parts, sign, weight=8
     blend(albedo, r, colour, sample(mask, u, v) * (r.nz > 0.25))
 
 
-def strip_decal(atlas, albedo, island_name, text, along, around, length, weight=800):
+def strip_decal(atlas, albedo, island_name, text, along, around, length, weight=800, carbon=None):
     island = next(i for i in atlas.islands if i["name"] == island_name)
     mask = text_mask(text, weight=weight)
     window = atlas.window(island, 0)
@@ -347,7 +348,10 @@ def strip_decal(atlas, albedo, island_name, text, along, around, length, weight=
     tall_uv = length * mask.shape[0] / mask.shape[1]
     a = 0.5 + (scale_v - along) / length
     b = 0.5 + (scale_u - around) / tall_uv
-    albedo[window] += (LIGHT_TEXT - albedo[window]) * sample(mask, a, b)[..., None]
+    cover = sample(mask, a, b)
+    albedo[window] += (LIGHT_TEXT - albedo[window]) * cover[..., None]
+    if carbon is not None:
+        carbon[window] *= 1 - cover
 
 
 def scheme(team, atlas, body, wings_colour):
@@ -455,10 +459,10 @@ def paint(atlas, team):
     albedo[halo] = BLACK
     carbon[halo] = 0.0
     rough[halo] = 0.42
-    albedo[atlas.where(r"^halo-hoop")] = BLACK
-    inner_edge = atlas.where(r"^halo-hoop") & (atlas.nz < 0.25)
-    carbon[inner_edge] = 1.0
-    albedo[inner_edge] = CARBON
+    hoop_shell = atlas.where(r"^halo-hoop")
+    albedo[hoop_shell] = CARBON
+    carbon[hoop_shell] = 1.0
+    rough[hoop_shell] = ROUGH_SATIN
     albedo[atlas.where(r"^(halo-pillar|halo-collar)")] = EMBER
     rough[atlas.where(r"^(halo-pillar|halo-collar)")] = ROUGH_PAINT
     streak = atlas.where(r"^halo-pillar") & (np.abs(absy - (0.004 + 1.8 * np.clip(0.73 - x, 0, 0.2) ** 1.6)) < 0.0022) & (x < 0.73)
@@ -475,6 +479,9 @@ def paint(atlas, team):
     window_carbon = carbon[rows, cols]
     window_carbon[centre & top_half] = 0.0
     carbon[rows, cols] = window_carbon
+    window_rough = rough[rows, cols]
+    window_rough[centre & top_half] = ROUGH_PAINT
+    rough[rows, cols] = window_rough
     albedo[rows, cols] = window_albedo
 
     albedo[atlas.where(r"^cockpit-pad")] = PEARL
@@ -600,7 +607,7 @@ def paint(atlas, team):
         (SUPPLIER, 0.615, 0.10),
         (ASSOCIATE, 0.76, 0.10),
     ):
-        strip_decal(atlas, albedo, "halo-hoop", text, along, 0.25, length, weight=850)
+        strip_decal(atlas, albedo, "halo-hoop", text, along, 0.25, length, weight=850, carbon=carbon)
 
     occlusion = gaussian_filter(np.clip(atlas.ao, 0, 1), atlas.size / 1600) ** 1.15
     soot = np.clip((-x - 1.7) / 0.5, 0, 1) * np.clip(1 - np.abs(z - 0.38) / 0.25, 0, 1) * np.clip(1 - absy / 0.25, 0, 1)

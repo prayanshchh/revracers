@@ -55,6 +55,8 @@ import {
 } from "./track-surface.ts";
 import { releaseOnceUploaded } from "./preload.ts";
 import { reliefKerbs } from "./kerb-relief.ts";
+import { cloudShade } from "./scenery-look.ts";
+import { glaze } from "./venue-facade.ts";
 
 export const groundFiles = [
   apronAUrl,
@@ -64,11 +66,11 @@ export const groundFiles = [
   grainUrl,
 ];
 
-const asphaltDark = 0.088;
-const asphaltLight = 0.118;
+const asphaltDark = 0.1;
+const asphaltLight = 0.134;
 const asphaltMean = 0.0152;
 const asphaltContrast = 0.75;
-const asphaltTint = vec3(0.98, 0.99, 1.0);
+const asphaltTint = vec3(1.0, 0.975, 0.92);
 const streakStrength = 0.2;
 const streakAcross = 1 / 7;
 const streakAlong = 1 / 24;
@@ -173,7 +175,7 @@ const tyreHubMargin = 0.5;
 const groundMaterials =
   /(asphalt|road paint|road kerb|road grass|pit strip|pit red)$/;
 const skyReflecting =
-  /(road asphalt|pit asphalt|apron asphalt|road paint|road kerb|pit strip|pit red|track marks|glass)$/;
+  /(road asphalt|pit asphalt|apron asphalt|road paint|road kerb|pit strip|pit red|track marks|glass|paddock panels)$/;
 const blendedMaterials = new Set(["track track marks"]);
 const alphaCutoffs: Record<string, number> = {
   "track debris fence": 0.5,
@@ -587,7 +589,6 @@ export interface BakedGround {
   terrain: THREE.Texture;
   grain: THREE.Texture;
   natural?: NaturalGround;
-  cracked?: boolean;
 }
 
 interface NaturalGround {
@@ -631,7 +632,7 @@ function shadeRoad(
     smoothstep(0.08, 0.42, photo),
   );
   const band = rubber();
-  const detail = asphaltDetail(baked.grain, baked.cracked ?? true);
+  const detail = asphaltDetail(baked.grain);
   asphaltDetails.set(material, detail);
   material.colorNode = asphaltGrain(source)
     .mul(tone)
@@ -830,6 +831,7 @@ const shadersBySuffix: {
       material.roughnessNode = float(1);
     },
   },
+  { suffix: "paddock panels", shade: glaze },
 ];
 
 function applyShading(
@@ -1039,7 +1041,6 @@ function startLampMaterial(): THREE.MeshStandardNodeMaterial {
 export class Sunlight {
   readonly sun = new THREE.DirectionalLight(0xffffff, 1);
   private readonly tint = uniform(new THREE.Color());
-  private flooded = false;
   readonly direction = new THREE.Vector3();
   private readonly cascades: CSMShadowNode;
   private tick = 0;
@@ -1087,6 +1088,8 @@ export class Sunlight {
     });
     this.cascades.fade = true;
     this.sun.shadow.shadowNode = this.cascades;
+    (this.sun as { colorNode?: THREE.Node }).colorNode =
+      this.tint.mul(cloudShade());
     scene.add(this.sun, this.sun.target);
   }
 
@@ -1097,7 +1100,6 @@ export class Sunlight {
   floodlit(cover: THREE.Node<"float">): void {
     (this.sun as { colorNode?: THREE.Node }).colorNode = this.tint.mul(cover);
     this.sun.shadow.intensity = floodShadow;
-    this.flooded = true;
   }
 
   refit(): void {
@@ -1177,8 +1179,7 @@ export class Sunlight {
       .multiplyScalar(shadowDistance)
       .add(this.sun.target.position);
     this.sun.intensity = this.intensity * this.scale;
-    if (this.flooded)
-      this.tint.value.copy(this.sun.color).multiplyScalar(this.sun.intensity);
+    this.tint.value.copy(this.sun.color).multiplyScalar(this.sun.intensity);
     this.schedule();
   }
 }

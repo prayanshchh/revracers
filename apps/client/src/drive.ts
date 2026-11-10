@@ -131,6 +131,7 @@ import {
 import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
 import { type Circuit, circuitOf } from "./game/circuits.ts";
+import { seasonOf, useSeason } from "./game/scenery-look.ts";
 import { dropEarly } from "./game/early.ts";
 import {
   freshPlayer,
@@ -146,20 +147,6 @@ import { warmGame } from "./game/warm-cache.ts";
 import { loadShow } from "./game/opening.ts";
 import { showActions } from "./game/weekend-ui.ts";
 
-const seasonByMonth = [
-  "winter",
-  "winter",
-  "spring",
-  "spring",
-  "spring",
-  "summer",
-  "summer",
-  "summer",
-  "autumn",
-  "autumn",
-  "autumn",
-  "winter",
-];
 const nightEnds = 6.5;
 const nightStarts = 19;
 const canvas = document.querySelector<HTMLCanvasElement>(
@@ -881,13 +868,6 @@ function raceLog(
   });
 }
 
-function seasonOf(choice: string, raceSeason: string): string {
-  if (choice === "from track") return raceSeason;
-  if (choice !== "now") return choice;
-  const month = new Date().getMonth();
-  return seasonByMonth[month] ?? raceSeason;
-}
-
 function weatherFor(
   settings: Settings,
   local: { rain: number; timeOfDay: number },
@@ -1118,6 +1098,7 @@ async function main(): Promise<void> {
 
   const track = trackOf(settings);
   const circuit = circuitOf(track.id);
+  useSeason(seasonOf(settings.season, circuit.season));
   const setup = prepareSession(settings);
   const seek = params.get("buildup");
   if (wantsBuildUp(settings, setup, autostart, seek)) music.preload("buildup");

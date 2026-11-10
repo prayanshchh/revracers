@@ -2,6 +2,7 @@ import hillFrame from "../../../../content/tracks/hill-country/sd-frame.json?url
 import hillMap from "../../../../content/tracks/hill-country/circuit-map.json?url";
 import hillLine from "../../../../content/tracks/hill-country/racing-line.json?url";
 import hillTrack from "../../../../content/tracks/hill-country/track.json?url";
+import hillTrees from "../../../../content/tracks/hill-country/trees.bin?url";
 import hillXml from "../../../../content/tracks/hill-country/hill-country.xml?url";
 import hillAi from "../../wasm/hill-country-ai.txt?url";
 import boulevardFrame from "../../../../content/tracks/neon-boulevard/sd-frame.json?url";
@@ -18,6 +19,7 @@ import trainingTrack from "../../../../content/tracks/training-ground/track.json
 import trainingDome from "../../../../content/tracks/training-ground/sky/noon-dome.webp?url";
 import trainingEnv from "../../../../content/tracks/training-ground/sky/noon-env.webp?url";
 import trainingSky from "../../../../content/tracks/training-ground/sky/noon.json?url";
+import type { Season } from "./scenery-look.ts";
 import type { CompactSky } from "./skybox.ts";
 import type { Lessons } from "./tutorial.ts";
 
@@ -55,6 +57,8 @@ export interface Circuit {
   sky: CompactSky | null;
   night: NightLook | null;
   venue: boolean;
+  trees: string | null;
+  season: Season;
 }
 
 export const trainingGround = "training-ground";
@@ -76,6 +80,8 @@ const circuits: Circuit[] = [
     sky: null,
     night: null,
     venue: true,
+    trees: hillTrees,
+    season: "autumn",
   },
   {
     id: "neon-boulevard",
@@ -106,6 +112,8 @@ const circuits: Circuit[] = [
       layer: 26,
     },
     venue: true,
+    trees: null,
+    season: "autumn",
   },
   {
     id: trainingGround,
@@ -125,6 +133,8 @@ const circuits: Circuit[] = [
     },
     night: null,
     venue: false,
+    trees: null,
+    season: "summer",
   },
 ];
 
