@@ -42,7 +42,7 @@ const credits: Credit[] = [
   },
   {
     name: "Poly Haven",
-    role: "Surface textures and skies",
+    role: "Surface textures, skies and tree models",
     licence: "CC0 1.0",
     url: "https://polyhaven.com/",
   },

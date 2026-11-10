@@ -40,6 +40,8 @@ const screenLift = 1.15;
 const knitBump = 0.35;
 const weavePitch = 1 / 0.0021;
 const weaveDepth = 0.55;
+const towRough = 1.3;
+const towSmooth = 0.72;
 const coatRoughness = 0.035;
 const beadPitch = 1 / 0.011;
 const beadShare = 0.3;
@@ -293,7 +295,12 @@ export function carTextures(
   };
 }
 
-function weave() {
+interface Weave {
+  tone: THREE.Node<"float">;
+  gloss: THREE.Node<"float">;
+}
+
+function weave(): Weave {
   const n = abs(normalGeometry);
   const p = positionGeometry;
   const flat = step(max(n.x, n.z), n.y);
@@ -307,11 +314,17 @@ function weave() {
   const thread = mix(across, along, warp).mul(2);
   const shape = float(1).sub(thread.pow(2));
   const fade = float(1).sub(smoothstep(0.25, 0.7, fwidth(coords.x)));
-  return mix(
+  const tone = mix(
     float(1),
     shape.mul(weaveDepth).add(float(1).sub(weaveDepth)),
     fade,
   ).mul(mix(float(1), mix(float(0.86), float(1.14), warp), fade));
+  const gloss = mix(
+    float(1),
+    mix(float(towRough), float(towSmooth), warp),
+    fade,
+  );
+  return { tone, gloss };
 }
 
 export const carWetness = uniform(0);
@@ -355,13 +368,14 @@ function atlasMaterial(
   const coat = float(1).sub(smoothstep(0.45, 0.6, orm.g));
   const water = beads();
   const paint = texture(textures.albedo, uv()).rgb.mul(
-    mix(float(1), pattern.mul(1.6), carbon),
+    mix(float(1), pattern.tone.mul(1.6), carbon),
   );
+  const finish = orm.g.mul(mix(float(1), pattern.gloss, carbon));
   const height = texture(textures.bump, uv()).r;
   const worn =
     name === "body"
-      ? scraped({ colour: paint, roughness: orm.g, height, coat })
-      : { colour: paint, roughness: orm.g, height, coat };
+      ? scraped({ colour: paint, roughness: finish, height, coat })
+      : { colour: paint, roughness: finish, height, coat };
   material.colorNode = worn.colour.max(water.mul(beadGrey));
   material.roughnessNode = mix(
     worn.roughness,
@@ -623,7 +637,7 @@ function texturedPart(
   if (physical.name === "wheel-face") {
     const face = texture(textures.wheelFace, uv()).rgb;
     const bare = float(1).sub(smoothstep(0.02, 0.06, luminance(face)));
-    physical.colorNode = face.mul(mix(float(1), weave().mul(1.15), bare));
+    physical.colorNode = face.mul(mix(float(1), weave().tone.mul(1.15), bare));
     physical.roughness = 0.82;
   }
 }
@@ -638,13 +652,16 @@ function partMaterial(
   physical.envMapIntensity *= shadedReflection[name] ?? 1;
   if (name === "brake") brakeGlow(physical);
   texturedPart(physical, textures);
-  if (carbonMaterials.has(name))
-    physical.colorNode = color(physical.color).mul(weave().mul(1.6));
+  if (satinParts.test(name)) physical.roughness = satinRoughness;
+  if (carbonMaterials.has(name)) {
+    const pattern = weave();
+    physical.colorNode = color(physical.color).mul(pattern.tone.mul(1.6));
+    physical.roughnessNode = float(physical.roughness).mul(pattern.gloss);
+  }
   if (name === "carbon-part") {
     physical.clearcoat = 1;
     physical.clearcoatRoughness = coatRoughness;
   }
-  if (satinParts.test(name)) physical.roughness = satinRoughness;
   if (lampMaterials.has(name)) lampGlow(physical);
   else if (name.startsWith("led-")) ledGlow(physical);
   return physical;

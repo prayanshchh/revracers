@@ -1948,6 +1948,8 @@ int sdAiBayOf(int index)
 
 bool sdAiInPitLaneAt(double distance, double toMiddle)
 {
+    if (!model.ready)
+        return false;
     const PitLayout &p = model.pit;
     if (onArc(distance, p.entry - pitEntryGrace, p.wallStart) && toMiddle > 0)
         return true;

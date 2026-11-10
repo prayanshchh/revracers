@@ -4,8 +4,12 @@
 #include <vector>
 #include <emscripten/emscripten.h>
 
+#include <tgf.h>
+
 #include "sim.h"
+#include "ai.h"
 #include "game.h"
+#include "race-control.h"
 
 namespace
 {
@@ -54,8 +58,7 @@ const double maxTorqueScale = 6.0;
 const char *const hybridCategory = "22MP1";
 const double straightAlpha = 0.97;
 const double straightLift = 0.5;
-const double straightSteer = 0.05;
-const double straightSpeed = 130.0;
+const double straightBrake = 0.02;
 const double straightOpenRate = 3.0;
 const double straightCloseRate = 12.0;
 const double straightRear = 0.25;
@@ -66,6 +69,7 @@ const double signalIdle = 5.0e3;
 const double fullDeploy = 350.0e3;
 const double fullDeployShare = 0.97;
 const double differentialBase = 60.0;
+const char *const zoneSection = "Straight Mode Zones";
 
 struct CarEnergy
 {
@@ -76,12 +80,16 @@ struct CarEnergy
     tdble baseBrakeCoeff = 0.0;
     double baseMass = 0.0;
     double baseWing[2] = {0.0, 0.0};
-    double straightOpen = 0.0;
+    double frontOpen = 0.0;
+    double rearOpen = 0.0;
     double baseDrag = 0.0;
     double baseDiffSlip = 0.0;
     double differential = differentialBase;
     bool straightAssist = true;
     bool straightArmed = false;
+    bool straightActive = false;
+    bool straightEnabled = false;
+    bool startLocked = false;
     double battery = batteryCapacity;
     double harvested = 0.0;
     double deployed = 0.0;
@@ -111,9 +119,35 @@ bool playerAssist;
 bool raceSession;
 bool playerStraightAssist = true;
 
+struct Zone
+{
+    double start, end;
+};
+
+std::vector<Zone> zones;
+double lapLength = 1.0;
+
 double clamp01(double value)
 {
     return std::max(0.0, std::min(1.0, value));
+}
+
+double lapWrap(double distance)
+{
+    double wrapped = fmod(distance, lapLength);
+    return wrapped < 0 ? wrapped + lapLength : wrapped;
+}
+
+double zoneRoom(double distance, double half)
+{
+    for (const Zone &zone : zones)
+    {
+        double span = lapWrap(zone.end - zone.start);
+        double into = lapWrap(distance - zone.start);
+        if (into - half >= 0 && into + half <= span)
+            return span - into - half;
+    }
+    return -1.0;
 }
 
 double standardLimit(double kph)
@@ -237,18 +271,39 @@ void setTorque(const CarEnergy &e, tEngine &engine, double alpha, double torque,
     engine.brakeLinCoeff = (tdble)std::max(e.baseBrakeLin, -torque / std::max(rads, 1.0));
 }
 
-void updateAero(CarEnergy &e, tCar *car, tCarElt *elt, double alpha, double brake, double kph, double dt)
+bool straightEnabled(CarEnergy &e, tCarElt *elt, bool driving)
 {
-    bool pedals = alpha >= straightAlpha && brake < 0.02;
-    if (!e.straightAssist && (alpha < straightLift || brake >= 0.02))
+    double half = elt->_dimension_x / 2.0;
+    double room = zoneRoom(elt->_distFromStartLine, half);
+    if (room < 0)
+        e.startLocked = false;
+    double closing = fabs(elt->_speed_x) / straightCloseRate;
+    return driving && !e.startLocked && room > closing && !sdRaceControlNeutralised() &&
+           !sdAiInPitLaneAt(elt->_distFromStartLine, elt->_trkPos.toMiddle) && sdDamageStraightAllowed(elt->index);
+}
+
+double stepFlap(double open, bool target, double dt)
+{
+    return clamp01(open + (target ? straightOpenRate : -straightCloseRate) * dt);
+}
+
+void updateAero(CarEnergy &e, tCar *car, tCarElt *elt, double alpha, double brake, bool driving, double dt)
+{
+    e.straightEnabled = straightEnabled(e, elt, driving);
+    bool command = e.straightAssist ? alpha >= straightAlpha : e.straightArmed;
+    if (!e.straightEnabled || alpha < straightLift || brake >= straightBrake)
+        e.straightActive = false;
+    else if (command)
+        e.straightActive = true;
+    if (e.straightActive || !e.straightEnabled)
         e.straightArmed = false;
-    bool open = pedals && sdDamageStraightAllowed(elt->index) && kph >= straightSpeed && (e.straightAssist ? fabs(elt->_steerCmd) < straightSteer : e.straightArmed);
-    double rate = open ? straightOpenRate : -straightCloseRate;
-    e.straightOpen = clamp01(e.straightOpen + rate * dt);
+    bool partial = sdWeatherLowGrip();
+    e.frontOpen = stepFlap(e.frontOpen, e.straightActive, dt);
+    e.rearOpen = stepFlap(e.rearOpen, e.straightActive && !partial, dt);
     elt->ctrl.wingControlMode = 2;
-    car->aero.CdBody = (tdble)(e.baseDrag * (1.0 - (1.0 - straightDrag) * e.straightOpen) * sdDamageDrag(elt->index));
-    elt->ctrl.wingFrontCmd = (tdble)(e.baseWing[0] * (1.0 - (1.0 - straightFront) * e.straightOpen));
-    elt->ctrl.wingRearCmd = (tdble)(e.baseWing[1] * (1.0 - (1.0 - straightRear) * e.straightOpen));
+    car->aero.CdBody = (tdble)(e.baseDrag * (1.0 - (1.0 - straightDrag) * e.rearOpen) * sdDamageDrag(elt->index));
+    elt->ctrl.wingFrontCmd = (tdble)(e.baseWing[0] * (1.0 - (1.0 - straightFront) * e.frontOpen));
+    elt->ctrl.wingRearCmd = (tdble)(e.baseWing[1] * (1.0 - (1.0 - straightRear) * e.rearOpen));
 }
 
 int energySignal(const CarEnergy &e, double alpha, double brake, double kph, bool driving)
@@ -309,12 +364,13 @@ void sdEnergyReset(tCarElt *elt)
     e.baseMass = car->mass;
     e.baseWing[0] = car->wing[0].angle;
     e.baseWing[1] = car->wing[1].angle;
-    e.straightOpen = 0;
+    e.frontOpen = e.rearOpen = 0;
     e.baseDrag = car->aero.CdBody;
     e.baseDiffSlip = car->transmission.differential[TRANS_REAR_DIFF].dSlipMax;
     e.differential = differentialBase;
     e.straightAssist = player ? playerStraightAssist : true;
-    e.straightArmed = false;
+    e.straightArmed = e.straightActive = e.straightEnabled = false;
+    e.startLocked = raceSession;
     e.iceScale = icePeak / std::max(1.0, (double)engine.curve.maxPw);
     engine.fuelcons = 0;
     e.battery = batteryCapacity;
@@ -374,7 +430,21 @@ double sdEnergyLastLapFuel(int index)
 
 double sdEnergyStraightOpen(int index)
 {
-    return field[index].straightOpen;
+    return field[index].rearOpen;
+}
+
+void sdEnergyLoadZones(tTrack *track)
+{
+    zones.clear();
+    lapLength = std::max(1.0, (double)track->length);
+    char path[64];
+    for (int n = 1;; n++)
+    {
+        snprintf(path, sizeof(path), "%s/%d", zoneSection, n);
+        if (!GfParmExistsSection(track->params, path))
+            break;
+        zones.push_back({GfParmGetNum(track->params, path, "start", nullptr, 0.0f), GfParmGetNum(track->params, path, "end", nullptr, 0.0f)});
+    }
 }
 
 double sdEnergySignal(int index)
@@ -411,7 +481,7 @@ void sdEnergyStep(tCarElt *elt, double dt)
     e.motorPower = -split.battery;
     e.icePower = alpha * ice;
     e.signal = energySignal(e, alpha, brake, kph, driving);
-    updateAero(e, car, elt, alpha, brake, kph, dt);
+    updateAero(e, car, elt, alpha, brake, driving, dt);
     burnFuel(e, car, alpha, dt);
 }
 
@@ -480,9 +550,11 @@ EMSCRIPTEN_KEEPALIVE void sdEnergyInfo(double *out)
     out[13] = e.lastLapHarvested;
     out[14] = car->brkSyst.rep;
     out[15] = e.deployLevel;
-    out[16] = e.straightOpen;
+    out[16] = e.frontOpen;
     out[17] = e.differential;
     out[18] = e.straightArmed ? 1 : 0;
+    out[19] = e.straightEnabled ? 1 : 0;
+    out[20] = sdWeatherLowGrip() ? 1 : 0;
 }
 
 }

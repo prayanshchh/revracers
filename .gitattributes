@@ -14,3 +14,4 @@ content/music/*.ogg filter=lfs diff=lfs merge=lfs -text
 apps/client/public/intro/*.mp4 filter=lfs diff=lfs merge=lfs -text
 content/cars/**/lite/*.bin filter=lfs diff=lfs merge=lfs -text
 content/tracks/**/*.webp filter=lfs diff=lfs merge=lfs -text
+content/scenery/**/*.webp filter=lfs diff=lfs merge=lfs -text

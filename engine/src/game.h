@@ -78,6 +78,7 @@ void sdEnergyArmOvertake(int index);
 bool sdEnergyOvertakeActive(int index);
 double sdEnergyLastLapFuel(int index);
 double sdEnergyStraightOpen(int index);
+void sdEnergyLoadZones(tTrack *track);
 double sdEnergySignal(int index);
 void sdServiceCar(int index, int compound);
 void sdCarTeleport(int index, double distance, double lateral);
@@ -91,6 +92,7 @@ double sdWeatherWaterAt(double distance, double toMiddle);
 double sdWeatherWheelWater(tCarElt *car, int wheel);
 double sdWeatherCarWater(tCarElt *car);
 double sdWeatherFutureLine(double seconds);
+bool sdWeatherLowGrip();
 bool sdWeatherWetCompound(int compound);
 int sdWeatherIdealCompound(double water, int dryChoice);
 

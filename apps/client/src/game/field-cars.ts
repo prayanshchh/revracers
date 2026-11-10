@@ -25,6 +25,7 @@ import {
 import {
   type DamageLook,
   newLook,
+  setLookSpeed,
   partCount,
   partIndex,
   tyreState,
@@ -618,6 +619,7 @@ export class FieldCars {
     this.lift(car, data, at);
     this.setShadow(car, distance < shadowDistance);
     this.setCompound(car, data[at + carField.compound] ?? 1);
+    this.setMotion(car, data, at);
     this.setDetail(car, detailFor(car.detail, distance * spread));
     if (this.wheelsMove(car, distance))
       this.updateWheels(car, data, at, seconds);
@@ -639,6 +641,10 @@ export class FieldCars {
       car.lost.includes(true) ||
       car.off.includes(true)
     );
+  }
+
+  private setMotion(car: FieldCar, data: Float64Array, at: number): void {
+    setLookSpeed(car.damage, data[at + carField.speed] ?? 0);
   }
 
   private updateFlaps(car: FieldCar, opening: number): void {

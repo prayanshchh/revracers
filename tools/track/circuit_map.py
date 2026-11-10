@@ -25,7 +25,7 @@ TURNS = [
     (14, 4080), (15, 4270), (16, 4490), (17, 4622), (18, 4794), (19, 5018),
     (20, 5318),
 ]
-STRAIGHTS = [(2640, 3700), (5370, 300)]
+STRAIGHT_MODE_ZONES = [(20, 120.0, 1, 60.0), (11, 110.0, 12, 70.0)]
 SPEED_TRAP = 3640.0
 
 
@@ -117,11 +117,20 @@ def snap_turns(track):
     return turns
 
 
+def straight_mode_zones(turns, length):
+    at = {turn["number"]: turn["distance"] for turn in turns}
+    return [
+        [round((at[after] + lead) % length, 1), round((at[before] - short) % length, 1)]
+        for after, lead, before, short in STRAIGHT_MODE_ZONES
+    ]
+
+
 def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else "content/tracks/hill-country")
     osm = Osm(root / "source" / "osm.json")
     track = json.loads((root / "track.json").read_text())
     points = track["centerline"][:: TRACK_STRIDE]
+    turns = snap_turns(track)
     output = {
         **classify(osm),
         "track": {
@@ -132,9 +141,9 @@ def main():
                 for v in (round(p["x"], ROUND), round(p["y"], ROUND), round(p["z"], ROUND))
             ],
         },
-        "turns": snap_turns(track),
+        "turns": turns,
         "sectors": track["sectors"],
-        "straights": [list(pair) for pair in STRAIGHTS],
+        "straights": straight_mode_zones(turns, track["length"]),
         "speedTrap": SPEED_TRAP,
     }
     (root / "circuit-map.json").write_text(json.dumps(output, separators=(",", ":")) + "\n")

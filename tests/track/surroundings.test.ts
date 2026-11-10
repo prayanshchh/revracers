@@ -11,6 +11,7 @@ interface Point {
   y: number;
   z: number;
   width: number;
+  camber: number;
   wallLeft: number;
   wallRight: number;
 }
@@ -22,7 +23,13 @@ const track = JSON.parse(
   length: number;
   centerline: Point[];
   surfaces: { kind: string; from: number; to: number; width: number }[];
-  pitLane: { entry: number; exit: number };
+  pitLane: {
+    entry: number;
+    exit: number;
+    garageStart: number;
+    garageEnd: number;
+    garageFront: number;
+  };
 };
 const skies = [
   "circuit",
@@ -44,6 +51,9 @@ const sharpRowsPerMetre = 2.5;
 const gpuTextureLimit = 16384;
 const maskColumns = 401;
 const clearanceHeight = 4;
+const balconyLevels = [7.2, 10.7];
+const balconyLip = 1.2;
+const balconyRecess = 1.6;
 
 function floats(file: string): Float32Array {
   const bytes = readFileSync(file);
@@ -83,6 +93,37 @@ function insideBarriers(x: number, north: number): boolean {
   return lateral > 0 ? lateral < point.wallLeft : -lateral < point.wallRight;
 }
 
+function lateralOf(x: number, north: number): { row: number; lateral: number } {
+  const row = nearestRow(x, north);
+  const point = track.centerline[row];
+  const next = track.centerline[(row + 1) % track.centerline.length];
+  if (!point || !next) return { row, lateral: 0 };
+  const tx = next.x - point.x;
+  const tn = -next.z + point.z;
+  const size = Math.hypot(tx, tn);
+  return {
+    row,
+    lateral: ((x - point.x) * -tn + (north + point.z) * tx) / size,
+  };
+}
+
+function onBalcony(x: number, north: number, up: number): boolean {
+  const { row, lateral } = lateralOf(x, north);
+  const point = track.centerline[row];
+  if (!point) return false;
+  const pit = track.pitLane;
+  const distance = (row / track.centerline.length) * track.length;
+  const span = (pit.garageEnd - pit.garageStart + track.length) % track.length;
+  const along = (distance - pit.garageStart + track.length) % track.length;
+  const floor = up - point.y - point.camber * lateral;
+  return (
+    along < span + 2 &&
+    lateral > pit.garageFront - balconyLip &&
+    lateral < pit.garageFront + balconyRecess &&
+    balconyLevels.some((level) => Math.abs(floor - level) < 0.2)
+  );
+}
+
 function standsInside(position: Accessor | null): boolean {
   if (!position) return false;
   const v = [0, 0, 0];
@@ -96,18 +137,24 @@ function standsInside(position: Accessor | null): boolean {
 }
 
 describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
-  test("spectators stay behind the barriers and use real sprite cells", () => {
+  test("spectators stay behind the barriers or on the pit building balconies, and use real sprite cells", () => {
     const values = floats(crowdFile);
     expect(values.length % stride).toBe(0);
     const offenders: number[] = [];
+    let guests = 0;
+    for (let i = 0; i < values.length; i += stride) {
+      const [x = 0, north = 0, up = 0] = values.subarray(i, i + 3);
+      if (!insideBarriers(x, north)) continue;
+      if (onBalcony(x, north, up)) guests += 1;
+      else offenders.push(i / stride);
+    }
+    expect(offenders).toEqual([]);
+    expect(guests).toBeGreaterThan(1000);
     for (let i = 0; i < values.length; i += stride * 11) {
-      if (insideBarriers(values[i] ?? 0, values[i + 1] ?? 0))
-        offenders.push(i / stride);
       const cell = values[i + 4] ?? -1;
       expect(cell).toBeGreaterThanOrEqual(0);
       expect(cell).toBeLessThan(32);
     }
-    expect(offenders).toEqual([]);
   });
 
   test("no tent, crane, mast or screen stands inside the barriers", async () => {

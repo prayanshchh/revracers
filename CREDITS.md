@@ -89,6 +89,11 @@ folder under `content/tracks` has a `SOURCES.md` with the full pipeline.
   Map, public domain.
 - Surface textures and skies: [Poly Haven](https://polyhaven.com/), CC0 1.0.
   Each file, author and checksum is listed in `TEXTURE-SOURCES.json`.
+- Trees (`content/scenery/trees`) are pictures rendered from four
+  [Poly Haven](https://polyhaven.com/) models, CC0 1.0: Island Tree 02
+  (Rob Tuytel, Rico Cilliers), Jacaranda Tree (Rico Cilliers, Rob Tuytel),
+  Tree Small 02 (Rico Cilliers) and Searsia Burchellii (James Ray Cock,
+  Jenelle van Heerden).
 - Pit crew skeleton and animations: Universal Base Characters and
   Universal Animation Library by [Quaternius](https://quaternius.com/),
   CC0 1.0.

@@ -25,6 +25,7 @@ const fieldCars = 4;
 const stepsPerFrame = 8;
 const frameSeconds = stepsPerFrame / 500;
 const closeSeconds = 0.1;
+const raceFrames = 6000;
 
 class ShownFlap {
   private readonly node = new THREE.Group();
@@ -88,7 +89,7 @@ describe.runIf(existsSync(wasm))("rear wing flap", () => {
     expect(unarmed.widest).toBe(0);
   });
 
-  test("rival flaps open on the straight and shut as soon as they brake", async () => {
+  test("rival flaps open in the Straight Mode zones and shut as soon as they brake", async () => {
     const m = await startField({
       kind: sessionKind.race,
       laps: 3,
@@ -100,7 +101,7 @@ describe.runIf(existsSync(wasm))("rear wing flap", () => {
     const shown = Array.from({ length: fieldCars }, () => new ShownFlap());
     const braking = Array.from({ length: fieldCars }, () => 0);
     let openUnderBraking = 0;
-    for (let frame = 0; frame < 2000; frame++) {
+    for (let frame = 0; frame < raceFrames; frame++) {
       m._sdStep(stepsPerFrame);
       m._sdCars(memory);
       const data = new Float64Array(

@@ -786,6 +786,7 @@ EMSCRIPTEN_KEEPALIVE int sdInit(const char *trackCategory, const char *trackName
         return -1;
     indexSegments();
     sdGravelInit(ReInfo->track);
+    sdEnergyLoadZones(ReInfo->track);
     sdInitWeather();
 
     tSituation *s = ReInfo->s;

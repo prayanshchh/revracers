@@ -833,7 +833,7 @@ export class Engine {
   }
 
   energyInfo(): EnergyInfo {
-    const v = this.doubles(19, (p) => {
+    const v = this.doubles(21, (p) => {
       this.module._sdEnergyInfo(p);
     });
     const at = (i: number) => v[i] ?? 0;
@@ -854,6 +854,7 @@ export class Engine {
       straightMode: at(16),
       differential: at(17),
       straightArmed: at(18) !== 0,
+      straightEnabled: at(19) !== 0,
     };
   }
 

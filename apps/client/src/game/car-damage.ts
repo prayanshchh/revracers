@@ -21,6 +21,7 @@ import {
   sin,
   smoothstep,
   step,
+  time,
   uniform,
   uniformArray,
   vec2,
@@ -413,12 +414,17 @@ export function tagDamageZones(
 const scrapeAt = 12;
 const flagAt = 15;
 const armsAt = 16;
-const lookSize = 20;
+const motionAt = 20;
+const lookSize = 24;
 
 export type DamageLook = Float32Array;
 
 export function newLook(): DamageLook {
   return new Float32Array(lookSize);
+}
+
+export function setLookSpeed(look: DamageLook, speed: number): void {
+  look[motionAt] = Math.abs(speed);
 }
 
 const intact = newLook();
@@ -545,7 +551,7 @@ export function updateLook(
     look[armsAt + wheel] = now;
   }
   look[flagAt] = 0;
-  look[flagAt] = look.some((v) => v > 0) ? 1 : 0;
+  look[flagAt] = look.subarray(0, motionAt).some((v) => v > 0) ? 1 : 0;
   return changes;
 }
 
@@ -563,6 +569,7 @@ function lookUniforms() {
     z2: block(8),
     scrape: block(scrapeAt),
     arms: block(armsAt),
+    motion: block(motionAt),
   };
 }
 
@@ -655,8 +662,31 @@ function stretchedArm(
   return p.add(moved.mul(weight));
 }
 
+const flutterFrom = 22;
+const flutterFull = 75;
+const flutterReach = 0.075;
+const flutterRate = 47;
+const flutterDrift = 31;
+
+function flutter(
+  zone: FloatNode,
+  state: FloatNode,
+  speed: FloatNode,
+): FloatNode {
+  const loose = step(0.02, state).mul(step(state, 1.2));
+  const phase = zone.mul(2.3);
+  const shake = sin(time.mul(flutterRate).add(phase))
+    .mul(0.6)
+    .add(sin(time.mul(flutterDrift).add(phase.mul(1.7))).mul(0.4));
+  return shake
+    .mul(flutterReach)
+    .mul(smoothstep(flutterFrom, flutterFull, speed))
+    .mul(loose)
+    .mul(clamp(state, 0.25, 1));
+}
+
 export function damageable(material: THREE.NodeMaterial): void {
-  const { z0, z1, z2, arms } = looks();
+  const { z0, z1, z2, arms, motion } = looks();
   const tag = attribute<"float">("damageZone", "float");
   const zone = floor(tag);
   const seed = fract(tag);
@@ -674,7 +704,10 @@ export function damageable(material: THREE.NodeMaterial): void {
     step(seed, state).mul(step(0.001, state)),
     tearing,
   );
-  const angle = clamp(state, 0, 1).mul(hinge.w).mul(float(1).sub(tearing));
+  const angle = clamp(state, 0, 1)
+    .mul(hinge.w)
+    .add(flutter(zone, state, motion.x).mul(float(1).sub(arm)))
+    .mul(float(1).sub(tearing));
   const k = mix(axis.xyz, vec3(0, 1, 0), arm);
   const p = positionLocal;
   const v = p.sub(hinge.xyz);
@@ -708,6 +741,59 @@ const scrapeTop = 0.47;
 const scrapeBottom = 0.03;
 
 const edgeBand = 0.022;
+const stumpReach = 0.05;
+const stumpRag = 0.22;
+const stumpTop = 0.2;
+
+function stumps(
+  x: FloatNode,
+  y: FloatNode,
+  z: FloatNode,
+  ragged: FloatNode,
+): FloatNode {
+  const { z0, z1, z2 } = looks();
+  const off = (state: FloatNode) => step(gone - 0.5, state);
+  const rag = ragged.mul(stumpRag);
+  const cut = (value: FloatNode, at: number, keeps: 1 | -1) => {
+    const inside = keeps > 0 ? float(at).sub(value) : value.sub(at);
+    return step(0, inside).mul(
+      smoothstep(float(stumpReach), float(0), inside.add(rag)),
+    );
+  };
+  const wing = step(wingBack, x).mul(step(z, stumpTop));
+  const mirror = step(0.48, x).mul(step(x, 0.82)).mul(step(0.58, z));
+  return [
+    wing
+      .mul(off(z0.x))
+      .mul(cut(y, wingOuter, 1))
+      .mul(step(wingInner, y)),
+    wing.mul(off(z0.y)).mul(cut(y, wingInner, 1)),
+    wing
+      .mul(off(z0.z))
+      .mul(cut(y, -wingOuter, -1))
+      .mul(step(y, -wingInner)),
+    wing.mul(off(z0.w)).mul(cut(y, -wingInner, -1)),
+    off(z1.x)
+      .mul(cut(z, 0.13, -1))
+      .mul(step(2.18, x)),
+    off(z1.y)
+      .mul(cut(z, 0.775, 1))
+      .mul(step(x, -2.1))
+      .mul(step(abs(y), 0.56)),
+    off(z1.z)
+      .mul(cut(z, 0.585, 1))
+      .mul(step(x, -1.85))
+      .mul(step(abs(y), 0.62)),
+    off(z1.w)
+      .mul(cut(y, 0.29, 1))
+      .mul(step(0.2, y))
+      .mul(mirror),
+    off(z2.x)
+      .mul(cut(y, -0.29, -1))
+      .mul(step(y, -0.2))
+      .mul(mirror),
+  ].reduce((a, b) => max(a, b));
+}
 
 function scrapeMask(): THREE.Node<"vec2"> {
   const { scrape } = looks();
@@ -745,7 +831,13 @@ function scrapeMask(): THREE.Node<"vec2"> {
       const noseEdge = nose.mul(
         smoothstep(noseReach.sub(edgeBand), noseReach, z),
       );
-      found.assign(vec2(max(flank, nose), max(flankEdge, noseEdge)));
+      const stump = stumps(x, y, z, ragged);
+      found.assign(
+        vec2(
+          max(max(flank, nose), stump),
+          max(max(flankEdge, noseEdge), stump),
+        ),
+      );
     });
     return found;
   })();

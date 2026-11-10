@@ -46,6 +46,8 @@ import {
   expectDownloads,
   releaseUploadedImages,
   uploadEverything,
+  uploadLater,
+  warmLater,
 } from "./preload.ts";
 import { PitGate } from "./pit-gate.ts";
 import type { PitControl, PitLayout } from "./pitstop.ts";
@@ -64,6 +66,8 @@ import {
 } from "./floodlights.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
 import { Crowd, crowdData } from "./crowd.ts";
+import { treeDownloads, Trees } from "./scenery-trees.ts";
+import { setCloudShadows } from "./scenery-look.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
 import { TyreStones } from "./tyre-stones.ts";
 import {
@@ -89,7 +93,7 @@ const kelvinOffset = 273.15;
 const cinematicNear = 0.5;
 const cinematicFar = 41000;
 const upAxis = new THREE.Vector3(0, 0, 1);
-const clearVisibility = 16000;
+const clearVisibility = 5000;
 const rainVisibility = 150;
 const rainFogCurve = 1.5;
 const overcastSun = 0.86;
@@ -254,6 +258,7 @@ function venueDownloads(
     roadUrl,
     crewUrl,
     crowdData,
+    ...(circuit.trees ? [circuit.trees, ...treeDownloads()] : []),
     ...circuitFiles(circuit),
     carFile(team, "car.glb"),
     ...[...new Set(fleet)].map((each) => carFile(each, "lod.glb")),
@@ -351,6 +356,16 @@ async function venueExtras(
   return { people, crews };
 }
 
+function fieldCrewsFor(
+  crews: PitCrew[],
+  field: FieldCars | null,
+  anisotropy: number,
+): FieldCrews | null {
+  return field && crews.length > 1
+    ? new FieldCrews(crews.slice(1), field, anisotropy)
+    : null;
+}
+
 async function parkedGrid(
   engine: Engine,
   team: string,
@@ -394,6 +409,7 @@ export class Scene {
   private shake: Shake | null = null;
   private lastFeel = 0;
   private readonly eye = new THREE.Vector3();
+  private readonly sunShine = new THREE.Color();
   private readonly carPosition = new THREE.Vector3();
   private viewMirrored = false;
   private cinematic: CameraPose | null = null;
@@ -449,6 +465,7 @@ export class Scene {
   };
   private readonly viewMatrix = new THREE.Matrix4();
   private warming = false;
+  private debrisCars = false;
   private crewOut = false;
   private parked: ParkedBoxes | null = null;
   private pitPoint:
@@ -486,6 +503,7 @@ export class Scene {
     private readonly sky: SdSky,
     private readonly skyBox: SkyBox,
     private readonly people: Crowd | null,
+    private readonly trees: Trees | null,
     private readonly car: GltfCar,
     private readonly grid: GridCars | null,
     track: THREE.Object3D,
@@ -509,15 +527,16 @@ export class Scene {
       skyBox.mesh,
       track,
       car.root,
-      this.smoke.root,
-      this.rain.mesh,
-      this.farRain.mesh,
-      this.spray.root,
-      this.debris.root,
-      this.gravel.root,
+      warmLater(this.smoke.root),
+      warmLater(this.rain.mesh),
+      warmLater(this.farRain.mesh),
+      warmLater(this.spray.root),
+      warmLater(this.debris.root),
+      warmLater(this.gravel.root),
       ...extras,
     );
     this.tyreStones = new TyreStones(car.tyreMounts());
+    this.tyreStones.meshes.forEach(warmLater);
     crew?.attachCar(car.tyreMounts(), car.wingParts(), car.damage);
     const night = light.night >= 1;
     const lit = sessionLighting(skyBox, night);
@@ -543,8 +562,8 @@ export class Scene {
       this.marks.mesh,
       ...presentRoots(this.crew),
       ...(fieldCrews?.roots ?? []),
-      this.gate.mesh,
-      this.safetyCar.root,
+      warmLater(this.gate.mesh),
+      warmLater(this.safetyCar.root),
     );
     this.moving = [
       skyBox.mesh,
@@ -553,7 +572,6 @@ export class Scene {
       this.safetyCar.root,
       ...extras,
     ];
-    this.addDebrisCars(field);
     culler.narrowViews();
     car.focusMirror = (view) => {
       culler.focus(view);
@@ -600,6 +618,7 @@ export class Scene {
       skyBox,
       frame,
       { people, crews },
+      trees,
       road,
       data,
       car,
@@ -615,6 +634,7 @@ export class Scene {
         team,
         rivals.length > 0 ? fieldCrewCount : 0,
       ),
+      circuit.trees ? Trees.load(circuit.trees, anisotropy) : null,
       groundOf(circuit, renderer, loads, carLoad),
       loads.line,
       carLoad,
@@ -636,13 +656,16 @@ export class Scene {
     const track = new THREE.Group();
     track.add(
       placed,
-      ...presentRoots(people).map((root) => placeOnTrack(root, frame, start)),
+      ...presentRoots(people, trees).map((root) =>
+        placeOnTrack(root, frame, start),
+      ),
       placeOnTrack(racingLine.root, frame, start),
     );
     const scene = new Scene(
       new SdSky(local),
       skyBox,
       people,
+      trees,
       car,
       grid,
       track,
@@ -650,9 +673,7 @@ export class Scene {
       culler,
       racingLine,
       crews[0] ?? null,
-      field && crews.length > 1
-        ? new FieldCrews(crews.slice(1), field, anisotropy)
-        : null,
+      fieldCrewsFor(crews, field, anisotropy),
       data.length / engine.trackLength(),
       field,
       lights,
@@ -755,8 +776,11 @@ export class Scene {
     }
   }
 
-  private addDebrisCars(field: FieldCars | null): void {
-    this.debris.addCar(0, this.car.pieces);
+  private addDebrisCars(): void {
+    if (this.debrisCars) return;
+    this.debrisCars = true;
+    const { field } = this;
+    this.debris.addCar(0, this.car.debrisPieces());
     this.debris.addWheels(0, this.car.wheelPieces);
     for (let i = 1; ; i++) {
       const pieces = field?.piecesOf(i);
@@ -969,6 +993,7 @@ export class Scene {
     this.sunlight.dim(
       (1 - overcastSun * shaded) * (1 - brokenSun * broken * this.cloudLight),
     );
+    setCloudShadows(broken * this.cloudLight * (1 - overcast), time);
     this.scene.environmentIntensity = 1 - overcastAmbient * shaded;
     this.atmosphere.exposure =
       this.baseExposure * (1 + overcastExposure * shaded);
@@ -1287,6 +1312,13 @@ export class Scene {
     setStartLights(this.cinematic ? 0 : lit);
     this.updateSky(time, eyeX, eyeY, eyeZ);
     this.people?.update(this.eye.set(eyeX, eyeY, eyeZ));
+    this.trees?.update(
+      this.eye,
+      this.sunlight.direction,
+      this.sunShine
+        .copy(this.sunlight.sun.color)
+        .multiplyScalar(this.sunlight.sun.intensity),
+    );
     this.applyWeather(frame, onboard);
     this.debris.update(time);
   }
@@ -1350,14 +1382,31 @@ export class Scene {
     this.warming = true;
     this.crew?.warm();
     this.fieldCrews?.warm();
-    await uploadEverything(renderer, this.scene, () => {
-      draw();
-      this.sunlight.freeze();
-      if (mirrors) this.warmMirrors(renderer);
-    });
+    if (mirrors) this.addDebrisCars();
+    await uploadEverything(
+      renderer,
+      this.scene,
+      () => {
+        draw();
+        this.sunlight.freeze();
+        if (mirrors) this.warmMirrors(renderer);
+      },
+      !mirrors,
+    );
     this.warming = false;
     releaseCpuCopies(this.road, this.culler.retained());
     releaseUploadedImages(renderer, this.scene);
+  }
+
+  get racingLineData(): RacingLineData {
+    return this.racingLine.data;
+  }
+
+  warmRest(renderer: THREE.WebGPURenderer, draw: () => void): Promise<void> {
+    this.addDebrisCars();
+    return uploadLater(renderer, this.scene, draw, () => {
+      this.sunlight.redraw();
+    });
   }
 
   updateTyres(frame: Float64Array, tyres: TyreInfo): void {

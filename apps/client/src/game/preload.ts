@@ -226,6 +226,21 @@ function pixelData(data: unknown): data is { width: number; height: number } {
   );
 }
 
+function drawnCanvas(
+  data: unknown,
+): data is OffscreenCanvas | HTMLCanvasElement {
+  return (
+    (typeof OffscreenCanvas !== "undefined" &&
+      data instanceof OffscreenCanvas) ||
+    (typeof HTMLCanvasElement !== "undefined" &&
+      data instanceof HTMLCanvasElement)
+  );
+}
+
+function freeable(data: unknown): data is { width: number; height: number } {
+  return fileImage(data) || pixelData(data) || drawnCanvas(data);
+}
+
 function slotTextures(scene: THREE.Scene): void {
   scene.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
@@ -253,41 +268,123 @@ export function releaseUploadedImages(
       continue;
     if (record.version !== texture.version) continue;
     const data: unknown = texture.source.data;
-    if (!fileImage(data) && !pixelData(data)) continue;
+    if (!freeable(data)) continue;
     texture.source.data = { width: data.width, height: data.height };
     if (data instanceof ImageBitmap) data.close();
+    if (drawnCanvas(data)) {
+      data.width = 0;
+      data.height = 0;
+    }
   }
   releasable.clear();
 }
 
-function drawEverything(scene: THREE.Scene, draw: () => void): void {
+const laterKey = "warmLater";
+
+export function warmLater<T extends THREE.Object3D>(object: T): T {
+  object.userData[laterKey] = true;
+  return object;
+}
+
+type Pass = "all" | "now" | "later";
+
+function reveal(scene: THREE.Object3D, pass: Pass): () => void {
   const hidden: THREE.Object3D[] = [];
   const culled: THREE.Object3D[] = [];
-  scene.traverse((object) => {
-    if (!object.visible) {
-      hidden.push(object);
+  const visit = (object: THREE.Object3D, inLater: boolean) => {
+    const late = inLater || object.userData[laterKey] === true;
+    if (late && pass === "now") return;
+    if (late || pass !== "later") {
+      if (!object.visible) hidden.push(object);
       object.visible = true;
-    }
-    if (object.frustumCulled) {
-      culled.push(object);
+      if (object.frustumCulled) culled.push(object);
       object.frustumCulled = false;
     }
-  });
-  draw();
-  for (const object of hidden) object.visible = false;
-  for (const object of culled) object.frustumCulled = true;
+    for (const child of object.children) visit(child, late);
+  };
+  visit(scene, false);
+  return () => {
+    for (const object of hidden) object.visible = false;
+    for (const object of culled) object.frustumCulled = true;
+  };
+}
+
+function drawEverything(
+  scene: THREE.Scene,
+  draw: () => void,
+  pass: Pass,
+): void {
+  const restore = reveal(scene, pass);
+  try {
+    draw();
+  } finally {
+    restore();
+  }
+}
+
+interface PipelineCache {
+  updateForRender(renderObject: unknown): void;
+  getForRender(renderObject: unknown, promises: Promise<void>[]): unknown;
+}
+
+export function startPipelines(
+  renderer: THREE.WebGPURenderer,
+  draw: () => void,
+): Promise<void> {
+  const pipelines = (renderer as unknown as { _pipelines: PipelineCache })
+    ._pipelines;
+  const pending: Promise<void>[] = [];
+  pipelines.updateForRender = (renderObject) => {
+    pipelines.getForRender(renderObject, pending);
+  };
+  try {
+    draw();
+  } finally {
+    delete (pipelines as Partial<PipelineCache>).updateForRender;
+  }
+  return Promise.all(pending).then(() => undefined);
 }
 
 export async function uploadEverything(
   renderer: THREE.WebGPURenderer,
   scene: THREE.Scene,
   draw: () => void,
+  deferLater: boolean,
 ): Promise<void> {
-  drawEverything(scene, draw);
+  const pass = deferLater ? "now" : "all";
+  await startPipelines(renderer, () => {
+    drawEverything(scene, draw, pass);
+  });
+  drawEverything(scene, draw, pass);
   await loaded();
-  drawEverything(scene, draw);
+  drawEverything(scene, draw, pass);
   for (let frame = 0; frame < settleFrames; frame += 1) draw();
   await (
     renderer.backend as unknown as GpuBackend
   ).device.queue.onSubmittedWorkDone();
+}
+
+interface NodeFrames {
+  _nodes: { nodeFrame: { update(): void } };
+}
+
+function freshFrame(renderer: THREE.WebGPURenderer): void {
+  (renderer as unknown as NodeFrames)._nodes.nodeFrame.update();
+}
+
+export async function uploadLater(
+  renderer: THREE.WebGPURenderer,
+  scene: THREE.Scene,
+  draw: () => void,
+  refresh: () => void,
+): Promise<void> {
+  refresh();
+  freshFrame(renderer);
+  const ready = startPipelines(renderer, () => {
+    drawEverything(scene, draw, "later");
+  });
+  refresh();
+  freshFrame(renderer);
+  draw();
+  await ready;
 }

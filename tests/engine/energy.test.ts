@@ -212,25 +212,6 @@ describe.runIf(existsSync(wasm))("car status beyond Speed Dreams", () => {
     expect(read().engine).toBeGreaterThan(start);
   });
 
-  test("Straight Mode needs arming when the assist is off, and closes on lift", async () => {
-    const m = await startRace();
-    const energy = energyReader(m);
-    m._sdEnergyStraight(0, 0);
-    accelerateTo(m, 50);
-    flatOut(m, 200);
-    expect(energy().straight).toBe(0);
-    m._sdEnergyStraight(0, 1);
-    let widest = 0;
-    for (let tick = 0; tick < 400; tick++) {
-      flatOut(m, 1);
-      widest = Math.max(widest, energy().straight);
-    }
-    expect(widest).toBeGreaterThan(0.5);
-    m._sdInputAnalog(1, 0, 0, 0.3);
-    m._sdStep(100);
-    expect(energy().straight).toBe(0);
-  });
-
   test("a tighter differential evens out the rear wheels under power", async () => {
     const spread = async (percent: number) => {
       const m = await startRace();
