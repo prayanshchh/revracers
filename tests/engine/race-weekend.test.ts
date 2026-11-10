@@ -192,6 +192,8 @@ describe.runIf(existsSync(wasm))("race weekend on the real engine", () => {
       expect(car.pits).toBeGreaterThanOrEqual(1);
       expect(car.pits).toBeLessThanOrEqual(entrant.stints.length + 1);
     }
+    expect(boxes.lines.released).toBeGreaterThanOrEqual(7);
+    expect(boxes.lines.wrongTyres).toBe(0);
     expect(boxes.lines.stops).toBeGreaterThanOrEqual(5);
     expect(boxes.lines.arriving).toBeLessThan(0.45);
     expect(boxes.lines.parked).toBeLessThan(0.45);

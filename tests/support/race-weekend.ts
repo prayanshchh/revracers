@@ -259,6 +259,7 @@ export function carPoses(m: Weekend, cars: number) {
       speed: at(40),
       toMiddle: at(47),
       distance: at(48),
+      compound: at(45),
     };
   });
 }
@@ -314,6 +315,8 @@ export function weatherOf(m: Weekend) {
 }
 
 export interface BoxLines {
+  released: number;
+  wrongTyres: number;
   stops: number;
   arriving: number;
   parked: number;
@@ -322,6 +325,9 @@ export interface BoxLines {
 
 interface BoxVisit {
   box: number;
+  requested: number;
+  released: boolean;
+  wrongTyres: boolean;
   shared: boolean;
   parkedAt: number;
   arriving: number;
@@ -340,7 +346,14 @@ export function watchBoxes(
   boxLine: number,
   straightFrom: number,
 ): { lines: BoxLines; look: () => void } {
-  const lines: BoxLines = { stops: 0, arriving: 0, parked: 0, leaving: 0 };
+  const lines: BoxLines = {
+    released: 0,
+    wrongTyres: 0,
+    stops: 0,
+    arriving: 0,
+    parked: 0,
+    leaving: 0,
+  };
   const visits = new Map<number, BoxVisit>();
   const ahead = (from: number, to: number) =>
     (((to - from) % trackLength) + trackLength) % trackLength;
@@ -350,6 +363,8 @@ export function watchBoxes(
   const finish = (car: number) => {
     const visit = visits.get(car);
     visits.delete(car);
+    if (visit?.released) lines.released += 1;
+    if (visit?.wrongTyres) lines.wrongTyres += 1;
     if (!visit || visit.shared || visit.parked < 0) return;
     if (ahead(straightFrom, visit.box) > trackLength / 2) return;
     lines.stops += 1;
@@ -367,6 +382,11 @@ export function watchBoxes(
     }
     if (phase === aiPitPhase.boxing && ahead(pose.distance, box) < crewAhead)
       visit.arriving = Math.max(visit.arriving, off);
+    if (phase === aiPitPhase.release && !visit.released) {
+      visit.released = true;
+      visit.wrongTyres =
+        visit.requested >= 0 && pose.compound !== visit.requested;
+    }
     if (phase === aiPitPhase.release && ahead(box, pose.distance) < crewBehind)
       visit.leaving = Math.max(
         visit.leaving,
@@ -386,6 +406,9 @@ export function watchBoxes(
       }
       const visit = visits.get(car) ?? {
         box: box(car),
+        requested: -1,
+        released: false,
+        wrongTyres: false,
         shared: false,
         parkedAt: boxLine,
         arriving: 0,
@@ -393,6 +416,7 @@ export function watchBoxes(
         leaving: 0,
       };
       visits.set(car, visit);
+      visit.requested = pits[car * pitStateSize + aiPit.compound] ?? -1;
       for (let other = 0; other < cars; other++)
         if (other !== car && pitting(phase(other)))
           visit.shared ||= apart(box(car), box(other)) < neighbourReach;

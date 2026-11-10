@@ -1934,6 +1934,7 @@ void sdAiPitState(int index, double *out)
     out[3] = boxDistance(driver.bay);
     out[4] = driver.noService ? 1 : 0;
     out[5] = driver.autoRelease ? 1 : 0;
+    out[6] = driver.pitCompound;
 }
 
 bool sdAiBoxOf(int bay, double *distance, double *lateral)

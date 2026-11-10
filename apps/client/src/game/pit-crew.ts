@@ -48,6 +48,7 @@ import {
   PitProps,
   type WingParts,
   wingGrip,
+  wheelsOffAt,
   wingHome,
   wingOff,
   wingPath,
@@ -559,6 +560,7 @@ export class PitCrew {
     out: false,
   };
   private stopAt: number | null = null;
+  private clock = 0;
   private lastTime = 0;
   private now = 0;
   private delta = 0;
@@ -949,6 +951,7 @@ export class PitCrew {
     this.lastTime = now;
     this.now = now;
     this.delta = delta;
+    this.clock += delta;
     this.carMatrix.copy(carMatrix);
     this.v.setFromMatrixPosition(this.anchor);
     const near = this.v.distanceTo(eye) <= animatedRange;
@@ -968,7 +971,7 @@ export class PitCrew {
     return {
       heave,
       pitch,
-      off: this.props.wheelsOff(),
+      off: wheelsOffAt(this.state.plan, this.state.time),
       wingOff: wingOff(this.state.plan, this.state.time),
     };
   }
@@ -1144,8 +1147,8 @@ export class PitCrew {
       return;
     }
     if (!this.state.out) this.turnOut(phase, plan, now);
-    if (phase === "service" && plan) this.park(now, serviceTime);
-    const time = this.stopAt === null ? -Infinity : now - this.stopAt;
+    if (phase === "service" && plan) this.park(serviceTime);
+    const time = this.stopAt === null ? -Infinity : this.clock - this.stopAt;
     const current = plan ?? this.state.plan;
     this.state = {
       plan: current,
@@ -1157,14 +1160,11 @@ export class PitCrew {
     };
   }
 
-  private park(now: number, serviceTime: number): void {
+  private park(serviceTime: number): void {
     const rolling =
-      this.stopAt !== null &&
-      now - this.stopAt < rollTime &&
-      Math.abs(this.speed) > stillSpeed / 10;
-    if (this.stopAt !== null && !rolling) return;
-    this.stopAt ??= now - serviceTime;
-    Object.assign(this.car, this.live);
+      serviceTime < rollTime && Math.abs(this.speed) > stillSpeed / 10;
+    if (this.stopAt === null || rolling) Object.assign(this.car, this.live);
+    this.stopAt = this.clock - serviceTime;
   }
 
   private locate(matrix: THREE.Matrix4, out: CarPose): void {

@@ -160,6 +160,8 @@ export class FieldCrews {
   ): void {
     const phase = duty.ready ? this.phase(pits, duty.car) : "track";
     this.carMatrix.fromArray(cars, duty.car * carStride);
+    const compound = this.state(pits, duty.car, aiPit.compound);
+    if (compound >= 0) duty.crew.setCompounds(compound);
     const result = duty.crew.update(
       phase,
       this.planFor(duty, phase, pits),

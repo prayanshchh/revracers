@@ -150,6 +150,18 @@ export function wingPath(
   };
 }
 
+export function wheelsOffAt(plan: StopPlan | null, time: number): boolean[] {
+  return [0, 1, 2, 3].map((c) => {
+    const work = plan?.service ? plan.corners[c] : undefined;
+    return (
+      !!work &&
+      !!plan &&
+      time >= work.nutOff &&
+      time < plan.duration + shownAfterStop
+    );
+  });
+}
+
 export function wingOff(plan: StopPlan | null, time: number): boolean {
   if (!plan?.wing) return false;
   return time >= plan.wing.unlock && time < plan.duration + shownAfterStop;
@@ -456,7 +468,6 @@ interface CornerRig {
   tip: THREE.Vector3;
   axis: THREE.Vector3;
   engaged: number;
-  off: boolean;
 }
 
 function retried(work: CornerPlan, time: number): number {
@@ -748,7 +759,6 @@ export class PitProps {
         tip: new THREE.Vector3(),
         axis: new THREE.Vector3(1, 0, 0),
         engaged: 0,
-        off: false,
       };
       this.root.add(rig.old, rig.fresh);
       this.corners.push(rig);
@@ -785,13 +795,8 @@ export class PitProps {
     };
   }
 
-  wheelsOff(): boolean[] {
-    return this.corners.map((corner) => corner.off);
-  }
-
   reset(): void {
     for (const corner of this.corners) {
-      corner.off = false;
       corner.offBase = null;
       corner.old.visible = false;
       corner.engaged = 0;
@@ -984,7 +989,6 @@ export class PitProps {
     at.s.copy(actual.s);
     const shown = !work || !plan || time < plan.duration + shownAfterStop;
     corner.fresh.visible = shown;
-    corner.off = !!work && !!plan && time >= work.nutOff && shown;
     corner.fresh.matrix.compose(at.p, at.q, at.s);
     corner.fresh.matrixWorldNeedsUpdate = true;
   }

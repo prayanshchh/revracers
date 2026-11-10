@@ -41,7 +41,7 @@ export const carField = {
 
 export const carWheel = { from: 16, stride: 6, yaw: 5 } as const;
 
-export const pitStateSize = 6;
+export const pitStateSize = 7;
 export const aiPit = {
   phase: 0,
   duration: 1,
@@ -49,6 +49,7 @@ export const aiPit = {
   box: 3,
   noService: 4,
   autoRelease: 5,
+  compound: 6,
 } as const;
 export const aiPitPhase = {
   none: 0,

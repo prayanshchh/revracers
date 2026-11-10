@@ -51,7 +51,7 @@ bool sdAiPitDone(int index);
 void sdAiSetPaceScale(double scale);
 bool sdAiGridPose(int slot, double *x, double *y, double *yaw);
 bool sdAiBoxOf(int bay, double *distance, double *lateral);
-const int SD_PIT_STATE = 6;
+const int SD_PIT_STATE = 7;
 void sdAiPitState(int index, double *out);
 double sdAiWrap(double distance);
 double sdAiLength();
