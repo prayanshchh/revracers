@@ -52,22 +52,29 @@ export class Mesh {
   }
 
   geometry(): THREE.BufferGeometry {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(this.position, 3),
+    return geometryOf(
+      {
+        position: [this.position, 3],
+        normal: [this.normal, 3],
+        uv: [this.uv, 2],
+        uv1: [this.uv1, 2],
+        uv2: [this.uv2, 2],
+      },
+      this.index,
     );
-    geometry.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(this.normal, 3),
-    );
-    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(this.uv, 2));
-    geometry.setAttribute("uv1", new THREE.Float32BufferAttribute(this.uv1, 2));
-    geometry.setAttribute("uv2", new THREE.Float32BufferAttribute(this.uv2, 2));
-    geometry.setIndex(this.index);
-    geometry.computeBoundingSphere();
-    return geometry;
   }
+}
+
+export function geometryOf(
+  attributes: Record<string, [number[], number]>,
+  index: number[],
+): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  for (const [name, [values, size]] of Object.entries(attributes))
+    geometry.setAttribute(name, new THREE.Float32BufferAttribute(values, size));
+  geometry.setIndex(index);
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 export interface Shell {

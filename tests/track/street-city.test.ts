@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { float } from "three/tsl";
+import * as THREE from "three/webgpu";
 import { describe, expect, test } from "vitest";
+import {
+  type Ground,
+  type Street,
+  streetMesh,
+  waterMesh,
+} from "../../apps/client/src/game/street-roads.ts";
 import { repoRoot } from "../support/repo.ts";
 
 interface Point {
@@ -16,6 +24,9 @@ const read = (name: string): unknown =>
   JSON.parse(readFileSync(path.join(directory, name), "utf8"));
 const track = read("track.json") as { centerline: Point[] };
 const city = read("city.json") as {
+  ground: Ground;
+  roads: Street[];
+  water: number[][];
   monorail: number[][];
   monorailColumns: number[];
   spectators: number[];
@@ -31,6 +42,56 @@ const columnHalf = 0.7;
 const beamDepth = 1.7;
 const headroom = 6;
 const personHalf = 0.5;
+const streetLift = 0.08;
+const waterLift = 0.05;
+const liftSlack = 0.005;
+
+function groundAt(x: number, z: number): number {
+  const g = city.ground;
+  const column = (x - g.x) / g.step;
+  const row = (g.z - z) / g.step;
+  const c = Math.min(g.columns - 2, Math.floor(column));
+  const r = Math.min(g.rows - 2, Math.floor(row));
+  const fc = column - c;
+  const fr = row - r;
+  const at = (i: number, j: number) => g.heights[i * g.columns + j] ?? 0;
+  const a = at(r, c);
+  const b = at(r + 1, c);
+  const d = at(r + 1, c + 1);
+  const e = at(r, c + 1);
+  return fr >= fc
+    ? a + fr * (b - a) + fc * (d - b)
+    : a + fc * (e - a) + fr * (d - e);
+}
+
+function sunk(positions: ArrayLike<number>, lift: number): number[][] {
+  const off: number[][] = [];
+  for (let i = 0; i + 2 < positions.length; i += 3) {
+    const x = positions[i] ?? 0;
+    const y = positions[i + 1] ?? 0;
+    const z = positions[i + 2] ?? 0;
+    const above = y - groundAt(x, z);
+    if (Math.abs(above - lift) > liftSlack) off.push([x, z, above]);
+  }
+  return off;
+}
+
+function area(mesh: THREE.Mesh): number {
+  const position = mesh.geometry.getAttribute("position");
+  const index = mesh.geometry.getIndex();
+  const triangle = new THREE.Triangle();
+  let total = 0;
+  for (let i = 0; index && i + 2 < index.count; i += 3) {
+    triangle.setFromAttributeAndIndices(
+      position,
+      index.getX(i),
+      index.getX(i + 1),
+      index.getX(i + 2),
+    );
+    total += triangle.getArea();
+  }
+  return total;
+}
 
 function nearest(x: number, z: number) {
   const points = track.centerline;
@@ -98,6 +159,28 @@ describe("street city around the circuit", () => {
     }
     expect(city.entrances.length).toBeGreaterThan(0);
     expect(inside).toEqual([]);
+  });
+
+  test("streets and ponds lie on the ground instead of sinking into it", () => {
+    const streets = streetMesh(city.roads, city.ground, float(1));
+    const ponds = waterMesh(city.water, city.ground, float(1));
+    const expected = city.roads.reduce((sum, street) => {
+      let length = 0;
+      for (let i = 2; i + 1 < street.line.length; i += 2)
+        length += Math.hypot(
+          (street.line[i] ?? 0) - (street.line[i - 2] ?? 0),
+          (street.line[i + 1] ?? 0) - (street.line[i - 1] ?? 0),
+        );
+      return sum + length * street.width;
+    }, 0);
+    expect(area(streets)).toBeGreaterThan(expected * 0.9);
+    expect(area(ponds)).toBeGreaterThan(0);
+    expect(
+      sunk(streets.geometry.attributes["position"]?.array ?? [], streetLift),
+    ).toEqual([]);
+    expect(
+      sunk(ponds.geometry.attributes["position"]?.array ?? [], waterLift),
+    ).toEqual([]);
   });
 
   test("the monorail beam clears the cars where it passes over the track", () => {

@@ -3,6 +3,12 @@ import type { Entrance } from "./street-entrances.ts";
 import { type Building, buildingMesh } from "./street-facades.ts";
 import type { Landmarks } from "./street-landmarks.ts";
 import { type Marquee, marqueeMesh } from "./street-marquee.ts";
+import {
+  type Ground,
+  type Street,
+  streetMesh,
+  waterMesh,
+} from "./street-roads.ts";
 import { type Sign, signMesh } from "./street-screens.ts";
 import { hash } from "./street-shell.ts";
 import type { Venue } from "./street-venue.ts";
@@ -18,22 +24,13 @@ import {
   vec3,
 } from "three/tsl";
 
-interface Ground {
-  x: number;
-  z: number;
-  step: number;
-  columns: number;
-  rows: number;
-  heights: number[];
-}
-
 export interface CityData {
   ground: Ground;
   buildings: Building[];
   monorail: number[][];
   monorailColumns: number[];
   trees: number[];
-  roads: { width: number; line: number[] }[];
+  roads: Street[];
   bridges: { distance: number }[];
   water: number[][];
   streetTrees: number[];
@@ -503,6 +500,8 @@ export function buildCity(
   const planted = splitTrees(city.streetTrees);
   root.add(
     groundMesh(city.ground),
+    streetMesh(city.roads, city.ground, cityGlow),
+    waterMesh(city.water, city.ground, cityGlow),
     buildingMesh(city.buildings, cityGlow),
     monorailMesh(city.monorail, city.monorailColumns),
     palms([...city.trees, ...planted.palms], frond),
