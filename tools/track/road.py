@@ -61,7 +61,13 @@ PIT_STRIP_WIDTH = 3.0
 PIT_STRIP_TILE = 24.0
 PIT_STRIP_BRANDS = (4, 10, 6, 7)
 PIT_RED_LINE = 0.4
-PIT_BOX_EDGE = 1.2
+BOX_LINE = 0.1
+BOX_AXLES = (1.44, -1.96)
+BOX_CORNER = 0.55
+BOX_LEG = 0.35
+BOX_WHEEL_IN = 0.95
+BOX_WHEEL_OUT = 1.75
+BOX_NOSE = 3.2
 PIT_CROSS_LINE = 0.6
 PIT_DASH = 3.0
 PIT_GORE = 34.0
@@ -534,7 +540,7 @@ def skew(track, s0, l0, s1, l1, width, lift):
     return vertices, [(0, 1, 2, 3)], uv
 
 
-def pit_markings(track, paint):
+def pit_markings(track, paint, yellow):
     pit = track.pit
     wall, lift = track.pit_wall, PIT_LINE_LIFT
     length = track.length
@@ -558,14 +564,23 @@ def pit_markings(track, paint):
         s0 = start_gore + k * PIT_CHEVRON_STEP
         top = edge + (wall - edge) * k * PIT_CHEVRON_STEP / PIT_GORE
         parts.append(skew(track, s0, edge, s0 + 2.0, top, PIT_CHEVRON_WIDTH, lift))
-    work_near = fast + PIT_STRIP_WIDTH + 1.0
-    for s0, spacing in pitlane.bays(track):
-        parts.append(rectangle(track, s0, s0 + LINE_WIDTH / 2, work_near, front - 1.0, lift))
-        middle = s0 + spacing / 2
-        for axle in (-1.75, 1.75):
-            parts.append(rectangle(track, middle + axle - PIT_BOX_EDGE / 2, middle + axle + PIT_BOX_EDGE / 2, pit["boxLateral"] - 1.0, pit["boxLateral"] - 0.85, lift))
-            parts.append(rectangle(track, middle + axle - 0.08, middle + axle + 0.08, pit["boxLateral"] - 1.0, pit["boxLateral"] + 1.0, lift))
     combine("pit lines", parts, paint)
+    work_near = fast + PIT_STRIP_WIDTH + 1.0
+    box = pit["boxLateral"]
+    marks = []
+    for s0, spacing in pitlane.bays(track):
+        marks.append(rectangle(track, s0, s0 + BOX_LINE, work_near, front - 1.0, lift))
+        middle = s0 + spacing / 2
+        for axle, ahead in zip(BOX_AXLES, (1, -1)):
+            wheel = middle + axle
+            for side in (-1, 1):
+                inner, outer = box + side * BOX_WHEEL_IN, box + side * BOX_WHEEL_OUT
+                corner = wheel + ahead * BOX_CORNER
+                marks.append(rectangle(track, min(corner, corner - ahead * BOX_LINE), max(corner, corner - ahead * BOX_LINE), min(inner, outer), max(inner, outer), lift))
+                rail = outer - side * BOX_LINE
+                marks.append(rectangle(track, min(corner, wheel - ahead * BOX_LEG), max(corner, wheel - ahead * BOX_LEG), min(rail, outer), max(rail, outer), lift))
+        marks.append(rectangle(track, middle + BOX_NOSE, middle + BOX_NOSE + BOX_LINE, box - BOX_WHEEL_IN, box + BOX_WHEEL_IN, lift))
+    combine("pit box lines", marks, yellow)
 
 
 def pit_apron(track, asphalt, boards, red):
@@ -672,6 +687,7 @@ def paddock_meshes(track, source, derived, build):
     palette = material("track paddock team", derived / "palette_base_color.png")
     materials = {
         "panels": flat_material("track paddock panels", (0.03, 0.04, 0.055), 0.5, 0.18),
+        "facade": material("track paddock facade", derived / "pit_facade_base_color.png"),
         "fascia": glow_textured("track paddock fascia", derived / "fascia_base_color.png", 0.35),
         "banner": material("track paddock banner", derived / "boards_base_color.png"),
         "canopy": flat_material("track paddock canopy", (0.78, 0.78, 0.76), 0.0, 0.6),
@@ -883,7 +899,7 @@ def main():
             source / "asphalt_track_normal.jpg",
         ),
     )
-    pit_markings(track, paint)
+    pit_markings(track, paint, flat_material("track pit yellow", (0.78, 0.5, 0.012), 0.0, 0.6))
     pit_apron(
         track,
         material(

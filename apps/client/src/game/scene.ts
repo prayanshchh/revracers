@@ -39,7 +39,9 @@ import type { AtmosphereState } from "./atmosphere.ts";
 import type { CameraPose } from "./buildup-shots.ts";
 import type { RacingLineData, RacingLineMode } from "./racing-line.ts";
 import { RacingLineView } from "./racing-line-view.ts";
+import { FieldCrews } from "./field-crews.ts";
 import { PitCrew } from "./pit-crew.ts";
+import { ParkedBoxes } from "./pit-props.ts";
 import {
   expectDownloads,
   releaseUploadedImages,
@@ -80,6 +82,7 @@ const chaseFollow = 0.5;
 const cameraListSlot = 21;
 const carCameraList = -1;
 const crewReach = 12;
+const fieldCrewCount = 2;
 const flipX = new THREE.Matrix4().makeScale(-1, 1, 1);
 const sunGlow = 2.4;
 const kelvinOffset = 273.15;
@@ -338,14 +341,14 @@ async function venueExtras(
   venue: boolean,
   anisotropy: number,
   team: string,
-  env: Promise<CarEnvironment>,
-): Promise<{ people: Crowd | null; crew: PitCrew | null }> {
-  if (!venue) return { people: null, crew: null };
-  const [people, crew] = await Promise.all([
+  spares: number,
+): Promise<{ people: Crowd | null; crews: PitCrew[] }> {
+  if (!venue) return { people: null, crews: [] };
+  const [people, crews] = await Promise.all([
     Crowd.load(),
-    env.then((loaded) => PitCrew.load(crewUrl, anisotropy, loaded, team)),
+    PitCrew.load(crewUrl, anisotropy, team, spares),
   ]);
-  return { people, crew };
+  return { people, crews };
 }
 
 async function parkedGrid(
@@ -447,10 +450,14 @@ export class Scene {
   private readonly viewMatrix = new THREE.Matrix4();
   private warming = false;
   private crewOut = false;
-  private compound = 1;
-  private fittedCompound = 1;
-  private fittedWear = 0;
-  private wear = 0;
+  private parked: ParkedBoxes | null = null;
+  private pitPoint:
+    ((d: number, l: number) => [number, number, number]) | null = null;
+  private pitLateral = 0;
+  private playerBox = 0;
+  private readonly pitEye = new THREE.Vector3();
+  private readonly pitCar = new THREE.Matrix4();
+  private readonly posts: number[] = [];
   private readonly crewBounds = new THREE.Sphere(
     new THREE.Vector3(),
     crewReach,
@@ -486,6 +493,7 @@ export class Scene {
     private readonly culler: WorldCuller,
     private readonly racingLine: RacingLineView,
     readonly crew: PitCrew | null,
+    private readonly fieldCrews: FieldCrews | null,
     private readonly lapScale: number,
     private readonly field: FieldCars | null,
     private lights: StartLights,
@@ -510,6 +518,7 @@ export class Scene {
       ...extras,
     );
     this.tyreStones = new TyreStones(car.tyreMounts());
+    crew?.attachCar(car.tyreMounts(), car.wingParts(), car.damage);
     const night = light.night >= 1;
     const lit = sessionLighting(skyBox, night);
     this.cloudLight = lit.cloudLight;
@@ -533,6 +542,7 @@ export class Scene {
     this.scene.add(
       this.marks.mesh,
       ...presentRoots(this.crew),
+      ...(fieldCrews?.roots ?? []),
       this.gate.mesh,
       this.safetyCar.root,
     );
@@ -589,7 +599,7 @@ export class Scene {
     const [
       skyBox,
       frame,
-      { people, crew },
+      { people, crews },
       road,
       data,
       car,
@@ -599,7 +609,12 @@ export class Scene {
     ] = await Promise.all([
       loads.sky,
       fetchJson<TrackFrame>(circuit.frame),
-      venueExtras(venue, anisotropy, team, loads.env),
+      venueExtras(
+        venue,
+        anisotropy,
+        team,
+        rivals.length > 0 ? fieldCrewCount : 0,
+      ),
       groundOf(circuit, renderer, loads, carLoad),
       loads.line,
       carLoad,
@@ -634,7 +649,10 @@ export class Scene {
       road,
       culler,
       racingLine,
-      crew,
+      crews[0] ?? null,
+      field && crews.length > 1
+        ? new FieldCrews(crews.slice(1), field, anisotropy)
+        : null,
       data.length / engine.trackLength(),
       field,
       lights,
@@ -668,8 +686,12 @@ export class Scene {
     return this.car.finish();
   }
 
-  updateField(cars: Float64Array): void {
+  updateField(cars: Float64Array, pits: Float64Array | null = null): void {
     this.cars = cars;
+    if (pits && this.fieldCrews) {
+      this.pitEye.setFromMatrixPosition(this.camera.matrixWorld);
+      this.fieldCrews.update(pits, cars, this.pitEye, performance.now() / 1000);
+    }
     this.field?.update(cars, this.camera);
   }
 
@@ -1012,27 +1034,35 @@ export class Scene {
   }
 
   updatePit(control: PitControl, frame: Float64Array, fresh: number): void {
-    this.crewOut = control.phase !== "track";
-    const active = control.phase === "service";
-    if (!active) {
-      this.fittedCompound = this.compound;
-      this.fittedWear = this.wear;
-    }
+    const phase =
+      control.penalty.kind === "drive-through" ? "track" : control.phase;
+    this.crewOut = phase !== "track";
+    this.parked?.show(this.playerBox, !this.crewOut);
     this.gate.update(control.countdown);
     if (!this.crew) return;
-    this.crew.setCompounds(this.fittedCompound, fresh, this.fittedWear);
-    const eye = new THREE.Vector3().setFromMatrixPosition(
-      this.camera.matrixWorld,
-    );
-    const carMatrix = new THREE.Matrix4().fromArray(frame, frameIndex.posMat);
-    const { lift, wheelsOff } = this.crew.update(
-      control.serviceProgress,
-      active,
-      active ? carMatrix : null,
-      eye,
+    this.crew.setCompounds(fresh);
+    this.pitEye.setFromMatrixPosition(this.camera.matrixWorld);
+    this.pitCar.fromArray(frame, frameIndex.posMat);
+    const { heave, pitch, off, wingOff } = this.crew.update(
+      phase,
+      control.plan,
+      control.serviceTime,
+      this.pitCar,
+      this.pitEye,
       performance.now() / 1000,
+      this.cars,
+      0,
     );
-    this.car.setPitService(lift, wheelsOff);
+    this.car.setPitService(heave, pitch, off);
+    this.car.hideFrontWing(wingOff);
+  }
+
+  crewPosts(steering: boolean): number[] {
+    this.posts.length = 0;
+    if (!steering) return this.posts;
+    if (this.crewOut) this.crew?.posts(this.posts);
+    this.fieldCrews?.posts(this.posts);
+    return this.posts;
   }
 
   placePit(
@@ -1043,11 +1073,36 @@ export class Scene {
     const [x, y, z] = point(layout.boxDistance, lateral);
     const [x2, y2] = point(layout.boxDistance + 2, lateral);
     this.crew?.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x));
+    this.fieldCrews?.place(point, lateral);
+    this.pitPoint = point;
+    this.pitLateral = lateral;
+    this.playerBox = layout.boxDistance;
     const turn = layout.boxDistance - gateLead;
     const gateLateral = layout.fastLane - layout.shift;
     const [gx, gy, gz] = point(turn, gateLateral);
     const [hx, hy] = point(turn + 2, gateLateral);
     this.gate.place(gx, gy, gz, Math.atan2(hy - gy, hx - gx));
+  }
+
+  parkBoxes(boxes: { distance: number; team: string }[]): void {
+    const point = this.pitPoint;
+    if (!point || this.parked) return;
+    this.parked = new ParkedBoxes(
+      boxes.map(({ distance, team }) => {
+        const [x, y, z] = point(distance, this.pitLateral);
+        const [x2, y2] = point(distance + 2, this.pitLateral);
+        return {
+          distance,
+          team,
+          matrix: new THREE.Matrix4()
+            .makeRotationZ(Math.atan2(y2 - y, x2 - x))
+            .setPosition(x, y, z),
+        };
+      }),
+    );
+    this.parked.root.updateMatrixWorld(true);
+    this.scene.add(this.parked.root);
+    this.fieldCrews?.park(this.parked);
   }
 
   renderAuxiliary(renderer: THREE.WebGPURenderer): void {
@@ -1272,6 +1327,7 @@ export class Scene {
   }
 
   hideUnseenCrew(): void {
+    this.fieldCrews?.hideUnseen(this.seen, this.sunlight, this.warming);
     if (!this.crew) return;
     const { root } = this.crew;
     if (!this.warming) {
@@ -1292,7 +1348,8 @@ export class Scene {
     mirrors: boolean,
   ): Promise<void> {
     this.warming = true;
-    this.crew?.bake();
+    this.crew?.warm();
+    this.fieldCrews?.warm();
     await uploadEverything(renderer, this.scene, () => {
       draw();
       this.sunlight.freeze();
@@ -1306,12 +1363,8 @@ export class Scene {
   updateTyres(frame: Float64Array, tyres: TyreInfo): void {
     this.smoke.update(frame, tyres, this.car.wheelRadii());
     this.car.setCompound(tyres.compound);
-    this.compound = tyres.compound;
     this.car.setTyreCondition(tyres.wheels);
     this.damageLog.recordTyres(frame[frameIndex.time] ?? 0, tyres.wheels);
-    this.wear =
-      tyres.wheels.reduce((sum, wheel) => sum + wheel.wear, 0) /
-      Math.max(1, tyres.wheels.length);
   }
 
   resize(width: number, height: number, pixelRatio = 1): void {

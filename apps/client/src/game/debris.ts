@@ -15,6 +15,8 @@ import {
 import {
   type LookChange,
   detaches,
+  noseBack,
+  noseZone,
   wheelHub,
   zoneCentre,
 } from "./car-damage.ts";
@@ -1109,4 +1111,125 @@ export function zonePieces(
     });
   }
   return pieces;
+}
+
+const bulkheadDepth = 0.03;
+const bulkheadInset = 0.005;
+const bulkheadShrink = 0.985;
+const keelHalf = 0.03;
+const keelSlack = 0.01;
+const bulkheadMaterial = "carbon-part";
+const movingParts = /^(wheel|driver)/;
+
+function outline(points: THREE.Vector2[]): THREE.Vector2[] {
+  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+  const turn = (o: THREE.Vector2, a: THREE.Vector2, b: THREE.Vector2) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (list: THREE.Vector2[]) => {
+    const kept: THREE.Vector2[] = [];
+    for (const p of list) {
+      while (
+        kept.length >= 2 &&
+        turn(
+          kept[kept.length - 2] as THREE.Vector2,
+          kept[kept.length - 1] as THREE.Vector2,
+          p,
+        ) <= 0
+      )
+        kept.pop();
+      kept.push(p);
+    }
+    return kept.slice(0, -1);
+  };
+  return [...half(sorted), ...half(sorted.reverse())];
+}
+
+function bulkheadHost(model: THREE.Object3D): THREE.Mesh | null {
+  let found: THREE.Mesh | null = null;
+  model.traverse((object) => {
+    if (found || !(object instanceof THREE.Mesh)) return;
+    const mesh = object as THREE.Mesh;
+    const material = mesh.material as THREE.Material;
+    if (material.name !== bulkheadMaterial) return;
+    if (!("damageZone" in mesh.geometry.attributes)) return;
+    for (let node: THREE.Object3D | null = mesh; node; node = node.parent)
+      if (movingParts.test(node.name)) return;
+    found = mesh;
+  });
+  return found;
+}
+
+function noseCut(pieces: CarPieces): THREE.Vector2[] {
+  const cut: THREE.Vector2[] = [];
+  for (const { geometry } of pieces.get(noseZone)?.meshes ?? []) {
+    const position = geometry.getAttribute("position");
+    for (let v = 0; v < position.count; v++) {
+      const z = position.getZ(v);
+      if (z >= noseBack && z <= noseBack + bulkheadDepth)
+        cut.push(new THREE.Vector2(position.getX(v), position.getY(v)));
+    }
+  }
+  const keel = Math.min(
+    ...cut.filter((p) => Math.abs(p.x) < keelHalf).map((p) => p.y),
+  );
+  if (!Number.isFinite(keel)) return [];
+  const ring = outline(cut.filter((p) => p.y >= keel - keelSlack));
+  const centre = ring
+    .reduce((sum, p) => sum.add(p), new THREE.Vector2())
+    .divideScalar(Math.max(1, ring.length));
+  return [
+    centre,
+    ...ring.map((p) =>
+      p.clone().sub(centre).multiplyScalar(bulkheadShrink).add(centre),
+    ),
+  ];
+}
+
+function capAttribute(
+  name: string,
+  source: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+  points: THREE.Vector2[],
+  toHost: THREE.Matrix4,
+): THREE.BufferAttribute {
+  const size = source.itemSize;
+  const array = new Float32Array(points.length * size);
+  const face = new THREE.Vector3(0, 0, 1)
+    .applyMatrix3(new THREE.Matrix3().getNormalMatrix(toHost))
+    .normalize();
+  const at = new THREE.Vector3();
+  points.forEach((p, i) => {
+    if (name === "position")
+      at.set(p.x, p.y, noseBack + bulkheadInset)
+        .applyMatrix4(toHost)
+        .toArray(array, i * size);
+    else if (name === "normal") face.toArray(array, i * size);
+    else if (name !== "damageZone")
+      for (let k = 0; k < size; k++)
+        array[i * size + k] = source.getComponent(0, k);
+  });
+  return new THREE.BufferAttribute(array, size);
+}
+
+export function capNose(model: THREE.Object3D, pieces: CarPieces): void {
+  const points = noseCut(pieces);
+  const host = bulkheadHost(model);
+  if (!host || points.length < 4) return;
+  model.updateMatrixWorld(true);
+  const toHost = host.matrixWorld.clone().invert().multiply(model.matrixWorld);
+  const geometry = new THREE.BufferGeometry();
+  for (const [name, source] of Object.entries(host.geometry.attributes))
+    geometry.setAttribute(name, capAttribute(name, source, points, toHost));
+  const rim = points.length - 1;
+  const index: number[] = [];
+  for (let i = 1; i <= rim; i++) index.push(0, i, (i % rim) + 1);
+  geometry.setIndex(index);
+  geometry.computeBoundingSphere();
+  const cap = new THREE.Mesh(geometry, host.material);
+  cap.name = "nose-bulkhead";
+  cap.castShadow = host.castShadow;
+  cap.receiveShadow = host.receiveShadow;
+  cap.frustumCulled = host.frustumCulled;
+  cap.layers.mask = host.layers.mask;
+  cap.userData = { ...host.userData };
+  host.add(cap);
 }

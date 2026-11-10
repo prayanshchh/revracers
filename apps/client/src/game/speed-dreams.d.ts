@@ -65,9 +65,12 @@ declare module "*/wasm/speed-dreams.js" {
       args: ["string"],
     ): (path: string) => number;
     _sdFieldClear(): void;
-    _sdFieldPlayer(teamIndex: number, seat: number, slot: number): void;
+    _sdFieldPlayer(garage: number, seat: number, slot: number): void;
     _sdFieldAutopilot(on: number): void;
     _sdFieldPlayerBox(): number;
+    _sdFieldPits(out: number): void;
+    _sdPitTeamBox(garage: number, seat: number): number;
+    _sdObstacles(circles: number, count: number): void;
     _sdPracticeGridSlot(slot: number): void;
     _sdFieldPlan(
       index: number,

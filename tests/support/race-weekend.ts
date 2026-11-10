@@ -1,4 +1,9 @@
-import { carStride } from "../../apps/client/src/game/frame-layout.ts";
+import {
+  aiPit,
+  aiPitPhase,
+  carStride,
+  pitStateSize,
+} from "../../apps/client/src/game/frame-layout.ts";
 import {
   planWeekend,
   type WeekendPlan,
@@ -31,7 +36,8 @@ export interface Weekend extends SpeedDreams {
     assist: number,
   ) => void;
   _sdFieldClear: () => void;
-  _sdFieldPlayer: (teamIndex: number, seat: number, slot: number) => void;
+  _sdFieldPlayer: (garage: number, seat: number, slot: number) => void;
+  _sdFieldPlayerBox: () => number;
   _sdFieldPlan: (
     index: number,
     speed: number,
@@ -55,6 +61,7 @@ export interface Weekend extends SpeedDreams {
   _sdQualifyingTimes: (index: number, out: number) => void;
   _sdTiming: (out: number) => void;
   _sdCars: (out: number) => void;
+  _sdFieldPits: (out: number) => void;
   _sdSessionPasses: (out: number, max: number, from: number) => number;
   _sdRaceControlConfigure: (
     safetyCar: number,
@@ -127,14 +134,13 @@ export async function startField(options: FieldOptions): Promise<Weekend> {
     m._sdFieldClear();
     plan.entrants.forEach((entrant, index) => {
       const slot = plan.slots[index] ?? index;
-      if (entrant.player)
-        m._sdFieldPlayer(entrant.teamIndex, entrant.seat, slot);
+      if (entrant.player) m._sdFieldPlayer(entrant.garage, entrant.seat, slot);
       else
         add(
           entrant.name,
           entrant.code,
           entrant.team,
-          entrant.teamIndex,
+          entrant.garage,
           entrant.seat,
           slot,
           entrant.speed,
@@ -306,14 +312,101 @@ export function weatherOf(m: Weekend) {
   };
 }
 
+export interface BoxLines {
+  stops: number;
+  arriving: number;
+  parked: number;
+  leaving: number;
+}
+
+interface BoxVisit {
+  shared: boolean;
+  parkedAt: number;
+  arriving: number;
+  parked: number;
+  leaving: number;
+}
+
+const crewAhead = 6;
+const crewBehind = 4.5;
+const neighbourReach = 40;
+
+export function watchBoxes(
+  m: Weekend,
+  cars: number,
+  trackLength: number,
+  boxLine: number,
+): { lines: BoxLines; look: () => void } {
+  const lines: BoxLines = { stops: 0, arriving: 0, parked: 0, leaving: 0 };
+  const visits = new Map<number, BoxVisit>();
+  const ahead = (from: number, to: number) =>
+    (((to - from) % trackLength) + trackLength) % trackLength;
+  const apart = (a: number, b: number) => Math.min(ahead(a, b), ahead(b, a));
+  const pitting = (phase: number) =>
+    phase >= aiPitPhase.lane && phase <= aiPitPhase.release;
+  const finish = (car: number) => {
+    const visit = visits.get(car);
+    visits.delete(car);
+    if (!visit || visit.shared || visit.parked < 0) return;
+    lines.stops += 1;
+    lines.arriving = Math.max(lines.arriving, visit.arriving);
+    lines.parked = Math.max(lines.parked, visit.parked);
+    lines.leaving = Math.max(lines.leaving, visit.leaving);
+  };
+  const follow = (visit: BoxVisit, phase: number, box: number, car: number) => {
+    const pose = carPoses(m, cars)[car];
+    if (!pose) return;
+    const off = Math.abs(pose.toMiddle - boxLine);
+    if (phase === aiPitPhase.stopped) {
+      visit.parked = Math.max(visit.parked, off);
+      visit.parkedAt = pose.toMiddle;
+    }
+    if (phase === aiPitPhase.boxing && ahead(pose.distance, box) < crewAhead)
+      visit.arriving = Math.max(visit.arriving, off);
+    if (phase === aiPitPhase.release && ahead(box, pose.distance) < crewBehind)
+      visit.leaving = Math.max(
+        visit.leaving,
+        Math.abs(pose.toMiddle - visit.parkedAt),
+      );
+  };
+  const look = () => {
+    const pits = read(m, cars * pitStateSize, (p) => {
+      m._sdFieldPits(p);
+    });
+    const phase = (car: number) => pits[car * pitStateSize + aiPit.phase] ?? 0;
+    const box = (car: number) => pits[car * pitStateSize + aiPit.box] ?? 0;
+    for (let car = 1; car < cars; car++) {
+      if (!pitting(phase(car))) {
+        finish(car);
+        continue;
+      }
+      const visit = visits.get(car) ?? {
+        shared: false,
+        parkedAt: boxLine,
+        arriving: 0,
+        parked: -1,
+        leaving: 0,
+      };
+      visits.set(car, visit);
+      for (let other = 0; other < cars; other++)
+        if (other !== car && pitting(phase(other)))
+          visit.shared ||= apart(box(car), box(other)) < neighbourReach;
+      follow(visit, phase(car), box(car), car);
+    }
+  };
+  return { lines, look };
+}
+
 export function runUntilComplete(
   m: Weekend,
   limitSeconds: number,
   onSecond?: () => void,
+  onCall?: () => void,
 ): void {
   const calls = limitSeconds / secondsPerCall;
   for (let call = 0; call < calls; call++) {
     m._sdStep(stepsPerCall);
+    onCall?.();
     if (call % 25 !== 0) continue;
     onSecond?.();
     if (phaseOf(m) === sessionPhase.complete) return;

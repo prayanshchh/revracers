@@ -48,7 +48,7 @@ void SdPhysicsEngine::configureCar(tCarElt *car)
 struct FieldEntry
 {
     std::string name, code, team;
-    int teamIndex, seat, slot;
+    int garage, seat, slot;
     double pace, racePace, racecraft;
 };
 
@@ -489,6 +489,7 @@ static void runOneStep(double deltaTimeIncrement)
         sdEnergyStep(s->cars[i], deltaTimeIncrement);
         sdCarStatusPrepare(s->cars[i]);
     }
+    sdObstaclesStep(s);
     SimUpdate(s, deltaTimeIncrement);
     for (int i = 0; i < s->_ncars; i++)
     {
@@ -625,14 +626,14 @@ EMSCRIPTEN_KEEPALIVE void sdFieldClear()
     sdSessionClearPlans();
 }
 
-EMSCRIPTEN_KEEPALIVE void sdFieldAdd(const char *name, const char *code, const char *team, int teamIndex, int seat, int slot, double pace, double racePace, double racecraft)
+EMSCRIPTEN_KEEPALIVE void sdFieldAdd(const char *name, const char *code, const char *team, int garage, int seat, int slot, double pace, double racePace, double racecraft)
 {
-    fieldEntries.push_back({name, code, team, teamIndex, seat, slot, pace, racePace, racecraft});
+    fieldEntries.push_back({name, code, team, garage, seat, slot, pace, racePace, racecraft});
 }
 
-EMSCRIPTEN_KEEPALIVE void sdFieldPlayer(int teamIndex, int seat, int slot)
+EMSCRIPTEN_KEEPALIVE void sdFieldPlayer(int garage, int seat, int slot)
 {
-    playerEntry.teamIndex = teamIndex;
+    playerEntry.garage = garage;
     playerEntry.seat = seat;
     playerEntry.slot = slot;
 }
@@ -647,7 +648,20 @@ EMSCRIPTEN_KEEPALIVE void sdFieldAutopilot(int on)
 EMSCRIPTEN_KEEPALIVE double sdFieldPlayerBox()
 {
     double distance = 0, lateral = 0;
-    sdAiBoxOf(sdFieldBay(playerEntry.teamIndex, playerEntry.seat), &distance, &lateral);
+    sdAiBoxOf(sdFieldBay(playerEntry.garage, playerEntry.seat), &distance, &lateral);
+    return distance;
+}
+
+EMSCRIPTEN_KEEPALIVE void sdFieldPits(double *out)
+{
+    for (int i = 0; i < ReInfo->s->_ncars; i++)
+        sdAiPitState(i, &out[i * SD_PIT_STATE]);
+}
+
+EMSCRIPTEN_KEEPALIVE double sdPitTeamBox(int garage, int seat)
+{
+    double distance = 0, lateral = 0;
+    sdAiBoxOf(sdFieldBay(garage, seat), &distance, &lateral);
     return distance;
 }
 
@@ -820,17 +834,17 @@ EMSCRIPTEN_KEEPALIVE int sdInit(const char *trackCategory, const char *trackName
         sdAiReset(carCount);
     if (carCount > 1)
     {
-        sdAiConfigure(0, 1.0, 1.0, 1.0, sdFieldBay(playerEntry.teamIndex, playerEntry.seat));
+        sdAiConfigure(0, 1.0, 1.0, 1.0, sdFieldBay(playerEntry.garage, playerEntry.seat));
         for (int i = 1; i < carCount; i++)
         {
             const FieldEntry &entry = fieldEntries[i - 1];
-            sdAiConfigure(i, entry.pace, entry.racePace, entry.racecraft, sdFieldBay(entry.teamIndex, entry.seat));
+            sdAiConfigure(i, entry.pace, entry.racePace, entry.racecraft, sdFieldBay(entry.garage, entry.seat));
         }
         for (int i = 0; i < carCount; i++)
         {
             const FieldEntry &entry = i == 0 ? playerEntry : fieldEntries[i - 1];
             double distance = 0, lateral = 0, x = 0, y = 0, yaw = 0;
-            bool grid = sdSessionStartPlace(i, entry.slot, sdFieldBay(entry.teamIndex, entry.seat), &distance, &lateral);
+            bool grid = sdSessionStartPlace(i, entry.slot, sdFieldBay(entry.garage, entry.seat), &distance, &lateral);
             if (grid && sdAiGridPose(entry.slot, &x, &y, &yaw))
                 placeCarAt(s->cars[i], x, y, yaw, 0.2);
             else

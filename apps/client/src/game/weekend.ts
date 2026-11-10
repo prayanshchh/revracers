@@ -12,6 +12,7 @@ interface SeasonDriver {
 
 export interface Team {
   index: number;
+  garage: number;
   car: string;
   name: string;
   colour: string;
@@ -23,6 +24,7 @@ export interface Entrant {
   car: string;
   team: string;
   teamIndex: number;
+  garage: number;
   seat: number;
   colour: string;
   player: boolean;
@@ -89,6 +91,7 @@ function teamOf(index: number): Team {
   const livery = liveryOf(index);
   return {
     index,
+    garage: liveries.indexOf(livery),
     car: livery.id,
     name: livery.name,
     colour: towerColour(livery.colours.primary),
@@ -134,6 +137,7 @@ function toEntrant(driver: SeasonDriver): Entrant {
     car: team.car,
     team: team.name,
     teamIndex: driver.teamIndex,
+    garage: team.garage,
     seat: driver.seat,
     colour: team.colour,
     player: false,
@@ -152,6 +156,7 @@ function playerEntrant(team: Team): Entrant {
     car: team.car,
     team: team.name,
     teamIndex: team.index,
+    garage: team.garage,
     seat: 1,
     colour: team.colour,
     player: true,

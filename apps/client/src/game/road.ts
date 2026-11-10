@@ -171,9 +171,9 @@ const tyreStrength = 0.88;
 const contactRange = 6;
 const tyreHubMargin = 0.5;
 const groundMaterials =
-  /(asphalt|road paint|road kerb|road grass|pit strip|pit red)$/;
+  /(asphalt|road paint|road kerb|road grass|pit strip|pit red|pit yellow)$/;
 const skyReflecting =
-  /(road asphalt|pit asphalt|apron asphalt|road paint|road kerb|pit strip|pit red|track marks|glass)$/;
+  /(road asphalt|pit asphalt|apron asphalt|road paint|road kerb|pit strip|pit red|pit yellow|track marks|glass)$/;
 const blendedMaterials = new Set(["track track marks"]);
 const alphaCutoffs: Record<string, number> = {
   "track debris fence": 0.5,
@@ -191,6 +191,7 @@ const depthOffsets: Record<string, number> = {
   "track apron asphalt": 0.25,
   "track pit strip": -1,
   "track pit red": -1,
+  "track pit yellow": -1,
   "track terrain": 2,
 };
 
@@ -574,7 +575,7 @@ function applyWetness(
     wetAsphalt(material, trackedWater, sky, true);
   else if (name.endsWith("asphalt"))
     wetAsphalt(material, () => wetOff, sky, !name.includes("pit"));
-  else if (/(road paint|road kerb|pit strip|pit red)$/.test(name))
+  else if (/(road paint|road kerb|pit strip|pit red|pit yellow)$/.test(name))
     wetPaint(material, sky);
   else if (/(road grass|terrain)$/.test(name)) wetGrass(material, sky);
 }

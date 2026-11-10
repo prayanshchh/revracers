@@ -20,8 +20,10 @@ import {
   subset,
   timingOf,
   trackPoint,
+  watchBoxes,
   type Weekend,
 } from "../support/race-weekend.ts";
+import { layout } from "../support/pit-drive.ts";
 import { repoRoot } from "../support/repo.ts";
 import { wasm } from "../support/speed-dreams.ts";
 import { offence, stage } from "../../apps/client/src/game/stewards.ts";
@@ -172,7 +174,13 @@ describe.runIf(existsSync(wasm))("race weekend on the real engine", () => {
       wear: 2,
       plan,
     });
-    runUntilComplete(m, (laps + 1) * lapSeconds);
+    const boxes = watchBoxes(
+      m,
+      plan.entrants.length,
+      layout.length,
+      layout.boxLateral - layout.shift,
+    );
+    runUntilComplete(m, (laps + 1) * lapSeconds, undefined, boxes.look);
     for (const car of timingOf(m, plan.entrants.length)) {
       const entrant = plan.entrants[car.index];
       expect(car.retired).toBe(false);
@@ -181,6 +189,10 @@ describe.runIf(existsSync(wasm))("race weekend on the real engine", () => {
       expect(car.pits).toBeGreaterThanOrEqual(1);
       expect(car.pits).toBeLessThanOrEqual(entrant.stints.length + 1);
     }
+    expect(boxes.lines.stops).toBeGreaterThanOrEqual(5);
+    expect(boxes.lines.arriving).toBeLessThan(0.45);
+    expect(boxes.lines.parked).toBeLessThan(0.45);
+    expect(boxes.lines.leaving).toBeLessThan(0.2);
   });
 
   test("every car starts with its front wheels in its own painted grid box", async () => {

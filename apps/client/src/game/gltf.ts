@@ -5,6 +5,8 @@ import { carMaterials, carTextures, mirrorLayout } from "./carpaint.ts";
 import { carLamps, fitLamps, PastLamps, setLamps } from "./lamps.ts";
 import {
   damageable,
+  frontWingPieces,
+  showFrontWing,
   type DamageLook,
   newLook,
   tagDamageZones,
@@ -16,6 +18,7 @@ import {
 import {
   type CarPieces,
   type WheelPiece,
+  capNose,
   gltfWheelPiece,
   zonePieces,
 } from "./debris.ts";
@@ -33,6 +36,7 @@ import { bounceMatrix } from "./rumble.ts";
 import { RearFlap } from "./rear-flap.ts";
 import { setTyreShadows, shadowOnlyLayer } from "./road.ts";
 import { carFile } from "./teams.ts";
+import type { WingParts } from "./pit-props.ts";
 import type { TyreMount } from "./tyre-stones.ts";
 import { compounds, type WheelTyre } from "./tyres.ts";
 import {
@@ -280,9 +284,11 @@ export class GltfCar {
   private visualWheelHeight = 0;
   private offsetReady = false;
   private contacts: { centre: THREE.Vector3; axis: THREE.Vector3 }[] = [];
-  private lift = 0;
+  private readonly pitLift = { heave: 0, pitch: 0 };
+  private readonly pitTurn = new THREE.Matrix4();
   private readonly body = { heave: 0, pitch: 0, roll: 0 };
-  private wheelsOff = false;
+  private wheelsOff: boolean[] = [false, false, false, false];
+  private wingHidden = false;
   private readonly bounce = new THREE.Matrix4();
   private readonly unbounce = new THREE.Matrix4();
   private readonly basisY = new THREE.Vector3();
@@ -365,6 +371,7 @@ export class GltfCar {
     car.dress(gltf.scene, materials, tyres);
     car.zoned = makeDamageable(gltf.scene, car.damage, withinChassis);
     car.pieces = zonePieces(gltf.scene, new Set(car.glass));
+    capNose(gltf.scene, car.pieces);
     fitLamps(gltf.scene, car.lamps);
     car.flap = RearFlap.find(gltf.scene);
     const axes = car.axes;
@@ -527,8 +534,22 @@ export class GltfCar {
     return bounceMatrix(this.body, share, out);
   }
 
-  setPitService(lift: number, wheelsOff: boolean): void {
-    this.lift = lift;
+  wingParts(): WingParts | null {
+    const meshes = frontWingPieces(this.pieces);
+    return this.carScene && meshes.length > 0
+      ? { meshes, frame: this.carScene }
+      : null;
+  }
+
+  hideFrontWing(hidden: boolean): void {
+    if (!hidden && !this.wingHidden) return;
+    this.wingHidden = hidden;
+    showFrontWing(this.damage, !hidden);
+  }
+
+  setPitService(heave: number, pitch: number, wheelsOff: boolean[]): void {
+    this.pitLift.heave = heave;
+    this.pitLift.pitch = pitch;
     this.wheelsOff = wheelsOff;
   }
 
@@ -546,7 +567,10 @@ export class GltfCar {
       contact.centre.setFromMatrixPosition(wheel.pivot.matrixWorld);
       if (!wheel.pivot.visible) contact.centre.z -= lostWheelShadowDrop;
     });
-    setTyreShadows(!this.wheelsOff, this.contacts);
+    setTyreShadows(
+      this.pitLift.heave === 0 && this.pitLift.pitch === 0,
+      this.contacts,
+    );
   }
 
   private orientTyres(): void {
@@ -718,7 +742,12 @@ export class GltfCar {
 
   pose(frame: Float64Array): void {
     this.root.matrix.fromArray(frame, frameIndex.posMat);
-    this.root.matrix.elements[14] += this.lift;
+    if (this.pitLift.heave !== 0 || this.pitLift.pitch !== 0)
+      this.root.matrix.multiply(
+        this.pitTurn
+          .makeRotationY(-this.pitLift.pitch)
+          .setPosition(0, 0, this.pitLift.heave),
+      );
     this.root.matrix.multiply(this.bodyBounce(1, this.bounce));
     this.unbounce.copy(this.bounce).invert();
     this.root.matrixWorldNeedsUpdate = true;
@@ -759,7 +788,7 @@ export class GltfCar {
       w.pivot.rotateZ(wheel(i, 3) + slump.camber);
       w.spin.rotation.set(wheel(i, 4), 0, 0);
       w.look.blur = spinBlur(wheel(i, 6), seconds);
-      w.spin.visible = !this.wheelsOff;
+      w.spin.visible = !this.wheelsOff[i];
     });
     this.updateTyreShadows();
     this.orientTyres();

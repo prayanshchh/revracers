@@ -95,7 +95,7 @@ export class WeekendFlow {
     const { engine, scene, hud } = this.ctx;
     if (this.ctx.stage === "qualifying") this.followPlayerRun();
     const cars = engine.cars();
-    scene.updateField(cars);
+    scene.updateField(cars, engine.fieldPits());
     hud.updateProximity(cars);
     if (now - this.timingClock < timingPeriod) return;
     this.timingClock = now;

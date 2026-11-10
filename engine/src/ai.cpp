@@ -94,9 +94,18 @@ const double pitPendingDistance = 160.0;
 const double pitRampBefore = 60.0;
 const double pitRampAfter = 25.0;
 const double pitReleaseClear = 45.0;
-const double turnInLead = 14.0;
 const double stopRun = 34.0;
-const double releaseRun = 13.0;
+const double turnRun = 54.0;
+const double boxStraight = 10.0;
+const double tightRun = 14.0;
+const double tightStraight = 3.0;
+const double busyBefore = 34.0;
+const double busyFrom = 5.0;
+const double boxRowHalf = 2.5;
+const double busyAhead = 24.0;
+const double releaseStraight = 8.6;
+const double releaseRun = 26.0;
+const double tightRelease = 13.0;
 const double stopDecel = 7.0;
 const double overlapRear = 0.3;
 const double overlapBackOff = 0.94;
@@ -198,6 +207,8 @@ struct Driver
     bool autoRelease = true;
     bool driveThrough = false;
     bool noService = false;
+    bool tightEntry = false;
+    bool tightExit = false;
     bool deferredPit = false;
     int deferredCompound = 0;
     double deferredTime = 0;
@@ -1007,6 +1018,38 @@ bool holdsInside(int index, tCarElt *car, tSituation *s)
     return false;
 }
 
+bool inBoxRow(tCarElt *car)
+{
+    const PitLayout &p = model.pit;
+    double at = car->_distFromStartLine;
+    return onArc(at, p.wallStart, p.wallEnd) && fabs(car->_trkPos.toMiddle + pitShift(at) - p.boxLateral) < boxRowHalf;
+}
+
+bool crewOutFor(int i, tSituation *s)
+{
+    tCarElt *car = s->cars[i];
+    if (i == 0 && !sdPlayerAutopilot())
+        return sdAiInPitLaneAt(car->_distFromStartLine, car->_trkPos.toMiddle);
+    return drivers[i].pit >= PIT_LANE && drivers[i].pit <= PIT_RELEASE && !drivers[i].driveThrough;
+}
+
+bool boxesBusy(int index, tSituation *s, double from, double reach)
+{
+    for (int i = 0; i < s->_ncars; i++)
+    {
+        if (i == index || !activeCar(s, i))
+            continue;
+        tCarElt *other = s->cars[i];
+        double car = delta(from, other->_distFromStartLine);
+        if (inBoxRow(other) && car > busyFrom && car < reach)
+            return true;
+        double crew = delta(from, boxDistance(drivers[i].bay));
+        if (crewOutFor(i, s) && crew > busyFrom && crew < reach)
+            return true;
+    }
+    return false;
+}
+
 double conflictSpeed(int index, tCarElt *car, tSituation *s, double target)
 {
     const Forecast &me = forecasts[index];
@@ -1315,8 +1358,12 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
             driver.pit = PIT_EXIT;
             return;
         }
-        if (toBox < stopRun)
+        bool tight = boxesBusy(index, s, wrap(box - busyBefore - busyFrom), busyBefore);
+        if (toBox < (tight ? stopRun : turnRun))
+        {
+            driver.tightEntry = tight;
             driver.pit = PIT_BOXING;
+        }
         steerAndGo(index, driver, car, s, lanePath, limit, toBox < stopRun + 8.0 ? sqrt(2.0 * stopDecel * std::max(0.0, toBox)) : limit, dt);
         return;
     }
@@ -1324,7 +1371,9 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
     {
         const auto path = [&](double at) {
             double remaining = delta(at, box);
-            double blend = remaining < 0 ? 1.0 : ease(1.0 - (remaining - 3.0) / (turnInLead - 3.0));
+            double lead = driver.tightEntry ? tightRun : turnRun;
+            double straight = driver.tightEntry ? tightStraight : boxStraight;
+            double blend = remaining < 0 ? 1.0 : ease(1.0 - (remaining - straight) / (lead - straight));
             double laneAt = sampled(model.pitLateral, at);
             return laneAt + (boxLat - laneAt) * blend;
         };
@@ -1355,7 +1404,10 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
         {
             driver.holdClock -= dt;
             if (driver.holdClock <= 0 && laneClearBehind(index, car, s))
+            {
+                driver.tightExit = boxesBusy(index, s, box, busyAhead);
                 driver.pit = PIT_RELEASE;
+            }
         }
         return;
     }
@@ -1363,12 +1415,12 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
     {
         const auto path = [&](double at) {
             double run = delta(box, at);
-            double blend = run < 0 ? 0.0 : ease(run / releaseRun);
+            double blend = run < 0 ? 0.0 : driver.tightExit ? ease(run / tightRelease) : ease((run - releaseStraight) / releaseRun);
             double laneAt = sampled(model.pitLateral, at);
             return boxLat + (laneAt - boxLat) * blend;
         };
         steerAndGo(index, driver, car, s, path, limit, limit, dt);
-        if (delta(box, pos) > releaseRun)
+        if (delta(box, pos) > (driver.tightExit ? tightRelease : releaseStraight + releaseRun))
             driver.pit = PIT_EXIT;
         return;
     }
@@ -1858,6 +1910,23 @@ bool sdAiGridPose(int slot, double *x, double *y, double *yaw)
     *y = model.gridY[slot];
     *yaw = model.gridYaw[slot];
     return true;
+}
+
+void sdAiPitState(int index, double *out)
+{
+    if (index < 0 || index >= (int)drivers.size())
+    {
+        for (int k = 0; k < SD_PIT_STATE; k++)
+            out[k] = 0;
+        return;
+    }
+    const Driver &driver = drivers[index];
+    out[0] = driver.pit;
+    out[1] = driver.pitTime;
+    out[2] = driver.pit == PIT_STOPPED ? driver.pitTime - driver.pitClock : 0;
+    out[3] = boxDistance(driver.bay);
+    out[4] = driver.noService ? 1 : 0;
+    out[5] = driver.autoRelease ? 1 : 0;
 }
 
 bool sdAiBoxOf(int bay, double *distance, double *lateral)
