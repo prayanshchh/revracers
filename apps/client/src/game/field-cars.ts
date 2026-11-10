@@ -33,10 +33,16 @@ import {
   wheelGone,
   wheelSlump,
 } from "./car-damage.ts";
-import { type CarPieces, type WheelPiece, zonePieces } from "./debris.ts";
+import {
+  type CarPieces,
+  type WheelPiece,
+  capNose,
+  zonePieces,
+} from "./debris.ts";
 import { teamModel } from "./grid.ts";
 import { RearFlap } from "./rear-flap.ts";
 import { simplified, simplifiedBody } from "./simplify.ts";
+import type { TyreMount } from "./tyre-stones.ts";
 import { compounds } from "./tyres.ts";
 import {
   deflatedSag,
@@ -108,12 +114,16 @@ interface FieldCar {
   lamps: CarLamps;
   pastLamps: PastLamps;
   flaps: RearFlap[];
+  team: string;
+  lift: { heave: number; pitch: number };
+  off: boolean[];
 }
 
 const scratch = new THREE.Matrix4();
 const sdToGltf = gltfToSdCar.clone().invert();
 const staticWheelsName = "static-wheels";
 const noSlump = wheelSlump(0, true, true);
+const lifted = new THREE.Matrix4();
 
 function wheelOf(x: number, y: number): number {
   return (x > 0 ? 0 : 2) + (y > 0 ? 1 : 0);
@@ -238,6 +248,7 @@ async function loadTemplate(
     );
   });
   const pieces = zonePieces(model);
+  capNose(model, pieces);
   const body = matrix();
   body.matrix.copy(gltfToSdCar);
   body.add(model);
@@ -279,12 +290,12 @@ export class FieldCars {
     for (const team of teams) {
       const template = templates.get(team);
       if (!template) throw new Error(`no field model for ${team}`);
-      field.cars.push(field.build(template));
+      field.cars.push(field.build(template, team));
     }
     return field;
   }
 
-  private build(template: Template): FieldCar {
+  private build(template: Template, team: string): FieldCar {
     const root = matrix();
     root.visible = false;
     const model = new THREE.Group();
@@ -364,6 +375,9 @@ export class FieldCars {
       lamps,
       pastLamps: new PastLamps(),
       flaps: [body, ...levels].flatMap((part) => RearFlap.find(part) ?? []),
+      team,
+      lift: { heave: 0, pitch: 0 },
+      off: looks.map(() => false),
     };
   }
 
@@ -462,6 +476,38 @@ export class FieldCars {
     for (const mesh of car.casters) mesh.castShadow = on;
   }
 
+  teamOf(index: number): string | null {
+    return this.cars[index - 1]?.team ?? null;
+  }
+
+  crewMounts(index: number): TyreMount[] | null {
+    const car = this.cars[index - 1];
+    if (!car) return null;
+    return car.wheels.map((wheel, i) => ({
+      spin: wheel.spin,
+      radius: car.radius,
+      width: car.wheelPieces[i]?.width ?? 0.3,
+    }));
+  }
+
+  setPitService(
+    index: number,
+    heave: number,
+    pitch: number,
+    off: boolean[],
+  ): void {
+    const car = this.cars[index - 1];
+    if (!car) return;
+    car.lift.heave = heave;
+    car.lift.pitch = pitch;
+    const changed = off.some((gone, i) => gone !== car.off[i]);
+    car.off = [...off];
+    car.wheels.forEach((wheel, i) => {
+      wheel.spin.visible = !car.off[i];
+    });
+    if (changed) this.showWheels(car);
+  }
+
   damageOf(index: number): DamageLook | null {
     return this.cars[index - 1]?.damage ?? null;
   }
@@ -494,7 +540,7 @@ export class FieldCars {
   }
 
   private showWheels(car: FieldCar): void {
-    const missing = car.lost.includes(true);
+    const missing = car.lost.includes(true) || car.off.includes(true);
     for (const wheels of car.staticWheels) wheels.visible = !missing;
     car.wheels.forEach((wheel, i) => {
       wheel.pivot.visible = (car.spinning || missing) && car.lost[i] !== true;
@@ -570,15 +616,31 @@ export class FieldCars {
     car.root.visible = shown;
     if (!shown) return;
     if (!car.placed) this.place(car, data, at);
-    car.root.matrix.fromArray(data, at);
-    car.root.matrixWorldNeedsUpdate = true;
+    this.lift(car, data, at);
     this.setShadow(car, distance < shadowDistance);
     this.setCompound(car, data[at + carField.compound] ?? 1);
     this.setMotion(car, data, at);
     this.setDetail(car, detailFor(car.detail, distance * spread));
-    if ((car.spinning && distance < wheelDistance) || car.lost.includes(true))
+    if (this.wheelsMove(car, distance))
       this.updateWheels(car, data, at, seconds);
     this.updateFlaps(car, data[at + carField.rearFlap] ?? 0);
+  }
+
+  private lift(car: FieldCar, data: Float64Array, at: number): void {
+    car.root.matrix.fromArray(data, at);
+    if (car.lift.heave !== 0 || car.lift.pitch !== 0)
+      car.root.matrix.multiply(
+        lifted.makeRotationY(-car.lift.pitch).setPosition(0, 0, car.lift.heave),
+      );
+    car.root.matrixWorldNeedsUpdate = true;
+  }
+
+  private wheelsMove(car: FieldCar, distance: number): boolean {
+    return (
+      (car.spinning && distance < wheelDistance) ||
+      car.lost.includes(true) ||
+      car.off.includes(true)
+    );
   }
 
   private setMotion(car: FieldCar, data: Float64Array, at: number): void {

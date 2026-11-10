@@ -16,7 +16,7 @@ PALETTE = {
     "skin light": "#d9a784", "skin mid": "#a8744f", "skin dark": "#5f3d2a", "hair": "#1e1712", "black": "#0b0b0d",
     "dark": "#1a1c22", "white": "#e9e7e2", "grey": "#7d8088", "marshal": "#e8701a", "hi vis": "#c9d62a",
     "soft": "#d8232a", "medium": "#f2c418", "hard": "#ecebe6", "blanket": "#25272c", "chair": "#121317",
-    "monitor": "#07090c", "rubber": "#101012", "jack": "#b9bdc4", "go": "#22c55e",
+    "monitor": "#07090c", "rubber": "#101012", "jack": "#b9bdc4", "go": "#22c55e", "garage floor": "#a9acb1",
 }
 PALETTE_CELLS = 8
 BRAND_ROWS = 12

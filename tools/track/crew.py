@@ -14,7 +14,15 @@ ATLAS_WIDTH = 2.0
 ATLAS_HEIGHT = 2.2
 HELMET_TILE = (0.86, 1.0)
 HELMET_CENTRE = (0.0, 0.0, 1.705)
-HEAD_CUT = 1.655
+HELMET_ABOVE_EYES = 0.04
+HELMET_BEHIND_NOSE = 0.12
+FACE_CUT_BELOW = 0.06
+BODY_FBX = "rocketbox_male_adult_10.fbx"
+BODY_NORMAL = "rocketbox_m024_body_normal.png"
+BODY_SKIN = "rocketbox_m024_head_color.png"
+KIT_JOINTS = {"wrist": ("hand_l", 0), "shoulder": ("upperarm_l", 0), "arm": ("upperarm_l", 2), "ankle": ("foot_l", 2), "waist": ("spine_01", 2), "neck": ("neck_01", 2)}
+VISOR_RADII = (0.113, 0.132, 0.072)
+VISOR_FRONT = 0.07
 GLOVE_REACH = 0.69
 BOOT_HEIGHT = 0.14
 SUIT_SMOOTHING = 6
@@ -37,6 +45,8 @@ UAL_CLIPS = {
     "Fixing_Kneeling": "gunner",
     "Idle_Talking_Loop": "talking",
     "Interact": "interact",
+    "Walk_Loop": "walk",
+    "Crouch_Idle_Loop": "crouch",
 }
 STATIC_POSES = (("ready", 12), ("talking", 20), ("interact", 16), ("arms_folded", 0), ("hands_hips", 0))
 SPINE_SHARE = {"pelvis": 0.25, "spine_01": 0.45, "spine_02": 0.75, "spine_03": 1.0}
@@ -167,8 +177,7 @@ def along(start, end):
     return Matrix.Translation((start + end) / 2) @ rotation, direction.length
 
 
-def make_helmet():
-    centre = Vector(HELMET_CENTRE)
+def make_helmet(centre=Vector(HELMET_CENTRE)):
     shell = bmesh.new()
     primitive(shell, "sphere", Matrix.Translation(centre) @ Matrix.Diagonal((0.108, 0.126, 0.116, 1.0)), u=24, v=16)
     primitive(shell, "sphere", Matrix.Translation(centre + Vector((0, -0.03, -0.085))) @ Matrix.Diagonal((0.082, 0.095, 0.05, 1.0)), u=16, v=10)
@@ -184,13 +193,16 @@ def make_helmet():
     layer = shell_data.uv_layers.new(name="UVMap")
     v0, v1 = HELMET_TILE
     for polygon in shell_data.polygons:
-        for loop_index in polygon.loop_indices:
-            co = shell_data.vertices[shell_data.loops[loop_index].vertex_index].co - centre
+        corners = [shell_data.vertices[shell_data.loops[i].vertex_index].co - centre for i in polygon.loop_indices]
+        around = [0.5 + math.atan2(co.x, -co.y) / (2 * math.pi) for co in corners]
+        if max(around) - min(around) > 0.5:
+            around = [a + 1.0 if a < 0.5 else a for a in around]
+        for loop_index, co, u in zip(polygon.loop_indices, corners, around):
             height = max(0.0, min(1.0, (co.z + 0.14) / 0.27))
-            layer.data[loop_index].uv = (0.5, v0 + (v1 - v0) * height)
+            layer.data[loop_index].uv = (u, v0 + (v1 - v0) * height)
     visor = bmesh.new()
-    primitive(visor, "sphere", Matrix.Translation(centre + Vector((0, -0.014, -0.002))) @ Matrix.Diagonal((0.103, 0.123, 0.078, 1.0)), u=24, v=10)
-    bmesh.ops.delete(visor, geom=[v for v in visor.verts if v.co.y > centre.y - 0.02], context="VERTS")
+    primitive(visor, "sphere", Matrix.Translation(centre + Vector((0, -0.004, -0.012))) @ Matrix.Diagonal(VISOR_RADII + (1.0,)), u=32, v=14)
+    bmesh.ops.delete(visor, geom=[v for v in visor.verts if v.co.y > centre.y - VISOR_FRONT], context="VERTS")
     visor_data = bpy.data.meshes.new("crew visor")
     visor.to_mesh(visor_data)
     visor.free()
@@ -397,21 +409,215 @@ def use_action(arm, name):
     arm.animation_data.action_slot = action.slots[0]
 
 
-def race_crew(parts, textures):
-    arm, body = parts["arm"], parts["body"]
-    tailor(body, arm)
-    keep_vertices(body, lambda co: co.z < HEAD_CUT or abs(co.x) > 0.2)
-    project_uvs(body.data)
+def bip_bones():
+    mapping = {"pelvis": "Pelvis", "spine_01": "Spine", "spine_02": "Spine1", "spine_03": "Spine2", "neck_01": "Neck", "Head": "Head"}
+    child = {}
+    for q, b in (("l", "L"), ("r", "R")):
+        limb = {"clavicle": "Clavicle", "upperarm": "UpperArm", "lowerarm": "Forearm", "hand": "Hand", "thigh": "Thigh", "calf": "Calf", "foot": "Foot", "ball": "Toe0"}
+        mapping.update({f"{name}_{q}": f"{b} {bone}" for name, bone in limb.items()})
+        chain = ["UpperArm", "Forearm", "Hand", "Finger2"]
+        child.update({f"{b} {a}": f"{b} {c}" for a, c in zip(chain, chain[1:])})
+        legs = ["Thigh", "Calf", "Foot", "Toe0"]
+        child.update({f"{b} {a}": f"{b} {c}" for a, c in zip(legs, legs[1:])})
+        for finger, n in (("thumb", 0), ("index", 1), ("middle", 2), ("ring", 3), ("pinky", 4)):
+            joints = [f"{b} Finger{n}", f"{b} Finger{n}1", f"{b} Finger{n}2"]
+            for k, joint in enumerate(joints):
+                mapping[f"{finger}_0{k + 1}_{q}"] = joint
+            child.update(dict(zip(joints, joints[1:])))
+    tails = dict(child)
+    tails.update({"L Clavicle": "L UpperArm", "R Clavicle": "R UpperArm", "Pelvis": "Spine", "Spine": "Spine1", "Spine1": "Spine2", "Spine2": "Neck", "Neck": "Head"})
+    named = lambda links: {"Bip01 " + a: "Bip01 " + c for a, c in links.items()}
+    return {q: "Bip01 " + b for q, b in mapping.items()}, named(child), named(tails)
+
+
+def import_fbx(path):
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.fbx(filepath=str(path))
+    return [o for o in bpy.data.objects if o not in before]
+
+
+def align_pose(bip, arm, mapping, child):
+    back = {b: q for q, b in mapping.items()}
+    bpy.context.view_layer.objects.active = bip
+    bpy.ops.object.mode_set(mode="POSE")
+    for bone in bip.data.bones:
+        q = back.get(bone.name)
+        if bone.name not in child or q is None:
+            continue
+        pose = bip.pose.bones[bone.name]
+        bpy.context.view_layer.update()
+        head = bip.matrix_world @ pose.head
+        current = (bip.matrix_world @ bip.pose.bones[child[bone.name]].head - head).normalized()
+        rest = arm.data.bones[q]
+        wanted = (arm.matrix_world @ rest.tail_local - arm.matrix_world @ rest.head_local).normalized()
+        turn = current.rotation_difference(wanted).to_matrix().to_4x4()
+        world = Matrix.Translation(head) @ turn @ Matrix.Translation(-head) @ bip.matrix_world @ pose.matrix
+        pose.matrix = bip.matrix_world.inverted() @ world
+    bpy.context.view_layer.update()
+    bpy.ops.object.mode_set(mode="OBJECT")
+    return {bone.name: bip.matrix_world @ bip.pose.bones[bone.name].head for bone in bip.data.bones}
+
+
+def bake_pose(body):
+    bpy.context.view_layer.objects.active = body
+    world = body.matrix_world.copy()
+    for modifier in list(body.modifiers):
+        if modifier.type == "ARMATURE":
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+    body.parent = None
+    body.data.transform(world)
+    body.matrix_world = Matrix.Identity(4)
+
+
+def move_joints(arm, joints, mapping, child):
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode="EDIT")
+    inverse = arm.matrix_world.inverted()
+    for q, b in mapping.items():
+        bone = arm.data.edit_bones[q]
+        roll, length, direction = bone.roll, bone.length, (bone.tail - bone.head).normalized()
+        bone.head = inverse @ joints[b]
+        bone.tail = inverse @ joints[child[b]] if b in child and not q.startswith("hand_") else bone.head + direction * length
+        bone.roll = roll
+    for bone in arm.data.edit_bones:
+        if "_leaf_" in bone.name and bone.parent:
+            reach = bone.parent.tail - bone.parent.head
+            bone.head = bone.parent.tail
+            bone.tail = bone.head + reach
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def rebind(body, arm, mapping):
+    back = {b: q for q, b in mapping.items()}
+    head, pelvis = body.vertex_groups.get(mapping["Head"]), body.vertex_groups.get(mapping["pelvis"])
+    for group in list(body.vertex_groups):
+        if group.name in back or group in (head, pelvis):
+            continue
+        target = pelvis if group.name == "Bip01" else head
+        for vertex in body.data.vertices:
+            for entry in vertex.groups:
+                if entry.group == group.index and entry.weight > 0:
+                    target.add([vertex.index], entry.weight, "ADD")
+        body.vertex_groups.remove(group)
+    for group in body.vertex_groups:
+        group.name = back.get(group.name, group.name)
+    body.parent = arm
+    body.modifiers.new("rig", "ARMATURE").object = arm
+
+
+def kit_joints(arm):
+    return {key: (arm.matrix_world @ arm.data.bones[bone].head_local)[axis] for key, (bone, axis) in KIT_JOINTS.items()}
+
+
+def realistic_body(source, arm):
+    objects = import_fbx(source / BODY_FBX)
+    bip = next(o for o in objects if o.type == "ARMATURE")
+    body = next(o for o in objects if o.type == "MESH")
+    for obj in objects:
+        if obj not in (bip, body):
+            bpy.data.objects.remove(obj)
+    reference = kit_joints(arm)
+    mapping, child, tails = bip_bones()
+    joints = align_pose(bip, arm, mapping, child)
+    bake_pose(body)
+    move_joints(arm, joints, mapping, tails)
+    rebind(body, arm, mapping)
+    bpy.data.objects.remove(bip)
+    body.name = "crew body"
+    eyes = (joints["Bip01 LEye"] + joints["Bip01 REye"]) / 2
+    nose = joints["Bip01 MNose"]
+    centre = Vector((0.0, nose.y + HELMET_BEHIND_NOSE, eyes.z + HELMET_ABOVE_EYES))
+    return body, centre, reference, kit_joints(arm)
+
+
+def spread(value, source, target):
+    return float(np.interp(value, source, target))
+
+
+def project_kit(data, reference, actual):
+    saved = [tuple(loop.uv) for loop in data.uv_layers[0].data]
+    while data.uv_layers:
+        data.uv_layers.remove(data.uv_layers[0])
+    xs = ([0.0, actual["shoulder"], actual["wrist"], actual["wrist"] + 1.0], [0.0, reference["shoulder"], reference["wrist"], reference["wrist"] + 1.0])
+    zs = (
+        [0.0, actual["ankle"], actual["waist"], actual["arm"], actual["neck"], actual["neck"] + 1.0],
+        [0.0, reference["ankle"], reference["waist"], reference["arm"], reference["neck"], reference["neck"] + 1.0],
+    )
+    layer = data.uv_layers.new(name="UVMap")
+    for polygon in data.polygons:
+        front = polygon.normal.y <= 0
+        for loop_index in polygon.loop_indices:
+            co = data.vertices[data.loops[loop_index].vertex_index].co
+            x = math.copysign(spread(abs(co.x), *xs), co.x)
+            across = x if front else -x
+            u = (across / ATLAS_WIDTH + 0.5) * 0.5
+            layer.data[loop_index].uv = (u + (0.0 if front else 0.5), spread(co.z, *zs) / ATLAS_HEIGHT)
+    detail = data.uv_layers.new(name="Detail")
+    for loop, uv in zip(detail.data, saved):
+        loop.uv = uv
+
+
+def detail_image(mat, path, colour):
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    image = nodes.new("ShaderNodeTexImage")
+    image.image = bpy.data.images.load(str(path))
+    if not colour:
+        image.image.colorspace_settings.name = "Non-Color"
+    coords = nodes.new("ShaderNodeUVMap")
+    coords.uv_map = "Detail"
+    links.new(coords.outputs["UV"], image.inputs["Vector"])
+    return image
+
+
+def dress(body, source, textures, centre, reference, actual):
+    slots = [slot.material.name if slot.material else "" for slot in body.material_slots]
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    cut = centre.z - FACE_CUT_BELOW
+    doomed = [f for f in bm.faces if slots[f.material_index].startswith("m024_opacity") or (slots[f.material_index].startswith("m024_head") and f.calc_center_median().z > cut)]
+    bmesh.ops.delete(bm, geom=doomed, context="FACES")
+    skinned = [1 if slots[face.material_index].startswith("m024_head") else 0 for face in bm.faces]
+    for face in bm.faces:
+        face.smooth = True
+    bm.to_mesh(body.data)
+    bm.free()
+    project_kit(body.data, reference, actual)
     body.data.materials.clear()
-    suit = material("crew suit", textures / "crew_suit_base_color.png", normal=textures / "crew_suit_normal.png")
-    suit.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.72
+    suit = material("crew suit", textures / "crew_suit_base_color.png")
+    bsdf = suit.node_tree.nodes["Principled BSDF"]
+    bsdf.inputs["Roughness"].default_value = 0.72
+    folds = detail_image(suit, source / BODY_NORMAL, False)
+    bend = suit.node_tree.nodes.new("ShaderNodeNormalMap")
+    bend.uv_map = "Detail"
+    suit.node_tree.links.new(folds.outputs["Color"], bend.inputs["Color"])
+    suit.node_tree.links.new(bend.outputs["Normal"], bsdf.inputs["Normal"])
+    skin = bpy.data.materials.new("crew skin")
+    skin_bsdf = skin.node_tree.nodes["Principled BSDF"]
+    skin_bsdf.inputs["Roughness"].default_value = 0.6
+    skin.node_tree.links.new(detail_image(skin, source / BODY_SKIN, True).outputs["Color"], skin_bsdf.inputs["Base Color"])
     body.data.materials.append(suit)
+    body.data.materials.append(skin)
+    body.data.polygons.foreach_set("material_index", skinned)
+
+
+def remake_clips(arm):
+    for name in CLIPS:
+        bpy.data.actions.remove(bpy.data.actions[name])
+    make_clips(arm)
+
+
+def race_crew(parts, textures, source):
+    arm = parts["arm"]
+    bpy.data.objects.remove(parts["body"])
+    body, centre, reference, actual = realistic_body(source, arm)
+    remake_clips(arm)
+    dress(body, source, textures, centre, reference, actual)
     for name in ("eyes", "brows"):
         bpy.data.objects.remove(parts[name])
     shell = material("crew shell", textures / "crew_suit_base_color.png")
     shell.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.25
-    visor = flat_material("crew visor", (0.012, 0.016, 0.022), 0.4, 0.06)
-    for obj, bone in make_helmet():
+    visor = flat_material("crew visor", (0.018, 0.022, 0.028), 0.2, 0.12)
+    for obj, bone in make_helmet(centre):
         obj.data.materials.append(shell if obj.name == "crew helmet" else visor)
         group = obj.vertex_groups.new(name=bone)
         group.add(list(range(len(obj.data.vertices))), 1.0, "REPLACE")
@@ -496,7 +702,7 @@ def main():
     for gender, hair_name in (("Male", "Hair_Buzzed"), ("Female", "Hair_Buns")):
         statics.update(static_figures(source, gender, hair_name))
     np.savez(textures.parent / "crew_static.npz", **statics)
-    race_crew(parts, textures)
+    race_crew(parts, textures, source)
     for action in bpy.data.actions:
         use_action(parts["arm"], action.name) if action.slots else None
     parts["arm"].animation_data.action = None

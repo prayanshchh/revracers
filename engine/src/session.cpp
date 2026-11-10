@@ -67,7 +67,15 @@ const double runTimeout = 420.0;
 const double contactWindow = 0.8;
 const double detectionShare = 0.94;
 const double overtakeWindow = 1.0;
-const double stopTimeBase = 2.6;
+const double stopQuantiles[] = {2.0, 2.2, 2.3, 2.4, 2.5, 2.5, 2.6, 2.7, 2.7, 2.8, 2.9,
+                                3.0, 3.1, 3.2, 3.3, 3.5, 3.8, 4.2, 5.1, 6.4, 10.0};
+const int stopQuantileCount = sizeof(stopQuantiles) / sizeof(stopQuantiles[0]);
+const double fieldStopMedian = 2.9;
+const double crewStopMedians[] = {2.6, 2.9, 2.6, 2.7, 2.9, 2.9, 2.95, 3.4, 2.8, 2.6, 3.95};
+const int crewCount = sizeof(crewStopMedians) / sizeof(crewStopMedians[0]);
+const int firstTeamBay = 1;
+const double fastestCrewStop = 1.8;
+const double longestCrewStop = 10.0;
 const double blueFlagGap = 1.1;
 const double lapNoiseSize = 0.0012;
 const double raceFormSwing = 0.006;
@@ -200,6 +208,7 @@ bool chequered = false;
 double chequeredAt = 0;
 int playerStartCompound = -1;
 std::vector<int> startSlots;
+std::vector<int> carBays;
 bool playerChangedCompound = false;
 
 double uniform(double low, double high)
@@ -210,6 +219,18 @@ double uniform(double low, double high)
 double weatherUniform(double low, double high)
 {
     return std::uniform_real_distribution<double>(low, high)(weatherRng);
+}
+
+double crewStop(int index, double luck)
+{
+    double at = std::clamp(luck, 0.0, 1.0) * (stopQuantileCount - 1);
+    int low = std::min((int)at, stopQuantileCount - 2);
+    double share = at - low;
+    double field = stopQuantiles[low] + (stopQuantiles[low + 1] - stopQuantiles[low]) * share;
+    int bay = index < (int)carBays.size() ? carBays[index] : -1;
+    int garage = (bay - firstTeamBay) / 2;
+    double median = bay >= firstTeamBay && garage < crewCount ? crewStopMedians[garage] : fieldStopMedian;
+    return std::clamp(field * median / fieldStopMedian, fastestCrewStop, longestCrewStop);
 }
 
 double carProgress(tCarElt *car, double length)
@@ -453,7 +474,7 @@ bool weatherCall(tSituation *s, int i)
     t.weatherDue = 0;
     t.weatherStop = true;
     t.stintIndex = plans[i].stints.empty() ? 0 : plans[i].stints.size() - 1;
-    sdAiRequestPit(i, wanted, stopTimeBase + weatherUniform(-0.3, 0.6) + sdStewardsOwedTime(i));
+    sdAiRequestPit(i, wanted, crewStop(i, weatherUniform(0, 1)) + sdStewardsOwedTime(i));
     t.pits++;
     t.stintStartLap = car->_laps + 1;
     t.stintStartWear = 0;
@@ -497,7 +518,7 @@ void raceStrategy(tSituation *s)
             compound = 2;
         if (tyreFamily(compound) == 0)
             compound = sdWeatherIdealCompound(sdWeatherFutureLine(0), compound);
-        sdAiRequestPit(i, compound, stopTimeBase + uniform(-0.3, 0.6) + sdStewardsOwedTime(i));
+        sdAiRequestPit(i, compound, crewStop(i, uniform(0, 1)) + sdStewardsOwedTime(i));
         t.pits++;
         t.stintStartLap = car->_laps + 1;
         t.stintStartWear = 0;
@@ -793,9 +814,9 @@ bool sdFieldActive()
     return kind != KIND_SOLO;
 }
 
-int sdFieldBay(int teamIndex, int seat)
+int sdFieldBay(int garage, int seat)
 {
-    return 2 + teamIndex * 2 + seat;
+    return firstTeamBay + garage * 2 + seat;
 }
 
 int sdPitCompound()
@@ -813,6 +834,9 @@ bool sdSessionStartPlace(int index, int slot, int bay, double *distance, double 
     if ((int)startSlots.size() <= index)
         startSlots.resize(index + 1, 0);
     startSlots[index] = slot;
+    if ((int)carBays.size() <= index)
+        carBays.resize(index + 1, -1);
+    carBays[index] = bay;
     if (kind != KIND_QUALIFYING)
         return true;
     sdAiBoxOf(bay, distance, lateral);

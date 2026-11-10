@@ -48,9 +48,15 @@ const credits: Credit[] = [
   },
   {
     name: "Quaternius",
-    role: "Pit crew characters and animations",
+    role: "Pit crew skeleton and animations",
     licence: "CC0 1.0",
     url: "https://quaternius.com/",
+  },
+  {
+    name: "Microsoft Rocketbox Avatar Library",
+    role: "Pit crew body",
+    licence: "MIT",
+    url: "https://github.com/microsoft/Microsoft-Rocketbox",
   },
   {
     name: "331music, Kulakovka and BreakzStudios",

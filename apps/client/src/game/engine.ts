@@ -19,7 +19,7 @@ import {
 } from "./stewards.ts";
 
 export { carField, carStride, carWheel, frameIndex } from "./frame-layout.ts";
-import { carStride, frameIndex } from "./frame-layout.ts";
+import { carStride, frameIndex, pitStateSize } from "./frame-layout.ts";
 import type { Pass } from "./highlights.ts";
 
 const telemetrySize = 40;
@@ -27,7 +27,6 @@ const barrierValues = 8;
 const weatherFields = 13;
 const telemetryWheels = 8;
 const gravelStride = 8;
-
 export interface WheelGrip {
   slip: number;
   load: number;
@@ -225,13 +224,13 @@ function configureField(module: SpeedDreamsModule, plan: SessionPlan): void {
   plan.field.entrants.forEach((entrant, index) => {
     const slot = plan.field.slots[index] ?? index;
     if (entrant.player)
-      module._sdFieldPlayer(entrant.teamIndex, entrant.seat, slot);
+      module._sdFieldPlayer(entrant.garage, entrant.seat, slot);
     else
       add(
         entrant.name,
         entrant.code,
         entrant.team,
-        entrant.teamIndex,
+        entrant.garage,
         entrant.seat,
         slot,
         entrant.speed,
@@ -262,6 +261,10 @@ export class Engine {
   private sessionMemory = 0;
   private qualifyingMemory = 0;
   private damageMemory = 0;
+  private pitsMemory = 0;
+  private postMemory = 0;
+  private postRoom = 0;
+  private posted = false;
   private tyreMemory = 0;
   private barrierMemory = 0;
   private passMemory = 0;
@@ -555,6 +558,38 @@ export class Engine {
 
   key(code: number, down: boolean): void {
     this.module._sdKey(code, down ? 1 : 0);
+  }
+
+  fieldPits(): Float64Array {
+    this.pitsMemory ||= this.module._malloc(this.carCount * pitStateSize * 8);
+    this.module._sdFieldPits(this.pitsMemory);
+    return new Float64Array(
+      this.module.HEAPF64.buffer,
+      this.pitsMemory,
+      this.carCount * pitStateSize,
+    );
+  }
+
+  obstacles(circles: ArrayLike<number>): void {
+    const count = Math.floor(circles.length / 3);
+    if (count > this.postRoom) {
+      if (this.postMemory) this.module._free(this.postMemory);
+      this.postRoom = count + 32;
+      this.postMemory = this.module._malloc(this.postRoom * 24);
+    }
+    if (count > 0)
+      new Float64Array(
+        this.module.HEAPF64.buffer,
+        this.postMemory,
+        count * 3,
+      ).set(circles);
+    if (count > 0 || this.posted)
+      this.module._sdObstacles(this.postMemory, count);
+    this.posted = count > 0;
+  }
+
+  teamBox(garage: number, seat: number): number {
+    return this.module._sdPitTeamBox(garage, seat);
   }
 
   carsDamage(): Float64Array {

@@ -11,19 +11,44 @@ const source = readFileSync(
   path.join(repoRoot, "apps/client/src/game/pit-crew.ts"),
   "utf8",
 );
+const sides = ["l", "r"];
+const solved = [
+  "pelvis",
+  "spine_01",
+  "spine_02",
+  "spine_03",
+  "neck_01",
+  "Head",
+  ...sides.flatMap((s) => [
+    `clavicle_${s}`,
+    `upperarm_${s}`,
+    `lowerarm_${s}`,
+    `hand_${s}`,
+    `thigh_${s}`,
+    `calf_${s}`,
+    `foot_${s}`,
+    `ball_${s}`,
+    ...["thumb", "index", "middle", "ring", "pinky"].flatMap((f) =>
+      [1, 2, 3].map((k) => `${f}_0${String(k)}_${s}`),
+    ),
+  ]),
+];
 
 describe.skipIf(lfsPointer)("pit crew model", () => {
-  test("has a skinned rig with a clip for every role the game plays", async () => {
+  test("has every clip the crew plays and every joint the body solver moves", async () => {
     const root = (await readModel(file)).getRoot();
     expect(root.listSkins().length).toBeGreaterThan(0);
     const clips = root.listAnimations().map((a) => a.getName());
-    const roles = [...source.matchAll(/\| "(\w+)"/g)].map((m) => m[1] ?? "");
-    expect(roles.length).toBeGreaterThan(4);
-    for (const clip of [...roles, "ready", "run"])
-      expect(clips).toContain(clip);
+    const chooser = source.match(/const gaitClips = ([^;]+);/)?.[1] ?? "";
+    const played = [
+      ...chooser.matchAll(/"(\w+)"/g),
+      ...source.matchAll(/actions\.get\("(\w+)"\)/g),
+    ].map((m) => m[1] ?? "");
+    expect(played).toEqual(expect.arrayContaining(["ready", "walk", "run"]));
+    for (const clip of played) expect(clips).toContain(clip);
     const joints = (root.listSkins()[0]?.listJoints() ?? []).map((j) =>
       j.getName(),
     );
-    expect(joints).toEqual(expect.arrayContaining(["hand_l", "hand_r"]));
+    expect(joints).toEqual(expect.arrayContaining(solved));
   });
 });

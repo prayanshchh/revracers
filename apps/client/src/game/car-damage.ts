@@ -59,9 +59,17 @@ const wingBack = 2.12;
 const wingTop = 0.42;
 const wingInner = 0.12;
 const wingOuter = 0.58;
+export const noseBack = 1.92;
+const noseHalf = 0.3;
+const noseFloor = 0.08;
+const noseTop = 0.7;
 
 function frontWing(x: number, z: number): boolean {
   return x > wingBack && z < wingTop;
+}
+
+function noseCone(x: number, y: number, z: number): boolean {
+  return x > noseBack && Math.abs(y) < noseHalf && z > noseFloor && z < noseTop;
 }
 
 function rearNeck(x: number, y: number, z: number): boolean {
@@ -125,7 +133,7 @@ const zoneSpecs: ZoneSpec[] = [
   },
   {
     name: "wingCentre",
-    inside: (x, _y, z) => x > 2.18 && z < 0.13,
+    inside: (x, y, z) => (x > 2.18 && z < 0.13) || noseCone(x, y, z),
     hinge: [2.5, 0, 0.09],
     axis: [0, 1, 0],
     bend: 0,
@@ -494,6 +502,27 @@ function zoneChange(zone: number, was: number, now: number): LookChange | null {
   const step = tears(zone) ? tearStep : bendStep;
   if (Math.floor(now / step) === Math.floor(was / step)) return null;
   return { zone, kind: tears(zone) ? "tear" : "bend", amount: now - was };
+}
+
+const frontWingZones = [
+  "wingOuterLeft",
+  "wingInnerLeft",
+  "wingOuterRight",
+  "wingInnerRight",
+  "wingCentre",
+].map((name) => zoneId[name] ?? 0);
+export const noseZone = frontWingZones[frontWingZones.length - 1] ?? 0;
+
+export function frontWingPieces<T>(
+  pieces: ReadonlyMap<number, { meshes: T[] }>,
+): T[] {
+  return frontWingZones.flatMap((zone) => pieces.get(zone)?.meshes ?? []);
+}
+
+export function showFrontWing(look: DamageLook, shown: boolean): void {
+  for (const zone of frontWingZones) look[zone - 1] = shown ? 0 : gone;
+  look[flagAt] = 0;
+  look[flagAt] = look.some((v) => v > 0) ? 1 : 0;
 }
 
 export function updateLook(

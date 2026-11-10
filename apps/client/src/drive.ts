@@ -90,6 +90,7 @@ import {
   seatDriver,
   startingGrid,
   teamOf,
+  teams,
 } from "./game/teams.ts";
 import {
   applySettings,
@@ -653,6 +654,23 @@ function warmInBackground(
     .finishCar()
     .then(() => warmGame(team, release, tutorial))
     .catch(() => undefined);
+}
+
+function parkTeamBoxes(
+  scene: Scene,
+  engine: Engine,
+  layout: PitLayout,
+  venue: boolean,
+): void {
+  if (!venue || !Number.isFinite(layout.pitWall)) return;
+  scene.parkBoxes(
+    teams.flatMap((team, garage) =>
+      [0, 1].map((seat) => ({
+        team: team.id,
+        distance: engine.teamBox(garage, seat),
+      })),
+    ),
+  );
 }
 
 function pitInput(frame: Float64Array, laneClear: boolean) {
@@ -1285,6 +1303,7 @@ async function main(): Promise<void> {
   const layout = await pitLayout(engine, field, circuit);
   const pit = new PitStop(layout, settings.pitExperience === "broadcast");
   scene.placePit(layout, (d, l) => engine.trackPoint(d, l));
+  parkTeamBoxes(scene, engine, layout, circuit.ground === "glb");
   await scene.populatePaddock(layout.boxDistance, renderer.getMaxAnisotropy());
   scene.setWeather(engine.weather());
   scene.update(engine.update(performance.now() / 1000));
@@ -1542,6 +1561,7 @@ async function main(): Promise<void> {
     scene.updateTyres(frame, tyres);
     scene.updateGravel(frame, audio.wheels, engine.carsGravel(gravelCars));
     scene.updatePit(control, frame, freshTyre());
+    engine.obstacles(scene.crewPosts(control.drive === null));
     scene.marks.update(
       frame,
       engine.wheelGrip(),

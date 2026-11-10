@@ -45,6 +45,7 @@ int sdDamageLimit();
 double sdCarStatusReplaceWing();
 void sdCarStatusDriveLimit(tCarElt *car);
 void sdCarStatusPrepare(tCarElt *car);
+void sdObstaclesStep(tSituation *s);
 int sdSurfaceClass(const tTrackSeg *seg);
 void sdGravelInit(tTrack *track);
 bool sdGravelSealedAt(tTrackSeg *near, double x, double y);

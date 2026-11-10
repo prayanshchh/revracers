@@ -94,9 +94,13 @@ folder under `content/tracks` has a `SOURCES.md` with the full pipeline.
   (Rob Tuytel, Rico Cilliers), Jacaranda Tree (Rico Cilliers, Rob Tuytel),
   Tree Small 02 (Rico Cilliers) and Searsia Burchellii (James Ray Cock,
   Jenelle van Heerden).
-- Pit crew characters and animations: Universal Base Characters and
+- Pit crew skeleton and animations: Universal Base Characters and
   Universal Animation Library by [Quaternius](https://quaternius.com/),
   CC0 1.0.
+- Pit crew body: Male_Adult_10 from the
+  [Microsoft Rocketbox Avatar Library](https://github.com/microsoft/Microsoft-Rocketbox),
+  MIT License, copyright (c) 2020 Microsoft. The license text is in
+  `content/tracks/hill-country/source/crew/LICENSE-rocketbox.txt`.
 - Trackside boards use fictional brands set in Anton, Oswald,
   Playfair Display, Montserrat, Cinzel and Barlow Condensed, all under the
   SIL Open Font License 1.1.

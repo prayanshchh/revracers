@@ -4,7 +4,7 @@
 #include <raceman.h>
 
 bool sdFieldActive();
-int sdFieldBay(int teamIndex, int seat);
+int sdFieldBay(int garage, int seat);
 int sdPitCompound();
 double sdSessionStartClock();
 bool sdSessionStartPlace(int index, int slot, int bay, double *distance, double *lateral);

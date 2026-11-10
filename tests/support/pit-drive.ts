@@ -39,6 +39,10 @@ export interface Lap {
   finished: boolean;
   parkedAlong: number;
   parkedLateral: number;
+  parkedAt: number;
+  arrivalDrift: number;
+  parkedHeading: number;
+  launch: { run: number; offset: number; turn: number }[];
   fuelBefore: number;
   fuelAfter: number;
   startFuel: number;
@@ -51,6 +55,7 @@ export interface Lap {
 
 const aheadOn = (pit: PitLayout, from: number, to: number) =>
   (((to - from) % pit.length) + pit.length) % pit.length;
+const crewReach = 6;
 
 function approach(
   pit: PitLayout,
@@ -97,8 +102,27 @@ function record(
   if (control.phase === "service" && !lap.phases.has("service")) {
     lap.parkedAlong = aheadOn(pit, car.distance, pit.boxDistance);
     lap.parkedLateral = lateral;
+    lap.parkedAt = car.distance;
+    lap.parkedHeading = car.heading;
     lap.fuelBefore = fuel;
   }
+  if (
+    control.phase === "boxing" &&
+    aheadOn(pit, car.distance, pit.boxDistance) < crewReach
+  )
+    lap.arrivalDrift = Math.max(
+      lap.arrivalDrift,
+      Math.abs(lateral - pit.boxLateral),
+    );
+  if (control.phase === "release")
+    lap.launch.push({
+      run: aheadOn(pit, lap.parkedAt, car.distance),
+      offset: lap.parkedLateral - lateral,
+      turn: Math.atan2(
+        Math.sin(lap.parkedHeading - car.heading),
+        Math.cos(lap.parkedHeading - car.heading),
+      ),
+    });
   lap.phases.add(control.phase);
   if (control.limit > 0 && control.phase === "lane")
     lap.fastestInLane = Math.max(lap.fastestInLane, car.speed * 3.6);
@@ -167,6 +191,10 @@ function freshLap(startFuel: number): Lap {
     finished: false,
     parkedAlong: 99,
     parkedLateral: 0,
+    parkedAt: 0,
+    arrivalDrift: 0,
+    parkedHeading: 0,
+    launch: [],
     fuelBefore: 0,
     fuelAfter: 0,
     startFuel,
@@ -180,6 +208,41 @@ function freshLap(startFuel: number): Lap {
 
 function planOf(options: PitOptions): PitLayout {
   return layoutOf(options.track ?? "hill-country");
+}
+
+const tailBehind = 1.56;
+const noseAhead = 2.66;
+const halfWidth = 1;
+const frontCrewPassed = 4.8;
+const nextJackMan = 9.3;
+const nextCrew = 10.9;
+const nextBox: [number, number] = [11, 17];
+
+export function launchClearance(lap: Lap) {
+  const corner = (s: Lap["launch"][number]) => ({
+    along: s.run + noseAhead * Math.cos(s.turn) + halfWidth * Math.sin(s.turn),
+    lane:
+      s.offset + noseAhead * Math.sin(s.turn) - halfWidth * Math.cos(s.turn),
+  });
+  const cornerAt = (along: number) =>
+    corner(
+      lap.launch.find((s) => corner(s).along >= along) ??
+        lap.launch.at(-1) ?? { run: 0, offset: 0, turn: 0 },
+    ).lane;
+  return {
+    rearSwing: Math.max(
+      ...lap.launch
+        .filter((s) => s.run <= frontCrewPassed)
+        .map((s) => s.offset - tailBehind * Math.sin(s.turn)),
+    ),
+    pastJackMan: cornerAt(nextJackMan),
+    pastCrew: cornerAt(nextCrew),
+    pastCar: Math.min(
+      ...lap.launch
+        .filter((s) => s.run >= nextBox[0] && s.run <= nextBox[1])
+        .map((s) => s.offset - halfWidth / Math.cos(s.turn)),
+    ),
+  };
 }
 
 export function driveStop(m: RaceSystems, options: PitOptions = {}): Lap {

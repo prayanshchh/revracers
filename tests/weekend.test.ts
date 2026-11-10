@@ -258,6 +258,7 @@ describe("leaving the box", () => {
   test("the tyre choice shows on the way in to a stop, not after it", () => {
     const pit = new PitStop(layout, true);
     const lane = { toMiddle: 12.5, speed: 20 };
+    pit.update({ ...lane, distance: 5320 }, 0, false);
     expect(
       pit.update({ ...lane, distance: 5400 }, 0, false).choosingTyres,
     ).toBe(true);

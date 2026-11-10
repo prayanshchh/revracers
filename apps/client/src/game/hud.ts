@@ -275,6 +275,11 @@ function fuelState(
   return (total ? delta < 0 : delta < 1.2) ? "low" : "";
 }
 
+function estimateText(estimate: PitControl["estimate"]): string {
+  const [low, high] = estimate ?? [0, 0];
+  return `${low.toFixed(1)}s - ${high.toFixed(1)}s`;
+}
+
 function turnInGrade(control: PitControl): PitControl["grade"] {
   return control.phase === "boxing" || control.phase === "service"
     ? control.grade
@@ -611,9 +616,9 @@ export class Hud {
   private updatePitPanel(control: PitControl, active: boolean): void {
     putHidden(this.find("pit-panel"), !active || control.pitTime === null);
     putText(this.find("pit-time"), (control.pitTime ?? 0).toFixed(1));
-    const running = control.serviceProgress * (control.estimate ?? 0);
     const stop =
-      control.stopTime ?? (control.phase === "service" ? running : null);
+      control.stopTime ??
+      (control.phase === "service" ? control.serviceTime : null);
     putText(this.find("pit-stop"), stop === null ? "-.-" : stop.toFixed(1));
   }
 
@@ -661,7 +666,7 @@ export class Hud {
     putText(
       this.find("pit-turn-hint"),
       grade
-        ? `Estimated stop time ${(control.estimate ?? 0).toFixed(1)}s`
+        ? `Estimated stop time ${estimateText(control.estimate)}`
         : "Press Space / Brake",
     );
   }
