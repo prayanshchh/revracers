@@ -45,8 +45,8 @@ void block(tCar *car, const Outline &box, const Post &post)
     tDynPt &dyn = car->DynGCg;
     double c = cos(dyn.pos.az);
     double s = sin(dyn.pos.az);
-    double dx = post.x - dyn.pos.x;
-    double dy = post.y - dyn.pos.y;
+    double dx = post.x - (dyn.pos.x + dyn.vel.x * SimDeltaTime);
+    double dy = post.y - (dyn.pos.y + dyn.vel.y * SimDeltaTime);
     double along = dx * c + dy * s;
     double across = -dx * s + dy * c;
     double nearAlong = std::min(box.front, std::max(box.rear, along));

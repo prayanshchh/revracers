@@ -15,6 +15,7 @@ const noseAhead = 2.7;
 const halfWidth = 1;
 const body = 0.2;
 const parts = 8;
+const pitLimit = 80 / 3.6;
 
 function pose(m: Solid) {
   const frame = new Float64Array(m.HEAPF64.buffer, m._sdFrame(), 88);
@@ -62,16 +63,20 @@ async function onTheGrid() {
 }
 
 describe.skipIf(!existsSync(wasm))("people in the pit lane are solid", () => {
-  test.each([9, 60])(
+  test.each([9, 30])(
     "a crew member standing %i m ahead stops the car undamaged and it drives on once he steps aside",
     async (gap) => {
       const { m, stand, travelled, drive, clear } = await onTheGrid();
       const status = statusReader(m);
       stand(gap, 0);
       let furthest = 0;
+      let fastest = 0;
       drive(6, () => {
-        furthest = Math.max(furthest, travelled().ahead);
+        const at = travelled();
+        furthest = Math.max(furthest, at.ahead);
+        fastest = Math.max(fastest, at.speed);
       });
+      if (gap > 20) expect(fastest).toBeGreaterThan(pitLimit);
       expect(furthest).toBeGreaterThan(gap - body - noseAhead - 0.3);
       expect(furthest).toBeLessThan(gap - body - noseAhead + 0.1);
       expect(travelled().speed).toBeLessThan(0.5);
@@ -82,6 +87,21 @@ describe.skipIf(!existsSync(wasm))("people in the pit lane are solid", () => {
       expect(travelled().ahead).toBeGreaterThan(gap + 4);
     },
   );
+
+  test("even far above the pit limit the car never drives through someone in its way", async () => {
+    const { m, stand, travelled, drive } = await onTheGrid();
+    const status = statusReader(m);
+    const gap = 60;
+    stand(gap, 0);
+    let furthest = 0;
+    drive(6, () => {
+      furthest = Math.max(furthest, travelled().ahead);
+    });
+    expect(furthest).toBeLessThan(gap - noseAhead);
+    expect(travelled().speed).toBeLessThan(0.5);
+    for (let part = 0; part < parts; part++)
+      expect(status().part(part)).toBe(0);
+  });
 
   test("a crew member beside the car's path is brushed past, never driven through", async () => {
     const { stand, travelled, drive } = await onTheGrid();

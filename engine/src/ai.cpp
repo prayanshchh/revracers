@@ -208,6 +208,7 @@ struct Driver
     bool driveThrough = false;
     bool noService = false;
     bool tightEntry = false;
+    double turnLead = 0;
     bool tightExit = false;
     bool deferredPit = false;
     int deferredCompound = 0;
@@ -1213,8 +1214,11 @@ bool laneClearBehind(int index, tCarElt *car, tSituation *s)
             continue;
         tCarElt *other = s->cars[i];
         double gap = delta(other->_distFromStartLine, car->_distFromStartLine);
-        double fast = sampled(model.pitLateral, other->_distFromStartLine);
-        bool inLane = fabs(other->_trkPos.toMiddle - fast) < 2.5;
+        double at = other->_distFromStartLine;
+        double fast = sampled(model.pitLateral, at);
+        double boxRow = model.pit.boxLateral - pitShift(at) - boxRowHalf;
+        double lateral = other->_trkPos.toMiddle;
+        bool inLane = lateral > fast - 2.5 && lateral < std::max(fast + 2.5, boxRow);
         if (inLane && gap > -4.0 && gap < pitReleaseClear)
             return false;
     }
@@ -1362,6 +1366,7 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
         if (toBox < (tight ? stopRun : turnRun))
         {
             driver.tightEntry = tight;
+            driver.turnLead = tight ? tightRun : std::min(turnRun, std::max(tightRun, delta(p.garageStart, box)));
             driver.pit = PIT_BOXING;
         }
         steerAndGo(index, driver, car, s, lanePath, limit, toBox < stopRun + 8.0 ? sqrt(2.0 * stopDecel * std::max(0.0, toBox)) : limit, dt);
@@ -1371,7 +1376,7 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
     {
         const auto path = [&](double at) {
             double remaining = delta(at, box);
-            double lead = driver.tightEntry ? tightRun : turnRun;
+            double lead = driver.turnLead;
             double straight = driver.tightEntry ? tightStraight : boxStraight;
             double blend = remaining < 0 ? 1.0 : ease(1.0 - (remaining - straight) / (lead - straight));
             double laneAt = sampled(model.pitLateral, at);
