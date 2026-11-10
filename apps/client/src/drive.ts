@@ -39,6 +39,7 @@ import {
   rememberDriver,
 } from "./game/api.ts";
 import { playBuildUp, type Weather } from "./game/buildup.ts";
+import { type BuildUpVenue, buildUpVenue } from "./game/buildup-venues.ts";
 import type { GridSpot } from "./game/buildup-shots.ts";
 import { FrontEnd } from "./game/front-end.ts";
 import { Hud, type HudOptions, lapTime, signed } from "./game/hud.ts";
@@ -137,6 +138,22 @@ import { warmGame } from "./game/warm-cache.ts";
 import { loadShow } from "./game/opening.ts";
 import { showActions } from "./game/weekend-ui.ts";
 
+const seasonByMonth = [
+  "winter",
+  "winter",
+  "spring",
+  "spring",
+  "spring",
+  "summer",
+  "summer",
+  "summer",
+  "autumn",
+  "autumn",
+  "autumn",
+  "winter",
+];
+const nightEnds = 6.5;
+const nightStarts = 19;
 const canvas = document.querySelector<HTMLCanvasElement>(
   "[data-testid=drive-canvas]",
 );
@@ -715,6 +732,7 @@ function bestLapWatcher(
 }
 
 interface BuildUpContext {
+  circuit: Circuit;
   renderer: THREE.WebGPURenderer;
   scene: Scene;
   draw: () => void;
@@ -765,7 +783,8 @@ function gridLineup(
 async function runBuildUp(context: BuildUpContext): Promise<void> {
   const { renderer, scene, draw, engine, settings, seat, seek, kind, slot } =
     context;
-  const { field, music } = context;
+  const { field, music, circuit } = context;
+  const venue = buildUpVenue(circuit.id);
   setStatus("Preparing the grid…");
   statusBar.followDownloads(0, 0.95);
   const opening = engine.update(performance.now() / 1000);
@@ -777,6 +796,8 @@ async function runBuildUp(context: BuildUpContext): Promise<void> {
   scene.atmosphere.detail = true;
   await playBuildUp(
     {
+      venue,
+      mapUrl: circuit.map,
       renderer,
       world: scene,
       drawWorld: draw,
@@ -793,7 +814,7 @@ async function runBuildUp(context: BuildUpContext): Promise<void> {
       playerDistance: opening[frameIndex.distFromStart] ?? 0,
       playerLateral: opening[frameIndex.toMiddle] ?? 0,
       playerSlot: slot,
-      weather: weatherFor(settings, engine.trackLocal().rain),
+      weather: weatherFor(settings, engine.trackLocal(), venue),
       seek: Number(seek ?? 0) || 0,
     },
     document.body,
@@ -834,20 +855,31 @@ function raceLog(
   });
 }
 
-function weatherFor(settings: Settings, rain: number): Weather {
-  const seasonal: Record<string, number> = {
-    spring: 24,
-    summer: 33,
-    autumn: 26,
-    winter: 15,
-  };
+function seasonOf(choice: string, raceSeason: string): string {
+  if (choice === "from track") return raceSeason;
+  if (choice !== "now") return choice;
+  const month = new Date().getMonth();
+  return seasonByMonth[month] ?? raceSeason;
+}
+
+function weatherFor(
+  settings: Settings,
+  local: { rain: number; timeOfDay: number },
+  { temperatures, season: raceSeason }: BuildUpVenue,
+): Weather {
+  const { rain } = local;
+  const hour = local.timeOfDay / 3600;
+  const night = hour < nightEnds || hour > nightStarts;
   const wet = rain > 0;
   const overcast = ["many clouds", "full cover"].includes(settings.clouds);
+  const clear = night ? "moon" : "sun";
   return {
     temperature:
-      (seasonal[settings.season] ?? 27) - rain * 3 - (overcast ? 2 : 0),
+      (temperatures[seasonOf(settings.season, raceSeason)] ?? 27) -
+      rain * 3 -
+      (overcast ? 2 : 0),
     label: `${weatherOf(settings).label} (${wet ? "Wet" : "Dry"})`,
-    icon: wet ? "rain" : overcast ? "cloud" : "sun",
+    icon: wet ? "rain" : overcast ? "cloud" : clear,
   };
 }
 
@@ -1205,6 +1237,7 @@ async function main(): Promise<void> {
   const layout = await pitLayout(engine, field, circuit);
   const pit = new PitStop(layout, settings.pitExperience === "broadcast");
   scene.placePit(layout, (d, l) => engine.trackPoint(d, l));
+  await scene.populatePaddock(layout.boxDistance, renderer.getMaxAnisotropy());
   scene.setWeather(engine.weather());
   scene.update(engine.update(performance.now() / 1000));
   setStatus("Preparing circuit…");
@@ -1491,6 +1524,7 @@ async function main(): Promise<void> {
     buildingUp = true;
     sound.mute(true);
     await runBuildUp({
+      circuit,
       renderer,
       scene,
       draw,

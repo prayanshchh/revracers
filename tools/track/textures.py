@@ -310,11 +310,9 @@ def crew_kit(team):
     }
 
 
-def crew_suit(kit=CREW_KIT):
+def atlas_pen(draw):
     width, height = CREW_ATLAS
     half = width // 2
-    image = Image.new("RGB", CREW_ATLAS, kit["suit"])
-    draw = ImageDraw.Draw(image)
 
     def to(side, x, z):
         return (side * half + half / 2 + x / CREW_WIDTH * half, height - z / CREW_HEIGHT * height)
@@ -323,11 +321,20 @@ def crew_suit(kit=CREW_KIT):
         (ax, ay), (bx, by) = to(side, x0, z1), to(side, x1, z0)
         draw.rectangle([min(ax, bx), ay, max(ax, bx), by], fill=colour)
 
-    def label(side, x, z, text, size, colour):
-        face = font(size, 800)
+    def label(side, x, z, text, size, colour, weight=800):
+        face = font(size, weight)
         cx, cy = to(side, x, z)
         box = draw.textbbox((0, 0), text, font=face)
         draw.text((cx - (box[2] + box[0]) / 2, cy - (box[3] + box[1]) / 2), text, font=face, fill=colour)
+
+    return to, band, label
+
+
+def crew_suit(kit=CREW_KIT):
+    width, height = CREW_ATLAS
+    image = Image.new("RGB", CREW_ATLAS, kit["suit"])
+    draw = ImageDraw.Draw(image)
+    to, band, label = atlas_pen(draw)
 
     for side in (0, 1):
         band(side, -1.0, 1.0, 0.0, 0.14, kit["black"])

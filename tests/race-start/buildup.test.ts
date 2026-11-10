@@ -4,10 +4,10 @@ import { describe, expect, test } from "vitest";
 import { ordinal } from "../../apps/client/src/game/buildup-ordinal.ts";
 import {
   poseAt,
-  shots,
   type TrackPoint,
   walkShot,
 } from "../../apps/client/src/game/buildup-shots.ts";
+import { buildUpVenue } from "../../apps/client/src/game/buildup-venues.ts";
 import {
   buildUpStages,
   gridPairSeconds,
@@ -63,7 +63,7 @@ describe("build-up timeline", () => {
       "map-sectors",
       "map-zones",
       "map-turns",
-      "hill",
+      "feature",
       "flag",
       "grid",
       "walk",
@@ -127,6 +127,7 @@ describe("build-up timeline", () => {
 });
 
 describe("camera shots", () => {
+  const shots = buildUpVenue("hill-country");
   const flatTrack: TrackPoint = (distance, lateral) => [distance, lateral, 5];
 
   test("poses stay put at the ends and clamp out-of-range progress", () => {
@@ -146,8 +147,8 @@ describe("camera shots", () => {
   });
 
   test("height is above the track, not above sea level", () => {
-    const pose = poseAt(shots.hill, 0, flatTrack);
-    expect(pose.eye[2]).toBeCloseTo(5 + shots.hill.eyeFrom.height, 5);
+    const pose = poseAt(shots.feature, 0, flatTrack);
+    expect(pose.eye[2]).toBeCloseTo(5 + shots.feature.eyeFrom.height, 5);
   });
 
   test.each([

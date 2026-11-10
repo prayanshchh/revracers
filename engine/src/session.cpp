@@ -607,7 +607,7 @@ void followRun(tSituation *s, int i)
     bool crossed = car->_laps != t.lastLaps;
     t.lastLaps = car->_laps;
     t.laps = car->_laps;
-    if (crossed && t.run == RUN_OUT)
+    if (crossed && t.run == RUN_OUT && !sdAiInPitLaneAt(car->_distFromStartLine, car->_trkPos.toMiddle))
     {
         t.run = RUN_FLYING;
         t.status = STATUS_PUSH_LAP;

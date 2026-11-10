@@ -5,6 +5,7 @@ export { carFile, liteCarFiles } from "./car-files.ts";
 interface TeamDriver {
   first: string;
   last: string;
+  code: string;
   nationality: string;
   number: number;
 }
@@ -41,8 +42,10 @@ export function teamOf(id: string): Team {
 export interface GridEntry {
   position: number;
   team: Team;
+  seat: number;
   first: string;
   last: string;
+  code: string;
   number: number;
   nationality: string;
   player: boolean;
@@ -57,6 +60,20 @@ export interface PlayerSeat {
 }
 
 const carsPerTeam = 2;
+const playerSeat = 1;
+
+function playerEntry(player: PlayerSeat): Omit<GridEntry, "position"> {
+  return {
+    first: player.first,
+    last: player.last,
+    code: player.last.slice(0, 3).toUpperCase(),
+    number: player.number,
+    nationality: player.nationality,
+    team: teamOf(player.team),
+    seat: playerSeat,
+    player: true,
+  };
+}
 
 export function gridTeamOrder(player: string): string[] {
   return [
@@ -75,16 +92,9 @@ export function startingGrid(player: PlayerSeat, slot = 0): GridEntry[] {
       seats.set(id, seat + 1);
       const driver = team.drivers[seat];
       if (!driver) throw new Error(`team ${id} is short of drivers`);
-      return { ...driver, team, player: false };
+      return { ...driver, team, seat, player: false };
     });
-  others.splice(slot, 0, {
-    first: player.first,
-    last: player.last,
-    number: player.number,
-    nationality: player.nationality,
-    team: teamOf(player.team),
-    player: true,
-  });
+  others.splice(slot, 0, playerEntry(player));
   return others.map((entry, index) => ({ ...entry, position: index + 1 }));
 }
 
@@ -98,11 +108,16 @@ export function seatDriver(
   player: PlayerSeat,
   entrant: FieldSeat,
 ): Omit<GridEntry, "position"> {
+  if (entrant.player)
+    return {
+      ...playerEntry(player),
+      team: teamOf(entrant.car),
+      seat: entrant.seat,
+    };
   const team = teamOf(entrant.car);
-  if (entrant.player) return { ...player, team, player: true };
   const driver = team.drivers[entrant.seat];
   if (!driver) throw new Error(`team ${team.id} is short of drivers`);
-  return { ...driver, team, player: false };
+  return { ...driver, team, seat: entrant.seat, player: false };
 }
 
 export function gridOrder(slots: number[]): number[] {

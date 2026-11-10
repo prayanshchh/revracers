@@ -21,8 +21,18 @@ const gravelRollingResistance = 0.2;
 const gravelRoughness = 0.012;
 const gravelWavelength = 0.7;
 const gravelSpansPerEntry = 200;
-const timeOfDay = 14.8;
-const sunAscension = 73.2;
+const local = {
+  station: "KAUS",
+  timeOfDay: 14.8,
+  sunAscension: 73.2,
+  latitude: 30.1328,
+  longitude: -97.6411,
+  altitude: 170,
+  climat: 10,
+  precipitation: 860,
+  ...track.local,
+};
+const sideSurface = track.sideSurface ?? "track-grass";
 const pitWallThin = 0.4;
 const pitDeckRamp = 20;
 const pitWallHeight = 1;
@@ -266,6 +276,26 @@ for (let i = 0; i < n; i++) {
   }
 }
 
+const maxRadius = track.maxRadius ?? Infinity;
+let carried = 0;
+for (const segment of segments) {
+  const turn =
+    (segment.kind === "lft" ? 1 : segment.kind === "rgt" ? -1 : 0) *
+      segment.arc +
+    carried;
+  if (Math.abs(turn) * maxRadius < segment.length) {
+    Object.assign(segment, { kind: "str", arc: 0, radius: Infinity });
+    carried = turn;
+  } else if (Number.isFinite(maxRadius)) {
+    Object.assign(segment, {
+      kind: turn > 0 ? "lft" : "rgt",
+      arc: Math.abs(turn),
+      radius: segment.length / Math.abs(turn),
+    });
+    carried = 0;
+  }
+}
+
 const minRadius = Math.min(
   ...segments.filter((s) => s.kind !== "str").map((s) => s.radius),
 );
@@ -404,7 +434,7 @@ function side(name, s, isLeft) {
   const border = borderOf(edge);
   const sideWidth = (wall) =>
     Math.max(wall - edge.reach - half - border.width, minSideWidth);
-  const surface = edge.pitZone ? "asphalt-lines" : "track-grass";
+  const surface = edge.pitZone ? "asphalt-lines" : sideSurface;
   return [
     `<section name="${name} Border">${border.xml}</section>`,
     `<section name="${name} Side">${num("start width", sideWidth(edge.wallStart), "m")}${num("end width", sideWidth(edge.wallEnd), "m")}${str("surface", surface)}</section>`,
@@ -465,14 +495,14 @@ ${num("version", 4)}
 ${str("author", `generated from content/tracks/${track.id}/track.json`)}
 </section>${startingGrid()}
 <section name="Local Info">
-${str("station", "KAUS")}
-${num("time of day", timeOfDay, "hour")}
-${num("sun ascension", sunAscension, "deg")}
-${num("latitude", 30.1328)}
-${num("longitude", -97.6411)}
-${num("altitude", 170, "m")}
-${num("climat", 10)}
-${num("precipitation", 860)}
+${str("station", local.station)}
+${num("time of day", local.timeOfDay, "hour")}
+${num("sun ascension", local.sunAscension, "deg")}
+${num("latitude", local.latitude)}
+${num("longitude", local.longitude)}
+${num("altitude", local.altitude, "m")}
+${num("climat", local.climat)}
+${num("precipitation", local.precipitation)}
 </section>
 <section name="Graphic">
 ${str("3d description", "road.glb")}

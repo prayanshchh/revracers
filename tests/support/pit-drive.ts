@@ -11,18 +11,23 @@ import {
 import { type RaceSystems, statusReader } from "./race-systems.ts";
 import { repoRoot } from "./repo.ts";
 
-export const layout = (
-  JSON.parse(
-    readFileSync(
-      path.join(repoRoot, "content/tracks/hill-country/sd-frame.json"),
-      "utf8",
-    ),
-  ) as { pit: PitLayout }
-).pit;
+export function layoutOf(track: string): PitLayout {
+  return (
+    JSON.parse(
+      readFileSync(
+        path.join(repoRoot, `content/tracks/${track}/sd-frame.json`),
+        "utf8",
+      ),
+    ) as { pit: PitLayout }
+  ).pit;
+}
+
+export const layout = layoutOf("hill-country");
 
 const noPenalty: PitPenalty = { kind: "none", seconds: 0 };
 
 export interface PitOptions {
+  track?: string;
   replaceWing?: boolean;
   penalty?: () => PitPenalty;
   settle?: number;
@@ -44,15 +49,20 @@ export interface Lap {
   floorAfter: number;
 }
 
-const ahead = (from: number, to: number) =>
-  (((to - from) % layout.length) + layout.length) % layout.length;
+const aheadOn = (pit: PitLayout, from: number, to: number) =>
+  (((to - from) % pit.length) + pit.length) % pit.length;
 
-function approach(armed: boolean, distance: number, look: number): PitDrive {
-  const fromEntry = ahead(layout.entry - 30, distance + look);
+function approach(
+  pit: PitLayout,
+  armed: boolean,
+  distance: number,
+  look: number,
+): PitDrive {
+  const fromEntry = aheadOn(pit, pit.entry - 30, distance + look);
   const entering =
-    armed && fromEntry < ahead(layout.entry - 30, layout.wallEnd);
+    armed && fromEntry < aheadOn(pit, pit.entry - 30, pit.wallEnd);
   return {
-    lateral: entering ? Math.min(layout.fastLane, fromEntry * 0.14) : 0,
+    lateral: entering ? Math.min(pit.fastLane, fromEntry * 0.14) : 0,
     lookahead: look,
     speed: 22,
   };
@@ -77,6 +87,7 @@ function sample(m: RaceSystems) {
 }
 
 function record(
+  pit: PitLayout,
   lap: Lap,
   control: PitControl,
   car: ReturnType<typeof sample>,
@@ -84,7 +95,7 @@ function record(
   fuel: number,
 ): void {
   if (control.phase === "service" && !lap.phases.has("service")) {
-    lap.parkedAlong = ahead(car.distance, layout.boxDistance);
+    lap.parkedAlong = aheadOn(pit, car.distance, pit.boxDistance);
     lap.parkedLateral = lateral;
     lap.fuelBefore = fuel;
   }
@@ -101,6 +112,7 @@ function service(m: RaceSystems, lap: Lap, control: PitControl): void {
 }
 
 interface StopRun {
+  layout: PitLayout;
   m: RaceSystems;
   pit: PitStop;
   lap: Lap;
@@ -111,10 +123,10 @@ interface StopRun {
 }
 
 function stepStop(run: StopRun): void {
-  const { m, pit, lap } = run;
+  const { m, pit, lap, layout: plan } = run;
   const car = sample(m);
   run.armed ||= car.distance > 1000 && car.distance < 5000;
-  const toTurn = ahead(car.distance, layout.boxDistance - 34);
+  const toTurn = aheadOn(plan, car.distance, plan.boxDistance - 34);
   const control = pit.update(
     car,
     car.time,
@@ -124,7 +136,7 @@ function stepStop(run: StopRun): void {
   m._sdInputPitHold(control.hold ? 1 : 0);
   const target =
     control.drive ??
-    approach(run.armed, car.distance, Math.max(8, car.speed * 0.45));
+    approach(plan, run.armed, car.distance, Math.max(8, car.speed * 0.45));
   const reach = car.distance + target.lookahead;
   const command = steerCommand(
     car,
@@ -133,6 +145,7 @@ function stepStop(run: StopRun): void {
   );
   m._sdInputAnalog(1, command.steer, command.throttle, command.brake);
   record(
+    plan,
     lap,
     control,
     car,
@@ -165,6 +178,10 @@ function freshLap(startFuel: number): Lap {
   };
 }
 
+function planOf(options: PitOptions): PitLayout {
+  return layoutOf(options.track ?? "hill-country");
+}
+
 export function driveStop(m: RaceSystems, options: PitOptions = {}): Lap {
   const out = m._malloc(12);
   const hud = m._malloc(8 * 32);
@@ -176,7 +193,8 @@ export function driveStop(m: RaceSystems, options: PitOptions = {}): Lap {
     m._sdHudInfo(hud);
     return new Float64Array(m.HEAPF64.buffer, hud, 32)[0] ?? 0;
   };
-  const pit = new PitStop(layout, false);
+  const plan = planOf(options);
+  const pit = new PitStop(plan, false);
   pit.requestWing(options.replaceWing ?? false);
   m._sdInputSteerDirect(1);
   m._sdStep(options.settle ?? 1000);
@@ -184,6 +202,7 @@ export function driveStop(m: RaceSystems, options: PitOptions = {}): Lap {
   m._sdCarDamageSet(0, lap.wingBefore);
   m._sdCarDamageSet(4, 0.5);
   const run: StopRun = {
+    layout: plan,
     m,
     pit,
     lap,

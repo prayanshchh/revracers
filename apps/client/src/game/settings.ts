@@ -14,6 +14,13 @@ export const tracks = [
     category: "circuit",
     length: 5528,
   },
+  {
+    id: "neon-boulevard",
+    label: "Neon Boulevard Circuit",
+    detail: "Las Vegas · 6.21 km · Night",
+    category: "circuit",
+    length: 6210,
+  },
 ] as const;
 
 export const tutorialTrack = {

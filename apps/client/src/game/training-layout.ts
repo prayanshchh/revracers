@@ -83,7 +83,7 @@ const lampRows = 4;
 const lampSize = 0.24;
 const lampGap = 0.34;
 
-interface Station {
+export interface Station {
   s: number;
   x: number;
   y: number;
@@ -97,7 +97,7 @@ interface Station {
   rubber: number;
 }
 
-function wrap(value: number, length: number): number {
+export function wrap(value: number, length: number): number {
   return ((value % length) + length) % length;
 }
 
@@ -180,7 +180,7 @@ export function stations(
   return out;
 }
 
-function place(station: Station, lateral: number, lift = 0): number[] {
+export function place(station: Station, lateral: number, lift = 0): number[] {
   return [
     station.x + station.lx * lateral,
     station.y + lift,
@@ -188,7 +188,7 @@ function place(station: Station, lateral: number, lift = 0): number[] {
   ];
 }
 
-class Builder {
+export class Builder {
   readonly position: number[] = [];
   readonly normal: number[] = [];
   readonly uvs: number[][];
@@ -234,9 +234,9 @@ class Builder {
   }
 }
 
-const up = [0, 1, 0];
+export const up = [0, 1, 0];
 
-function closedRows(list: Station[], length: number): Station[] {
+export function closedRows(list: Station[], length: number): Station[] {
   const first = list[0];
   return first ? [...list, { ...first, s: length }] : list;
 }
@@ -245,7 +245,7 @@ function space(lateral: number, s: number, length: number): number[] {
   return [(lateral + spaceReach) / (2 * spaceReach), 1 - s / length];
 }
 
-function road(list: Station[], track: TrainingTrack): Part {
+export function road(list: Station[], track: TrainingTrack): Part {
   const builder = new Builder(3);
   const rows = closedRows(list, track.length);
   const border = track.runoff;
@@ -267,7 +267,7 @@ function road(list: Station[], track: TrainingTrack): Part {
   return builder.part("road", "track road asphalt");
 }
 
-function strip(
+export function strip(
   builder: Builder,
   rows: Station[],
   inner: (station: Station) => number,
@@ -285,7 +285,7 @@ function strip(
   builder.grid(rows.length, 2, first);
 }
 
-function edgeLines(list: Station[], track: TrainingTrack): Part {
+export function edgeLines(list: Station[], track: TrainingTrack): Part {
   const builder = new Builder(1);
   const rows = closedRows(list, track.length);
   for (const sign of [1, -1])
@@ -299,7 +299,7 @@ function edgeLines(list: Station[], track: TrainingTrack): Part {
   return builder.part("edge lines", "track road paint");
 }
 
-function stationAt(list: Station[], length: number, s: number): Station {
+export function stationAt(list: Station[], length: number, s: number): Station {
   const n = list.length;
   const f = (wrap(s, length) / length) * n;
   const i = Math.floor(f) % n;
@@ -318,7 +318,7 @@ function stationAt(list: Station[], length: number, s: number): Station {
   };
 }
 
-function rectangle(
+export function rectangle(
   builder: Builder,
   list: Station[],
   length: number,
@@ -334,7 +334,7 @@ function rectangle(
   builder.quad(first, first + 2, first + 3, first + 1);
 }
 
-function markings(list: Station[], track: TrainingTrack): Part {
+export function markings(list: Station[], track: TrainingTrack): Part {
   const builder = new Builder(1);
   const line = track.startLine;
   const span = stationAt(list, track.length, line).half - lineWidth;
@@ -383,7 +383,7 @@ function kerbRows(list: Station[], track: TrainingTrack, span: KerbSpan) {
   });
 }
 
-function kerbs(list: Station[], track: TrainingTrack): Part {
+export function kerbs(list: Station[], track: TrainingTrack): Part {
   const builder = new Builder(1);
   const last = kerbProfile[kerbProfile.length - 1]?.[0] ?? 1;
   for (const span of track.surfaces) {
@@ -536,11 +536,12 @@ function terrain(centre: number[]): Part {
   return builder.part("terrain", "track terrain");
 }
 
-function box(
+export function box(
   builder: Builder,
   centre: number[],
   half: number[],
   axes: number[][],
+  uvs: number[][] = [[0, 0]],
 ): void {
   const [ax = [1, 0, 0], ay = [0, 1, 0], az = [0, 0, 1]] = axes;
   const corner = (sx: number, sy: number, sz: number) =>
@@ -610,7 +611,7 @@ function box(
   for (const [normal, corners] of faces) {
     const first = builder.count;
     for (const [sx = 0, sy = 0, sz = 0] of corners)
-      builder.vertex(corner(sx, sy, sz), normal, [[0, 0]]);
+      builder.vertex(corner(sx, sy, sz), normal, uvs);
     builder.quad(first, first + 1, first + 2, first + 3);
   }
 }
@@ -622,7 +623,7 @@ function gantryFrame(list: Station[], track: TrainingTrack) {
   return { station, forward, left, axes: [left, up, forward] };
 }
 
-function gantry(list: Station[], track: TrainingTrack): Part {
+export function gantry(list: Station[], track: TrainingTrack): Part {
   const builder = new Builder(1);
   const { station, axes } = gantryFrame(list, track);
   const reach = station.half + track.runoff + gantryReach;
@@ -650,7 +651,7 @@ function gantry(list: Station[], track: TrainingTrack): Part {
   return builder.part("gantry steel", "track gantry steel");
 }
 
-function lamps(list: Station[], track: TrainingTrack): Part {
+export function lamps(list: Station[], track: TrainingTrack): Part {
   const builder = new Builder(1);
   const { station, forward, left } = gantryFrame(list, track);
   const back = forward.map((v) => -v);
