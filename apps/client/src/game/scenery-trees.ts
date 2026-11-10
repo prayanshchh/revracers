@@ -278,9 +278,7 @@ function shade(albedo: THREE.Texture, instances: Instances): THREE.Material {
   return material;
 }
 
-type Picture = CanvasImageSource & { width: number; height: number };
-
-function sheet(pictures: Picture[], anisotropy: number): THREE.Texture {
+function sheet(pictures: ImageBitmap[], anisotropy: number): THREE.Texture {
   const [first] = pictures;
   if (!first) throw new Error("no tree pictures");
   const canvas = new OffscreenCanvas(
@@ -298,6 +296,7 @@ function sheet(pictures: Picture[], anisotropy: number): THREE.Texture {
       first.height,
     );
   });
+  for (const picture of pictures) picture.close();
   const map = new THREE.CanvasTexture(canvas);
   map.flipY = false;
   map.premultiplyAlpha = true;
