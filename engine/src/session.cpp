@@ -61,6 +61,7 @@ const int timingLaps = 3;
 const int segments = 3;
 const int segmentKnockouts[segments] = {6, 6, 0};
 const double raceFuelPerLap = 1.6;
+const double raceFuelLapLength = 5478.0;
 const double qualifyingFuel = 7.0;
 const double runTimeout = 420.0;
 const double contactWindow = 0.8;
@@ -150,6 +151,10 @@ struct Timing
     double weatherPatience = 0;
     double weatherLook = 0;
     bool weatherStop = false;
+    bool pinned = false;
+    double pinX = 0;
+    double pinY = 0;
+    double pinYaw = 0;
 };
 
 struct PassEvent
@@ -542,6 +547,11 @@ void parkInGarage(tSituation *s, int i)
     sdCarTeleport(i, distance, lateral);
     sdAiResetAtBox(i);
     Timing &t = timing[i];
+    const tDynPt &pose = SimCarTable[i].DynGCg;
+    t.pinned = !humanPlayer(s, i);
+    t.pinX = pose.pos.x;
+    t.pinY = pose.pos.y;
+    t.pinYaw = pose.pos.az;
     t.lastLaps = s->cars[i]->_laps;
     if (t.eliminated)
     {
@@ -594,6 +604,7 @@ void launchRun(tSituation *s, int i)
         sdAiSetTask(i, AI_OUT_LAP);
     }
     t.lastLaps = car->_laps;
+    t.pinned = false;
     t.run = RUN_OUT;
     t.runStart = s->currentTime;
     t.status = STATUS_OUT_LAP;
@@ -607,7 +618,7 @@ void followRun(tSituation *s, int i)
     bool crossed = car->_laps != t.lastLaps;
     t.lastLaps = car->_laps;
     t.laps = car->_laps;
-    if (crossed && t.run == RUN_OUT)
+    if (crossed && t.run == RUN_OUT && !sdAiInPitLaneAt(car->_distFromStartLine, car->_trkPos.toMiddle))
     {
         t.run = RUN_FLYING;
         t.status = STATUS_PUSH_LAP;
@@ -756,7 +767,7 @@ void beginRace(tSituation *s)
     {
         if (playerDriven(s->cars[i]))
             continue;
-        sdCarSetFuel(i, std::min(100.0, totalLaps * raceFuelPerLap + 2.0));
+        sdCarSetFuel(i, std::min(100.0, totalLaps * raceFuelPerLap * std::max(1.0, ReInfo->track->length / raceFuelLapLength) + 2.0));
         const CarPlan &plan = plans[i];
         sdAiSetTask(i, AI_RACE);
         sdAiSetReaction(i, uniform(reactionLow, reactionHigh));
@@ -877,10 +888,27 @@ void sdSessionTick(tSituation *s)
     raceFinish(s);
 }
 
+void holdParked(tSituation *s)
+{
+    for (int i = 0; i < s->_ncars; i++)
+    {
+        const Timing &t = timing[i];
+        if (!t.pinned || (t.status != STATUS_GARAGE && t.status != STATUS_KNOCKED_OUT))
+            continue;
+        tCar *car = &SimCarTable[i];
+        car->DynGCg.pos.x = car->DynGC.pos.x = (tdble)t.pinX;
+        car->DynGCg.pos.y = car->DynGC.pos.y = (tdble)t.pinY;
+        car->DynGCg.pos.az = car->DynGC.pos.az = (tdble)t.pinYaw;
+        car->DynGCg.vel.x = car->DynGCg.vel.y = car->DynGCg.vel.az = 0;
+        car->DynGC.vel.x = car->DynGC.vel.y = car->DynGC.vel.az = 0;
+    }
+}
+
 void sdSessionAfterStep(tSituation *s)
 {
     if (kind == KIND_SOLO || kind == KIND_LAPPING)
         return;
+    holdParked(s);
     trackContacts(s);
 }
 

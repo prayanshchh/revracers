@@ -33,6 +33,7 @@ import {
 } from "three/tsl";
 import { expectDownloads, releaseOnceUploaded } from "./preload.ts";
 import { alphaTestedOrder } from "./road.ts";
+import type { NightLook } from "./circuits.ts";
 
 const skyFiles = import.meta.glob<string>(
   "../../../../content/tracks/hill-country/sky/*.hdr",
@@ -295,6 +296,10 @@ export class SkyBox {
   readonly tint = uniform(clearTint.clone());
   readonly haze = uniform(clearHaze.clone());
   private readonly rotation = new THREE.Matrix4();
+  private readonly nightZenith: THREE.Vector3;
+  private readonly nightHorizon: THREE.Vector3;
+  private readonly nightGlow: THREE.Vector3;
+  private readonly nightDome: number;
 
   readonly environment: THREE.Texture;
   private readonly envOvercast = uniform(0);
@@ -312,8 +317,15 @@ export class SkyBox {
     private readonly exposureScale: number,
     private readonly nightShare: number,
     private readonly grade: THREE.Vector3,
+    look: NightLook | null = null,
   ) {
     this.night = uniform(nightShare);
+    this.nightZenith = look ? new THREE.Vector3(...look.zenith) : nightZenith;
+    this.nightHorizon = look
+      ? new THREE.Vector3(...look.horizon)
+      : nightHorizon;
+    this.nightGlow = look ? new THREE.Vector3(...look.glow) : nightGlow;
+    this.nightDome = look ? look.dome : 1;
     const { width, height } = clearEnvironment.image as {
       width: number;
       height: number;
@@ -355,7 +367,11 @@ export class SkyBox {
     });
     const clip = modelViewProjection as unknown as THREE.Node<"vec4">;
     material.vertexNode = vec4(clip.xy, 0, clip.w);
-    material.colorNode = this.radiance(normalize(positionLocal));
+    const shown = this.radiance(normalize(positionLocal));
+    material.colorNode =
+      this.nightDome === 1
+        ? shown
+        : shown.mul(mix(float(1), float(this.nightDome), this.night));
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(domeRadius, 64, 32),
       material,
@@ -374,11 +390,11 @@ export class SkyBox {
   private nightSky(up: THREE.Node<"float">): THREE.Node<"vec3"> {
     const above = up.max(0);
     const gradient = mix(
-      vec3(nightHorizon.x, nightHorizon.y, nightHorizon.z),
-      vec3(nightZenith.x, nightZenith.y, nightZenith.z),
+      vec3(this.nightHorizon.x, this.nightHorizon.y, this.nightHorizon.z),
+      vec3(this.nightZenith.x, this.nightZenith.y, this.nightZenith.z),
       smoothstep(0, 0.6, above),
     );
-    const glow = vec3(nightGlow.x, nightGlow.y, nightGlow.z).mul(
+    const glow = vec3(this.nightGlow.x, this.nightGlow.y, this.nightGlow.z).mul(
       exp(above.div(nightGlowHeight).negate()),
     );
     return mix(
@@ -445,7 +461,7 @@ export class SkyBox {
   }
 
   private nightAmbient(upward: boolean): THREE.Color {
-    const sky = upward ? nightHorizon : nightGround;
+    const sky = upward ? this.nightHorizon : nightGround;
     const share = this.nightShare * Math.PI * (upward ? 1 : 0.5);
     return new THREE.Color(sky.x * share, sky.y * share, sky.z * share);
   }
@@ -618,6 +634,7 @@ export class SkyBox {
     afternoon: boolean,
     night: number,
     compact: CompactSky | null = null,
+    look: NightLook | null = null,
   ): Promise<SkyBox> {
     const { name, meta, sky, clearSky, environment } = await skyTextures(
       compact,
@@ -648,6 +665,7 @@ export class SkyBox {
       skyExposures[name] ?? 1,
       night,
       grade,
+      look,
     );
   }
 
@@ -681,7 +699,8 @@ export class SkyBox {
   }
 
   get nightHaze(): THREE.Color {
-    return new THREE.Color(nightHorizon.x, nightHorizon.y, nightHorizon.z);
+    const h = this.nightHorizon;
+    return new THREE.Color(h.x, h.y, h.z);
   }
 
   update(sun: THREE.Vector3, eyeX: number, eyeY: number, scene: THREE.Scene) {

@@ -26,6 +26,10 @@ export interface GridSlot {
   offset: number;
 }
 
+export interface GarageSlot extends GridSlot {
+  team: string;
+}
+
 type TrackPoint = (
   distance: number,
   lateral: number,
@@ -208,6 +212,7 @@ function tinted(
 export class GridCars {
   readonly root = new THREE.Group();
   private placed = false;
+  private garaged = false;
   playerSlot = 0;
   private readonly batches = new Batches();
 
@@ -221,13 +226,8 @@ export class GridCars {
     this.root.visible = false;
   }
 
-  static async load(
-    player: string,
-    slots: GridSlot[],
-    point: TrackPoint,
-    env: CarEnvironment,
-  ): Promise<GridCars> {
-    const parts = new Map(
+  private static async allParts(): Promise<Map<string, TeamPart[]>> {
+    return new Map(
       await Promise.all(
         teams.map(
           async (team) =>
@@ -235,12 +235,63 @@ export class GridCars {
         ),
       ),
     );
+  }
+
+  static async load(
+    player: string,
+    slots: GridSlot[],
+    point: TrackPoint,
+    env: CarEnvironment,
+  ): Promise<GridCars> {
     return new GridCars(
       gridTeamOrder(player).slice(1),
-      parts,
+      await GridCars.allParts(),
       slots,
       point,
       env,
+    );
+  }
+
+  static async garages(
+    slots: GarageSlot[],
+    point: TrackPoint,
+    env: CarEnvironment,
+  ): Promise<GridCars> {
+    const cars = new GridCars([], await GridCars.allParts(), [], point, env);
+    const contacts: THREE.BufferGeometry[] = [];
+    for (const slot of slots) {
+      const at = new THREE.Vector3(...point(slot.distance, slot.offset));
+      const out = new THREE.Vector3(
+        ...point(slot.distance, slot.offset - headingProbe),
+      );
+      cars.park(slot.team, at, out.sub(at).normalize(), contacts);
+    }
+    cars.build(contacts);
+    cars.placed = true;
+    cars.garaged = true;
+    cars.root.visible = true;
+    return cars;
+  }
+
+  private park(
+    team: string,
+    at: THREE.Vector3,
+    forward: THREE.Vector3,
+    contacts: THREE.BufferGeometry[],
+  ): void {
+    const left = new THREE.Vector3(0, 0, 1).cross(forward).normalize();
+    const up = forward.clone().cross(left);
+    const matrix = new THREE.Matrix4().makeBasis(forward, left, up);
+    matrix.setPosition(at);
+    this.addCar(team, matrix);
+    const contact = contactShadow(wheelRest);
+    contact.updateMatrix();
+    contacts.push(
+      placedCopy(
+        contact.geometry,
+        new THREE.Matrix4().multiplyMatrices(matrix, contact.matrix),
+        textured,
+      ),
     );
   }
 
@@ -285,10 +336,7 @@ export class GridCars {
       .normalize();
     const along = player.clone().sub(ownPoint).dot(ahead);
     const others = this.slots.filter((_, index) => index !== slot);
-    const contact = contactShadow(wheelRest);
-    contact.updateMatrix();
     const contacts: THREE.BufferGeometry[] = [];
-    const matrix = new THREE.Matrix4();
     this.teamsInOrder.forEach((team, index) => {
       const target = others[index];
       if (!target) return;
@@ -300,23 +348,14 @@ export class GridCars {
       )
         .sub(at)
         .normalize();
-      const left = new THREE.Vector3(0, 0, 1).cross(forward).normalize();
-      const up = forward.clone().cross(left);
-      matrix.makeBasis(forward, left, up).setPosition(at);
-      this.addCar(team, matrix);
-      contacts.push(
-        placedCopy(
-          contact.geometry,
-          new THREE.Matrix4().multiplyMatrices(matrix, contact.matrix),
-          textured,
-        ),
-      );
+      this.park(team, at, forward, contacts);
     });
     this.build(contacts);
     this.placed = true;
   }
 
   update(frame: Float64Array): void {
+    if (this.garaged) return;
     const pose = frameIndex.posMat;
     const player = new THREE.Vector3(
       frame[pose + 12] ?? 0,

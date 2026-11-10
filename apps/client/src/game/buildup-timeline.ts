@@ -5,7 +5,7 @@ export type StageId =
   | "map-sectors"
   | "map-zones"
   | "map-turns"
-  | "hill"
+  | "feature"
   | "flag"
   | "grid"
   | "walk"
@@ -28,6 +28,7 @@ export const gridPairSeconds = 3.2;
 const walkShotSeconds = 6.5;
 export const walkShots = 3;
 const wipeSeconds = 1;
+const defaultFeature = 6;
 
 const seconds = {
   black: 0.8,
@@ -36,13 +37,13 @@ const seconds = {
   mapSectors: 5.5,
   mapZones: 5,
   mapTurns: 6.5,
-  hill: 6,
   flag: 3.5,
 };
 
 export function buildUpStages(
   kind: "practice" | "race",
   gridPairs: number,
+  feature = defaultFeature,
 ): Stage[] {
   const plan: [StageId, number][] = [
     ["black", seconds.black],
@@ -53,7 +54,7 @@ export function buildUpStages(
     ["map-turns", seconds.mapTurns],
     ...(kind === "race"
       ? ([
-          ["hill", seconds.hill],
+          ["feature", feature],
           ["flag", seconds.flag],
           ...Array.from({ length: gridPairs }, (): [StageId, number] => [
             "grid",

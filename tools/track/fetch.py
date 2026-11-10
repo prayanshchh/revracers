@@ -66,17 +66,16 @@ def fetch_osm(out):
     )
 
 
-def fetch_dem(out):
-    x0, y0 = DEM_ORIGIN
-    width, height = DEM_SIZE
-    tile = 1000
+def elevation_tiles(origin, size, resolution, tile, epsg):
+    x0, y0 = origin
+    width, height = size
     dem = np.zeros((height, width), np.float32)
     for top in range(0, height, tile):
         for left in range(0, width, tile):
             w, h = min(tile, width - left), min(tile, height - top)
-            xmin, ymax = x0 + left, y0 - top
+            xmin, ymax = x0 + left * resolution, y0 - top * resolution
             url = (
-                f"{DEM_SERVICE}?bbox={xmin},{ymax - h},{xmin + w},{ymax}&bboxSR=32614&imageSR=32614"
+                f"{DEM_SERVICE}?bbox={xmin},{ymax - h * resolution},{xmin + w * resolution},{ymax}&bboxSR={epsg}&imageSR={epsg}"
                 f"&size={w},{h}&format=tiff&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image"
             )
             for attempt in range(6):
@@ -87,10 +86,18 @@ def fetch_dem(out):
             else:
                 raise RuntimeError(f"elevation service refused tile {left},{top}")
             dem[top : top + h, left : left + w] = tifffile.imread(io.BytesIO(body))
-    centimetres = np.round((dem - 100.0) * 100.0)
+    return dem
+
+
+def save_elevation(dem, floor, out):
+    centimetres = np.round((dem - floor) * 100.0)
     if centimetres.min() < 0 or centimetres.max() > 65535:
-        raise RuntimeError("elevation outside the 100 m to 755 m PNG range")
+        raise RuntimeError(f"elevation outside the {floor:.0f} m to {floor + 655.35:.0f} m PNG range")
     Image.fromarray(centimetres.astype(np.uint16)).save(out)
+
+
+def fetch_dem(out):
+    save_elevation(elevation_tiles(DEM_ORIGIN, DEM_SIZE, 1, 1000, 32614), 100.0, out)
 
 
 def aerial_tile(service, xmin, ymin, xmax, ymax, width, height, bands="0,1,2", mode="RGB"):

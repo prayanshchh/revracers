@@ -43,6 +43,16 @@ const trackFiles: Record<string, [string, string][]> = {
       "tracks/circuit/hill-country/ai.dat",
     ],
   ],
+  "neon-boulevard": [
+    [
+      "content/tracks/neon-boulevard/neon-boulevard.xml",
+      "tracks/circuit/neon-boulevard/neon-boulevard.xml",
+    ],
+    [
+      "apps/client/wasm/neon-boulevard-ai.txt",
+      "tracks/circuit/neon-boulevard/ai.dat",
+    ],
+  ],
 };
 
 interface Files {

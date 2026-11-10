@@ -21,30 +21,6 @@ function at(distance: number, lateral: number, height: number): ShotPoint {
   return { distance, lateral, height };
 }
 
-export const shots = {
-  title: {
-    eyeFrom: at(1716, 66, 56),
-    eyeTo: at(1672, 74, 66),
-    lookFrom: at(1262, 0, 6),
-    lookTo: at(1292, 0, 10),
-    fov: 44,
-  },
-  weather: {
-    eyeFrom: at(1420, 60, 74),
-    eyeTo: at(1450, 64, 82),
-    lookFrom: at(4080, 0, 8),
-    lookTo: at(4110, 0, 10),
-    fov: 40,
-  },
-  hill: {
-    eyeFrom: at(322, -3, 0.8),
-    eyeTo: at(352, -3, 1),
-    lookFrom: at(640, 0, 30),
-    lookTo: at(640, 0, 34),
-    fov: 32,
-  },
-} satisfies Record<string, Shot>;
-
 const gridRowGap = 8;
 
 export interface GridSpot {

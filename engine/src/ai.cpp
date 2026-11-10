@@ -1454,9 +1454,9 @@ bool sdAiLineLateral(double distance, double *lateral)
 
 bool sdAiLoadTrack(tTrack *track)
 {
-    std::string path = std::string(GfDataDir()) + "tracks/circuit/hill-country/ai.dat";
+    std::string path = std::string(GfDataDir()) + "tracks/circuit/" + track->internalname + "/ai.dat";
     auto data = readData(path.c_str());
-    if (data.empty() || strcmp(track->internalname, "hill-country") != 0)
+    if (data.empty())
     {
         model.ready = false;
         return false;

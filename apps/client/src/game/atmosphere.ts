@@ -20,6 +20,7 @@ import {
   normalize,
   pass,
   pow,
+  select,
   smoothstep,
   step,
   uniform,
@@ -52,6 +53,7 @@ const dropSoftness = 0.55;
 const dropTrail = 3.2;
 const dropTrailShare = 0.75;
 const hazeMax = 0.92;
+const skyGraze = 0.012;
 const mistFrom = 2;
 const mistTo = 40;
 const mirrorFloor = 0.004;
@@ -106,6 +108,8 @@ export interface AtmosphereState {
   glowMirror: number;
   sheen: number;
   shock: number;
+  layer: number;
+  layerBase: number;
 }
 
 type FloatNode = THREE.Node<"float">;
@@ -209,6 +213,9 @@ export class Atmosphere {
   private glow: ReturnType<typeof bloom> | null = null;
   private readonly mist = uniform(0);
   private readonly upView = uniform(new THREE.Vector3(0, 1, 0));
+  private readonly layered = uniform(0);
+  private readonly layerHeight = uniform(1);
+  private readonly layerBase = uniform(0);
   private readonly scenePass: ReturnType<typeof pass>;
   private detail = false;
 
@@ -235,11 +242,34 @@ export class Atmosphere {
     const toSun = max(dot(normalize(view), this.sunView), 0);
     const ground = step(1e-7, depth);
     const mist = smoothstep(mistFrom, mistTo, view.length()).mul(this.mist);
+    const world = uniform(camera.matrixWorld);
+    const depthOf = (height: THREE.Node<"float">) =>
+      height.sub(this.layerBase).div(this.layerHeight).max(0);
+    const eye = depthOf(world.mul(vec4(0, 0, 0, 1)).z);
+    const seen = depthOf(world.mul(vec4(view, 1)).z);
+    const gap = seen.sub(eye);
+    const thin = select(
+      gap.abs().lessThan(1e-3),
+      exp(eye.negate()),
+      exp(eye.negate()).sub(exp(seen.negate())).div(gap),
+    );
+    const density = select(this.layered.greaterThan(0), thin, float(1));
+    const climb = world.mul(vec4(normalize(view), 0)).z.max(skyGraze);
+    const beyond = this.layerHeight
+      .mul(exp(eye.negate()))
+      .div(climb)
+      .div(this.hazeDistance);
+    const skyHaze = select(
+      this.layered.greaterThan(0),
+      float(1).sub(exp(beyond.negate())).mul(hazeMax).mul(ground.oneMinus()),
+      float(0),
+    );
     const haze = float(1)
-      .sub(exp(view.length().div(this.hazeDistance).negate()))
+      .sub(exp(view.length().mul(density).div(this.hazeDistance).negate()))
       .max(mist)
       .mul(hazeMax)
-      .mul(ground);
+      .mul(ground)
+      .add(skyHaze);
     const tint = mix(
       this.hazeColor,
       this.sunColor,
@@ -462,6 +492,9 @@ export class Atmosphere {
     this.sunColor.value.copy(state.sun);
     this.renderer.toneMappingExposure = state.exposure;
     this.hazeDistance.value = state.visibility;
+    this.layered.value = state.layer > 0 ? 1 : 0;
+    this.layerHeight.value = Math.max(1, state.layer);
+    this.layerBase.value = state.layerBase;
     this.lensWater.value = state.lensWater;
     if (this.glow) this.glow.strength.value = bloomStrength * state.glare;
     this.reflections.value = state.reflections;

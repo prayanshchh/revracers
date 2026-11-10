@@ -1,9 +1,18 @@
 import * as THREE from "three/webgpu";
 import crewUrl from "../../../../content/tracks/hill-country/crew.glb?url";
 import roadUrl from "../../../../content/tracks/hill-country/road.glb?url";
-import { type Circuit, circuitFiles } from "./circuits.ts";
+import { type Circuit, circuitFiles, type NightLook } from "./circuits.ts";
 import { carFile, liteCarFiles, teams } from "./teams.ts";
 import { buildTrainingGround } from "./training-ground.ts";
+import {
+  buildStreetCircuit,
+  crewOf,
+  garageCarsOf,
+  polesOf,
+  streetFiles,
+} from "./street-ground.ts";
+import { type CityData, cityGlow } from "./street-city.ts";
+import type { StreetPole, StreetTrack } from "./street-layout.ts";
 import { trainingTextures } from "./training-files.ts";
 import type { LinePath, TrainingTrack } from "./training-layout.ts";
 import { FieldCars } from "./field-cars.ts";
@@ -39,6 +48,7 @@ import type { AtmosphereState } from "./atmosphere.ts";
 import type { CameraPose } from "./buildup-shots.ts";
 import type { RacingLineData, RacingLineMode } from "./racing-line.ts";
 import { RacingLineView } from "./racing-line-view.ts";
+import { paddockCrew } from "./paddock-crew.ts";
 import { PitCrew } from "./pit-crew.ts";
 import {
   expectDownloads,
@@ -63,7 +73,7 @@ import {
   type TrackPoint,
 } from "./floodlights.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
-import { Crowd, crowdData } from "./crowd.ts";
+import { Crowd, crowdAtlas, crowdData, standing } from "./crowd.ts";
 import { treeDownloads, Trees } from "./scenery-trees.ts";
 import { setCloudShadows } from "./scenery-look.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
@@ -84,6 +94,7 @@ const chaseFollow = 0.5;
 const cameraListSlot = 21;
 const carCameraList = -1;
 const crewReach = 12;
+const playerBayClear = 7;
 const flipX = new THREE.Matrix4().makeScale(-1, 1, 1);
 const sunGlow = 2.4;
 const kelvinOffset = 273.15;
@@ -175,6 +186,32 @@ function buildFloodlights(
   return lights;
 }
 
+function buildStreetLights(
+  data: TrackData,
+  poles: StreetPole[],
+  frame: TrackFrame,
+  start: [number, number, number],
+): Floodlights {
+  const holder = new THREE.Group();
+  const placed = placeOnTrack(holder, frame, start);
+  const toWorld = placed.matrix;
+  const vector = (p: number[]) => new THREE.Vector3(p[0], p[1], p[2]);
+  const lamps = poles.map((pole) => {
+    const head = vector(pole.head);
+    const aim = vector(pole.aim);
+    return {
+      base: vector(pole.base),
+      head,
+      aim,
+      power: head.distanceToSquared(aim),
+    };
+  });
+  const track = data.centerline.map((p) =>
+    new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(toWorld),
+  );
+  return new Floodlights([], floodMap(track, inWorld(lamps, toWorld)));
+}
+
 const dryWeather: WeatherInfo = {
   rain: 0,
   lineWater: 0,
@@ -199,20 +236,30 @@ interface SessionLighting {
   cloudLight: number;
 }
 
-function sessionLighting(skyBox: SkyBox, night: boolean): SessionLighting {
-  if (night)
-    return {
-      colour: floodColour.clone(),
-      intensity: floodIntensity,
-      elevation: floodElevation,
-      haze: skyBox.nightHaze,
-      sunGlow: 0,
-      glare: nightGlare,
-      glowMirror: nightGlowMirror,
-      sheen: 0,
-      air: floodColour.clone().multiplyScalar(nightAir),
-      cloudLight: 0,
-    };
+function nightLighting(
+  skyBox: SkyBox,
+  look: NightLook | null,
+): SessionLighting {
+  return {
+    colour: look ? new THREE.Color(...look.tint) : floodColour.clone(),
+    intensity: look ? look.flood : floodIntensity,
+    elevation: floodElevation,
+    haze: look ? new THREE.Color(...look.haze) : skyBox.nightHaze,
+    sunGlow: 0,
+    glare: nightGlare,
+    glowMirror: nightGlowMirror,
+    sheen: 0,
+    air: floodColour.clone().multiplyScalar(nightAir),
+    cloudLight: 0,
+  };
+}
+
+function sessionLighting(
+  skyBox: SkyBox,
+  night: boolean,
+  look: NightLook | null,
+): SessionLighting {
+  if (night) return nightLighting(skyBox, look);
   const [sr = 1, sg = 1, sb = 1] = skyBox.meta.sunColor;
   const [hr = 1, hg = 1, hb = 1] = skyBox.meta.horizon;
   return {
@@ -251,10 +298,12 @@ function venueDownloads(
 ): string[] {
   const fleet =
     rivals.length > 0 ? [team, ...rivals] : teams.map((each) => each.id);
+  const ground =
+    circuit.ground === "street"
+      ? [...trainingTextures, ...streetFiles, ...crowdAtlas, crewUrl]
+      : [roadUrl, crewUrl, crowdData];
   return [
-    roadUrl,
-    crewUrl,
-    crowdData,
+    ...ground,
     ...(circuit.trees ? [circuit.trees, ...treeDownloads()] : []),
     ...circuitFiles(circuit),
     carFile(team, "car.glb"),
@@ -283,6 +332,7 @@ interface SharedLoads {
   radiance: Promise<SkyRadiance>;
   track: Promise<TrackData>;
   line: Promise<RacingLineData>;
+  city: Promise<CityData> | null;
 }
 
 function sharedLoads(
@@ -295,6 +345,7 @@ function sharedLoads(
     light.afternoon,
     light.night,
     circuit.sky,
+    circuit.night,
   ).then((loaded) => {
     loaded.refreshEnvironment(renderer, 0, 1);
     return loaded;
@@ -312,6 +363,10 @@ function sharedLoads(
     ),
     track: fetchJson<TrackData>(circuit.track),
     line: fetchJson<RacingLineData>(circuit.racingLine),
+    city:
+      circuit.ground === "street" && circuit.city
+        ? fetchJson<CityData>(circuit.city)
+        : null,
   };
 }
 
@@ -322,7 +377,20 @@ function groundOf(
   after: Promise<unknown>,
 ): Promise<THREE.Object3D> {
   const anisotropy = renderer.getMaxAnisotropy();
-  if (circuit.venue) {
+  if (loads.city) {
+    return Promise.all([loads.track, loads.line, loads.city]).then(
+      ([data, line, cityData]) =>
+        buildStreetCircuit(
+          data as unknown as StreetTrack,
+          line as LinePath,
+          cityData,
+          anisotropy,
+          loads.radiance,
+          after,
+        ),
+    );
+  }
+  if (circuit.ground === "glb") {
     const limit =
       (renderer.backend as { device?: GPUDevice }).device?.limits
         .maxTextureDimension2D ?? defaultTextureLimit;
@@ -340,15 +408,19 @@ function groundOf(
 }
 
 async function venueExtras(
-  venue: boolean,
+  circuit: Circuit,
   anisotropy: number,
   team: string,
-  env: Promise<CarEnvironment>,
+  loads: SharedLoads,
 ): Promise<{ people: Crowd | null; crew: PitCrew | null }> {
-  if (!venue) return { people: null, crew: null };
+  if (!circuit.venue) return { people: null, crew: null };
   const [people, crew] = await Promise.all([
-    Crowd.load(),
-    env.then((loaded) => PitCrew.load(crewUrl, anisotropy, loaded, team)),
+    loads.city
+      ? loads.city.then((city) => Crowd.load(standing(city.spectators)))
+      : circuit.ground === "glb"
+        ? Crowd.load()
+        : null,
+    loads.env.then((loaded) => PitCrew.load(crewUrl, anisotropy, loaded, team)),
   ]);
   return { people, crew };
 }
@@ -369,6 +441,40 @@ async function parkedGrid(
     engine.trackPoint.bind(engine),
     env,
   );
+}
+
+interface PitFrame extends TrackFrame {
+  pit?: { shift: number; boxDistance: number } | null;
+}
+
+async function garagedCars(
+  engine: Engine,
+  road: Promise<THREE.Object3D>,
+  frame: Promise<PitFrame>,
+  loads: SharedLoads,
+): Promise<GridCars> {
+  const [ground, sd, data, env] = await Promise.all([
+    road,
+    frame,
+    loads.track,
+    loads.env,
+  ]);
+  const length = engine.trackLength();
+  const scale = length / data.length;
+  const shift = sd.pit?.shift ?? 0;
+  const box = sd.pit?.boxDistance ?? -length;
+  const gap = (distance: number) => {
+    const ahead = (((distance - box) % length) + length) % length;
+    return Math.min(ahead, length - ahead);
+  };
+  const slots = garageCarsOf(ground)
+    .map((car) => ({
+      distance: car.s * scale,
+      offset: car.lateral - shift,
+      team: car.team,
+    }))
+    .filter((slot) => gap(slot.distance) > playerBayClear);
+  return GridCars.garages(slots, engine.trackPoint.bind(engine), env);
 }
 
 const defaultTextureLimit = 8192;
@@ -433,6 +539,7 @@ export class Scene {
   private baseExposure = 1;
   private readonly cloudLight: number;
   private readonly airLight: THREE.Color | null;
+  private readonly clearSight: number;
   private readonly moving: THREE.Object3D[];
   private readonly safetyCar = new SafetyCar();
   private signalAt = 0;
@@ -480,6 +587,8 @@ export class Scene {
     glowMirror: 0,
     sheen: 0,
     shock: 0,
+    layer: 0,
+    layerBase: 0,
   };
 
   private constructor(
@@ -500,6 +609,7 @@ export class Scene {
     light: SessionLight,
     floodlights: Floodlights | null,
     private readonly cover: number,
+    look: NightLook | null,
   ) {
     this.camera.matrixAutoUpdate = false;
     this.camera.matrixWorldAutoUpdate = false;
@@ -520,7 +630,9 @@ export class Scene {
     this.tyreStones = new TyreStones(car.tyreMounts());
     this.tyreStones.meshes.forEach(warmLater);
     const night = light.night >= 1;
-    const lit = sessionLighting(skyBox, night);
+    const lit = sessionLighting(skyBox, night, look);
+    this.clearSight = night && look ? look.visibility : clearVisibility;
+    this.atmosphere.layer = night && look ? look.layer : 0;
     this.cloudLight = lit.cloudLight;
     this.airLight = lit.air;
     this.sunlight = new Sunlight(
@@ -594,6 +706,8 @@ export class Scene {
     const carLoad = loads.env.then((env) =>
       GltfCar.load(team, renderer, env, !venue),
     );
+    const frameLoad = fetchJson<PitFrame>(circuit.frame);
+    const roadLoad = groundOf(circuit, renderer, loads, carLoad);
     const [
       skyBox,
       frame,
@@ -607,14 +721,18 @@ export class Scene {
       field,
     ] = await Promise.all([
       loads.sky,
-      fetchJson<TrackFrame>(circuit.frame),
-      venueExtras(venue, anisotropy, team, loads.env),
+      frameLoad,
+      venueExtras(circuit, anisotropy, team, loads),
       circuit.trees ? Trees.load(circuit.trees, anisotropy) : null,
-      groundOf(circuit, renderer, loads, carLoad),
+      roadLoad,
       loads.line,
       carLoad,
       loads.track,
-      venue && rivals.length === 0 ? parkedGrid(engine, team, loads) : null,
+      venue && rivals.length === 0
+        ? circuit.ground === "street"
+          ? garagedCars(engine, roadLoad, frameLoad, loads)
+          : parkedGrid(engine, team, loads)
+        : null,
       rivals.length > 0
         ? loads.env.then((env) => FieldCars.load(rivals, env))
         : null,
@@ -624,9 +742,12 @@ export class Scene {
     const placed = placeOnTrack(road, frame, start);
     placed.updateMatrixWorld(true);
     const culler = new WorldCuller(road, cascadeLayers);
+    cityGlow.value = light.lamps;
     const floodlights =
       venue && light.lamps > 0
-        ? buildFloodlights(gridData, frame, start)
+        ? circuit.ground === "street"
+          ? buildStreetLights(gridData, polesOf(road), frame, start)
+          : buildFloodlights(gridData, frame, start)
         : null;
     const track = new THREE.Group();
     track.add(
@@ -654,7 +775,9 @@ export class Scene {
       light,
       floodlights,
       coverOf(clouds),
+      circuit.night,
     );
+    scene.atmosphere.layerBase = start[2];
     scene.useGround(
       (x, y) => engine.groundHeight(x, y),
       (x, y) => engine.barriers(x, y),
@@ -973,8 +1096,8 @@ export class Scene {
       .multiplyScalar(this.skyBox.overcastLight.value);
     this.atmosphere.visibility =
       1 /
-      (1 / clearVisibility +
-        (1 / rainVisibility - 1 / clearVisibility) *
+      (1 / this.clearSight +
+        (1 / rainVisibility - 1 / this.clearSight) *
           Math.pow(rain, rainFogCurve));
     const speed = Math.abs(frame[frameIndex.speed] ?? 0);
     this.atmosphere.lensWater = rain * (onboard ? 1 : chaseLens);
@@ -1065,6 +1188,19 @@ export class Scene {
     const [gx, gy, gz] = point(turn, gateLateral);
     const [hx, hy] = point(turn + 2, gateLateral);
     this.gate.place(gx, gy, gz, Math.atan2(hy - gy, hx - gx));
+  }
+
+  async populatePaddock(box: number, anisotropy: number): Promise<void> {
+    const { spots, length } = crewOf(this.road);
+    const near = box * this.lapScale;
+    const kept = spots.filter((spot) => {
+      const gap = (((spot.s - near) % length) + length) % length;
+      return !spot.garage || Math.min(gap, length - gap) > playerBayClear;
+    });
+    if (kept.length === 0) return;
+    const group = await paddockCrew(crewUrl, kept, anisotropy);
+    this.road.add(group);
+    group.updateMatrixWorld(true);
   }
 
   renderAuxiliary(renderer: THREE.WebGPURenderer): void {

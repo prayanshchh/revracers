@@ -92,6 +92,7 @@ export interface FieldOptions {
   autopilot?: boolean;
   rules?: Rules;
   rain?: string;
+  track?: string;
 }
 
 export interface Rules {
@@ -155,7 +156,7 @@ export async function startField(options: FieldOptions): Promise<Weekend> {
           `name="rain" val="${options.rain}"`,
         ),
       );
-  });
+  }, options.track);
 }
 
 function read(
