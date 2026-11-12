@@ -27,14 +27,28 @@ const double gripFloor = 17.0;
 const double gripAero = 0.006;
 const double brakeFloor = 19.0;
 const double brakeAero = 0.0034;
-const double raceManage = 0.93;
-const double racePush = 0.98;
+const double raceManage = 0.97;
+const double racePush = 1.0;
+const double openingManage = 0.93;
+const double openingPush = 0.98;
+const double openingDefend = 0.6;
+const double wetTrack = 0.05;
+const double overdrive = 0.025;
+const double defendGap = 0.6;
+const double defendEdge = 0.5;
+const double defendFull = 0.2;
+const double overlapMargin = 1.0;
+const double fightHotMargin = 14.0;
+const double hotBackOff = 0.12;
+const double boostPush = 0.7;
+const double squeezeRoom = 0.3;
+const double squeezeLift = 0.985;
 const double offLineCost = 0.9;
 const double laneChangeCost = 1.0;
 const double keepLaneMargin = 6.0;
 const double commitTime = 0.6;
 const double attackBonus = 28.0;
-const double defendBonus = 8.0;
+const double defendBonus = 30.0;
 const double sampleStep = 2.0;
 const double laneOffsets[] = {-9.0, -7.0, -5.0, -3.5, -2.0, 0.0, 2.0, 3.5, 5.0, 7.0, 9.0};
 const int laneCount = sizeof(laneOffsets) / sizeof(laneOffsets[0]);
@@ -73,11 +87,14 @@ const double wheelbase = 3.5;
 const double steerRateLimit = 4.0;
 const double absSlip = 0.14;
 const double tcSlip = 0.10;
+const double overdriveAbs = 0.03;
+const double overdriveTc = 0.03;
 const double pushRise = 0.5;
 const double pushFall = 0.15;
-const double defendPush = 0.6;
 const double fightGapAhead = 1.6;
 const double fightGapBehind = 0.9;
+const double attackFrom = 0.8;
+const double attackFull = 0.3;
 const double insideLateBrake = 1.02;
 const double yieldLane = 5.0;
 const double yieldLook = 220.0;
@@ -111,6 +128,7 @@ const double tightRelease = 13.0;
 const double stopDecel = 7.0;
 const double overlapRear = 0.3;
 const double overlapBackOff = 0.94;
+const double mergeFloor = 0.7;
 const double pitClearance = 0.15;
 const double pitEntryGrace = 15.0;
 const double fastLaneOffset = 1.2;
@@ -233,6 +251,8 @@ struct Driver
     double leak = 0.0;
     double gripClock = 0;
     double weight = 1.0;
+    bool opening = false;
+    double water = 0.0;
 };
 
 struct Forecast
@@ -567,6 +587,11 @@ bool onArc(double s, double from, double to)
 }
 
 
+double ramp(double from, double full, double value)
+{
+    return std::max(0.0, std::min(1.0, (from - value) / (from - full)));
+}
+
 double ease(double t)
 {
     double c = std::max(0.0, std::min(1.0, t));
@@ -626,11 +651,23 @@ double damageScale(const Driver &driver, double lane, double s)
     return std::min(1.0, std::min(corner, cap) / std::max(1.0, lane));
 }
 
+bool wet(const Driver &driver)
+{
+    return driver.water > wetTrack;
+}
+
+bool cautious(const Driver &driver)
+{
+    return driver.opening || wet(driver);
+}
+
 double driverScale(const Driver &driver)
 {
     if (driver.task == AI_RACE)
     {
-        double manage = raceManage + (racePush - raceManage) * driver.push;
+        double low = cautious(driver) ? openingManage : raceManage;
+        double high = cautious(driver) ? openingPush : racePush;
+        double manage = low + (high - low) * std::min(1.0, driver.push) + overdrive * std::max(0.0, driver.push - 1.0);
         return driver.racePace * manage * paceScale * gripScale(driver) * driver.lapNoise;
     }
     return driver.pace * paceScale * gripScale(driver) * driver.lapNoise;
@@ -886,7 +923,7 @@ double yieldSideAt(double pos)
 
 double fightBonus(int index, const Driver &driver, tCarElt *car, tSituation *s, const std::vector<Rival> &rivals, double candidate)
 {
-    if (driver.task != AI_RACE)
+    if (driver.task != AI_RACE || sdRaceControlRacingHeld())
         return 0;
     double pos = car->_distFromStartLine;
     double v = std::max(5.0, (double)car->_speed_x);
@@ -900,19 +937,21 @@ double fightBonus(int index, const Driver &driver, tCarElt *car, tSituation *s, 
     for (const Rival &rival : rivals)
     {
         const Forecast &f = forecasts[rival.index];
-        if (rival.gap > 0 && rival.gap / v < fightGapAhead)
+        if (rival.gap > 0 && rival.gap / v < attackFrom)
         {
             double rivalInside = (f.l[6] - lineLateral) * side;
             double clearOfRival = towardsInside - rivalInside;
             if (clearOfRival > f.halfLat[6] * 2.0 + 0.4)
-                bonus += attackBonus * driver.racecraft * std::min(1.0, fightGapAhead + 0.1 - rival.gap / v);
+                bonus += attackBonus * driver.racecraft * ramp(attackFrom, attackFull, rival.gap / v);
         }
-        else if (rival.gap < 0 && -rival.gap / v < fightGapBehind)
+        else if (rival.gap < 0 && -rival.gap / v < fightGapBehind && !drivers[rival.index].blueFlag)
         {
             double reach = forecasts[index].halfLong[0] + f.halfLong[0] + 0.8;
             bool overlapped = -rival.gap < reach;
             bool brakingNow = sampled(model.kappa, pos + v * 0.8) != 0.0 && targetSpeedAt(driver, pos + v * 0.8, 0.0) < v - 5.0;
-            if (!overlapped && !brakingNow && driver.defendMoves == 0 && towardsInside > 1.0 && towardsInside < 4.5)
+            bool holding = driver.defendMoves > 0 && fabs(candidate - driver.laneTarget) < 0.01;
+            bool moving = driver.defendMoves == 0 && !brakingNow;
+            if (!overlapped && (holding || moving) && towardsInside > 1.0 && towardsInside < 4.5)
                 bonus += defendBonus * driver.racecraft;
         }
     }
@@ -969,6 +1008,11 @@ void plan(int index, Driver &driver, tCarElt *car, tSituation *s)
                 driver.defendMoves = 1;
 }
 
+bool slowCornerAhead(const Driver &driver, double pos, double v)
+{
+    return slowMargin(v) > 0.0 || targetSpeedAt(driver, pos + v * 2.0, driver.lane) < slowCornerSpeed;
+}
+
 double lateralSafety(int index, tCarElt *car, tSituation *s, double wanted, double *speedFactor)
 {
     double pos = car->_distFromStartLine;
@@ -976,6 +1020,7 @@ double lateralSafety(int index, tCarElt *car, tSituation *s, double wanted, doub
     double low = sampled(model.rightBound, pos);
     double high = sampled(model.leftBound, pos);
     const Forecast &me = forecasts[index];
+    bool squeezed = false;
     for (int i = 0; i < s->_ncars; i++)
     {
         if (i == index || !activeCar(s, i) || ghostCar(i))
@@ -994,8 +1039,10 @@ double lateralSafety(int index, tCarElt *car, tSituation *s, double wanted, doub
             high = std::min(high, lateral - side);
         else
             low = std::max(low, lateral + side);
-        *speedFactor = std::min(*speedFactor, 0.985);
+        squeezed = true;
     }
+    if (squeezed && (wet(drivers[index]) || sdRaceControlRacingHeld() || slowCornerAhead(drivers[index], pos, me.v[0]) || high - low < squeezeRoom))
+        *speedFactor = std::min(*speedFactor, squeezeLift);
     if (low > high)
         return (low + high) * 0.5;
     return std::max(low, std::min(high, wanted));
@@ -1059,6 +1106,7 @@ double conflictSpeed(int index, tCarElt *car, tSituation *s, double target)
     double v = me.v[0];
     double limit = target;
     bool inPit = drivers[index].pit != PIT_NONE;
+    bool opening = !inPit && drivers[index].task == AI_RACE && drivers[index].opening && car->_distFromStartLine < firstLapDistance;
     for (int i = 0; i < s->_ncars; i++)
     {
         if (i == index || !activeCar(s, i) || (ghostCar(i) && !inPit))
@@ -1080,24 +1128,25 @@ double conflictSpeed(int index, tCarElt *car, tSituation *s, double target)
             double t = k * planStep;
             double ahead = gap + (f.s[k] - f.s[0]);
             double travelled = me.s[k] - me.s[0];
-            double side = me.halfLat[k] + f.halfLat[k] + (inPit ? pitClearance : hardClearance + slowMargin(me.v[k]));
+            double side = me.halfLat[k] + f.halfLat[k] + (inPit ? pitClearance : hardClearance + (opening && k == 0 ? 0.0 : slowMargin(me.v[k])));
             if (fabs(f.l[k] - me.l[k]) >= side)
                 continue;
-            double reach = (me.halfLong[k] + f.halfLong[k] + 0.8 + v * 0.015) / alongScale(me.s[k], me.l[k]);
+            double reach = (me.halfLong[k] + f.halfLong[k] + 0.8 + v * 0.015) / alongScale(me.s[k], opening ? (me.l[k] + f.l[k]) * 0.5 : me.l[k]);
             if (ahead - travelled > reach && k > 0)
                 continue;
             double room = ahead - reach;
             if (k == 0)
             {
                 bool blocked = fabs(f.l[0] - me.l[0]) < me.halfLat[0] + f.halfLat[0] + 0.2 && f.v[0] <= crawlRivalSpeed;
-                limit = std::min(limit, room <= 0 ? std::max(std::min(f.v[0] - 0.5, v * overlapBackOff), blocked ? 0.0 : crawlSpeed) : sqrt(std::max(0.0, f.v[0] * f.v[0] + 30.0 * room)));
+                double backOff = opening && f.v[0] > v ? v : v * overlapBackOff;
+                limit = std::min(limit, room <= 0 ? std::max(std::min(f.v[0] - 0.5, backOff), blocked ? 0.0 : crawlSpeed) : sqrt(std::max(0.0, f.v[0] * f.v[0] + 30.0 * room)));
                 break;
             }
             double average = std::max(0.0, room) / t;
             if (average < v)
             {
                 double decel = 2.0 * (v - average) / t;
-                limit = std::min(limit, v - decel * 0.25);
+                limit = std::min(limit, std::max(v - decel * 0.25, opening ? mergeFloor * f.v[k] : 0.0));
             }
             break;
         }
@@ -1163,6 +1212,9 @@ double longSlip(tCarElt *car, int i)
 void applyPedals(Driver &driver, tCarElt *car, double target, double upcoming, double dt)
 {
     double v = (double)car->_speed_x;
+    double edge = std::max(0.0, std::min(1.0, driver.push - 1.0));
+    double brakeSlip = absSlip + overdriveAbs * edge;
+    double spinSlip = tcSlip + overdriveTc * edge;
     double error = target - v;
     double decelNeeded = std::max(0.0, (v * v - upcoming * upcoming) / (2.0 * std::max(4.0, v * 0.25)));
     double capacity = std::max(5.0, brakeLimit(std::max(v, 1.0), 0.0));
@@ -1180,8 +1232,8 @@ void applyPedals(Driver &driver, tCarElt *car, double target, double upcoming, d
     double commands[4];
     for (int i = 0; i < 4; i++)
     {
-        double excess = fabs(v) > 2.0 ? longSlip(car, i) - absSlip : -1.0;
-        driver.wheelBrake[i] = excess > 0 ? std::max(0.05, driver.wheelBrake[i] - 30.0 * excess * dt / absSlip)
+        double excess = fabs(v) > 2.0 ? longSlip(car, i) - brakeSlip : -1.0;
+        driver.wheelBrake[i] = excess > 0 ? std::max(0.05, driver.wheelBrake[i] - 30.0 * excess * dt / brakeSlip)
                                           : std::min(1.0, driver.wheelBrake[i] + 8.0 * dt);
         commands[i] = std::min(brake, driver.wheelBrake[i]);
     }
@@ -1192,8 +1244,8 @@ void applyPedals(Driver &driver, tCarElt *car, double target, double upcoming, d
     double spin = std::max(-longSlip(car, REAR_RGT), -longSlip(car, REAR_LFT));
     double latSlip = std::max(fabs(car->_wheelSlipSide(REAR_RGT)), fabs(car->_wheelSlipSide(REAR_LFT))) / std::max(4.0, fabs(v));
     double slip = hypot(std::max(0.0, spin), latSlip);
-    double spinExcess = fabs(v) > 3.0 ? slip - tcSlip : -1.0;
-    driver.tractionLimit = spinExcess > 0 ? std::max(0.08, driver.tractionLimit - 26.0 * spinExcess * dt / tcSlip)
+    double spinExcess = fabs(v) > 3.0 ? slip - spinSlip : -1.0;
+    driver.tractionLimit = spinExcess > 0 ? std::max(0.08, driver.tractionLimit - 26.0 * spinExcess * dt / spinSlip)
                                           : std::min(1.0, driver.tractionLimit + 2.0 * dt);
     car->_brakeCmd = (tdble)brake;
     car->_accelCmd = (tdble)(std::min(accel, driver.tractionLimit) * (1.0 - driver.slide));
@@ -1458,21 +1510,43 @@ void updatePush(int index, Driver &driver, tCarElt *car, tSituation *s, double d
     double pos = car->_distFromStartLine;
     double v = std::max(5.0, (double)car->_speed_x);
     double wanted = 0;
-    if (driver.task == AI_RACE)
+    driver.opening = sdRaceControlSinceSignal(s) < openingLapTime;
+    if (driver.task == AI_RACE && !driver.blueFlag && driver.caution >= 1.0 && !sdRaceControlRacingHeld())
     {
+        bool chasing = false, chased = false, alongside = false;
+        double attack = 0, defend = 0;
         for (int i = 0; i < s->_ncars; i++)
         {
             if (i == index || !activeCar(s, i) || ghostCar(i) || sdAiInPitLane(i))
                 continue;
             double gap = delta(pos, s->cars[i]->_distFromStartLine);
-            if (gap > 0 && gap / v < fightGapAhead)
-                wanted = 1;
-            if (gap < 0 && -gap / v < fightGapBehind)
-                wanted = std::max(wanted, defendPush);
+            double time = fabs(gap) / v;
+            if (gap < 0 && drivers[i].blueFlag)
+                continue;
+            if (gap > 0 && time < fightGapAhead)
+            {
+                chasing = true;
+                attack = std::max(attack, ramp(attackFrom, attackFull, time));
+            }
+            if (gap < 0 && time < fightGapBehind)
+                chased = true;
+            if (gap < 0 && time < defendGap)
+                defend = std::max(defend, 1.0 + defendEdge * ramp(defendGap, defendFull, time));
+            if (fabs(gap) < car->_dimension_x + overlapMargin)
+                alongside = true;
+        }
+        if (cautious(driver))
+            wanted = chasing ? 1.0 : chased ? openingDefend : 0.0;
+        else
+        {
+            wanted = std::max(chasing ? 1.0 + attack : 0.0, defend);
+            if (alongside || slowCornerAhead(driver, pos, v))
+                wanted = std::min(wanted, 1.0);
         }
         double heat = sdTyresHeat(index);
-        if (heat > hotMargin)
-            wanted = std::max(0.0, wanted - (heat - hotMargin) * 0.12);
+        double margin = wanted > 1.0 ? fightHotMargin : hotMargin;
+        if (heat > margin)
+            wanted = std::max(0.0, wanted - (heat - margin) * hotBackOff);
     }
     double rate = wanted > driver.push ? pushRise : pushFall;
     double step = rate * dt;
@@ -1486,7 +1560,7 @@ void updateEnergy(int index, Driver &driver, tCarElt *car, double fighting)
         mode = 2;
     if (driver.task == AI_OUT_LAP || driver.task == AI_IN_LAP || driver.task == AI_COOL_DOWN)
         mode = 0;
-    if (driver.task == AI_RACE && fighting > defendPush + 0.1 && sdEnergyBatteryShare(index) > 0.25)
+    if (driver.task == AI_RACE && fighting > boostPush && sdEnergyBatteryShare(index) > 0.25)
         mode = 3;
     sdEnergySetMode(index, mode);
 }
@@ -1980,6 +2054,7 @@ void sdAiDrive(int index, tCarElt *car, tSituation *s)
         driver.wet = std::max(0.3, std::min(1.0, sdTyresWetShare(index)));
         driver.wetLine = std::max(0.3, std::min(1.0, sdTyresWetShareAt(index, sdWeatherWaterAt(car->_distFromStartLine, sampled(model.line, car->_distFromStartLine)))));
         driver.wetOff = std::max(0.3, std::min(1.0, sdTyresWetShareAt(index, sdWeatherWaterAt(car->_distFromStartLine, sampled(model.line, car->_distFromStartLine) + 9.0))));
+        driver.water = sdWeatherWaterAt(car->_distFromStartLine, sampled(model.line, car->_distFromStartLine));
         double fuelShare = (double)car->_fuel / std::max(1.0f, car->_tank);
         driver.weight = 1.0 - 0.09 * fuelShare;
     }

@@ -847,6 +847,11 @@ bool sdRaceControlNeutralised()
     return kind == kindRace && deltaPeriod();
 }
 
+bool sdRaceControlRacingHeld()
+{
+    return kind == kindRace && (deltaPeriod() || state == RC_RESTART);
+}
+
 double sdRaceControlSinceSignal(tSituation *s)
 {
     return s->currentTime - (kind == kindRace ? signalTime : 0.0);
