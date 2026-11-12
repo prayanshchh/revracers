@@ -6,6 +6,7 @@ import type { EnergyInfo } from "./energy.ts";
 import type { CarStatus } from "./mfd.ts";
 import type { TyreInfo } from "./tyres.ts";
 import type { WeatherInfo } from "./weather.ts";
+import type { WeatherPlan } from "./weather-plan.ts";
 import type { SetupSource } from "./settings.ts";
 import type { CarAudio } from "./sound/sound-state.ts";
 import type { TrackLocal } from "./sky.ts";
@@ -46,8 +47,7 @@ export interface HudInfo {
 }
 
 export interface RaceSystems {
-  dynamicWeather: boolean;
-  weatherSeed: number;
+  weather: WeatherPlan | null;
   compound: number;
   wearScale: number;
   isRace: boolean;
@@ -255,6 +255,15 @@ function configureRules(module: SpeedDreamsModule, race: RaceSystems): void {
   module._sdRaceControlInterventions(race.rules.interventions ? 1 : 0);
 }
 
+function configureWeather(
+  module: SpeedDreamsModule,
+  plan: WeatherPlan | null,
+): void {
+  module._sdWeatherConfigure(plan ? 1 : 0, plan?.start ?? 0);
+  for (const shift of plan?.shifts ?? [])
+    module._sdWeatherShift(shift.at, shift.level);
+}
+
 export class Engine {
   private carsMemory = 0;
   private timingMemory = 0;
@@ -292,7 +301,7 @@ export class Engine {
     module._sdInputAssist(assist ? 1 : 0);
     module._sdInputAntiLock(antiLock ? 1 : 0);
     module._sdTyresConfigure(race.compound, race.wearScale);
-    module._sdWeatherConfigure(race.dynamicWeather ? 1 : 0, race.weatherSeed);
+    configureWeather(module, race.weather);
     module._sdEnergyConfigure(
       race.isRace ? 1 : 0,
       race.ersMode,

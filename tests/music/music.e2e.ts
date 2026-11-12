@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { seedPlayer } from "../support/player.ts";
+import { startEvent } from "../support/race-event.ts";
 
 declare global {
   interface Window {
@@ -59,8 +60,8 @@ if (process.platform !== "linux") {
     await expect
       .poll(() => music(page))
       .toEqual({ cue: "menu", contexts: ["running"] });
-    await page.locator('[data-menu="start"]').click();
-    await expect(page.locator('[data-menu="root"]')).toBeHidden();
+    await startEvent(page);
+    await expect(page.locator('[data-front="root"]')).toBeHidden();
     await expect
       .poll(() => music(page), { timeout: 300_000 })
       .toEqual({ cue: "buildup", contexts: ["running"] });

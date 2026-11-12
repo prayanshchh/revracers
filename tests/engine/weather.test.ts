@@ -9,7 +9,12 @@ import {
   type Weekend,
 } from "../support/race-weekend.ts";
 import { planWeekend } from "../../apps/client/src/game/weekend.ts";
-import { startCircuit, wasm } from "../support/speed-dreams.ts";
+import { wasm } from "../support/speed-dreams.ts";
+import { tracks } from "../../apps/client/src/game/settings.ts";
+import {
+  sessionSeconds,
+  weatherPlan,
+} from "../../apps/client/src/game/weather-plan.ts";
 
 const fieldSize = 22;
 const wet = 4;
@@ -89,22 +94,35 @@ describe.runIf(existsSync(wasm))("rain and a drying track", () => {
     expect(met).toBeLessThan(middle);
   });
 
-  test("dynamic weather keeps its forecast and repeats for the same seed", async () => {
-    const start = (weatherSeed: number) =>
-      startCircuit<Weekend>((m) => {
-        m._sdWeatherConfigure(1, weatherSeed);
+  test("dynamic weather over a five-lap race turns the call between slicks and wet tyres, both when rain arrives and when the track dries", async () => {
+    const laps = 5;
+    const length = tracks[0].length;
+    const duration = Math.round(sessionSeconds("race", laps, length));
+    const plans = (["rain", "drying"] as const).map((story) => {
+      for (let seed = 1; seed < 400; seed++) {
+        const plan = weatherPlan(seed, duration);
+        if (plan.story === story) return plan;
+      }
+      throw new Error(`no ${story} plan`);
+    });
+    for (const plan of plans) {
+      const m = await startField({
+        kind: sessionKind.race,
+        laps,
+        seed: 5,
+        weather: plan,
       });
-    const seeds = [11, 12, 13, 14, 15, 16];
-    const forecasts = await Promise.all(
-      seeds.map(async (seed) => weatherOf(await start(seed)).forecast),
-    );
-    expect(new Set(forecasts.map((f) => f.join())).size).toBeGreaterThan(1);
-    const m = await start(seeds[0] ?? 0);
-    const promised = weatherOf(m).forecast;
-    expect(weatherOf(await start(seeds[0] ?? 0)).forecast).toEqual(promised);
-    for (const expected of promised.slice(0, 3)) {
-      seconds(m, 300);
-      expect(weatherOf(m).rain).toBeCloseTo(expected, 3);
+      const promised = weatherOf(m).forecast[0] ?? 0;
+      const calls: string[] = [];
+      seconds(m, duration, (second) => {
+        const w = weatherOf(m);
+        const call = w.line >= w.slickLimit ? "wet" : "slick";
+        if (calls.at(-1) !== call) calls.push(call);
+        if (second === 300) expect(w.rain).toBeCloseTo(promised, 3);
+      });
+      expect(calls, plan.story).toEqual(
+        plan.story === "rain" ? ["slick", "wet"] : ["wet", "slick"],
+      );
     }
   });
 });

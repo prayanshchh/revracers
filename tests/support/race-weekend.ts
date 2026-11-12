@@ -8,6 +8,7 @@ import {
   planWeekend,
   type WeekendPlan,
 } from "../../apps/client/src/game/weekend.ts";
+import type { WeatherPlan } from "../../apps/client/src/game/weather-plan.ts";
 import { type SpeedDreams, startCircuit } from "./speed-dreams.ts";
 
 const timingStride = 20;
@@ -70,7 +71,8 @@ export interface Weekend extends SpeedDreams {
   ) => void;
   _sdRaceControlDeploy: (which: number) => number;
   _sdRaceControlInfo: (out: number) => void;
-  _sdWeatherConfigure: (dynamic: number, seed: number) => void;
+  _sdWeatherConfigure: (dynamic: number, startLevel: number) => void;
+  _sdWeatherShift: (at: number, level: number) => void;
   _sdWeatherSet: (rain: number, line: number, off: number) => void;
   _sdWeatherInfo: (out: number) => void;
   FS: {
@@ -99,6 +101,7 @@ export interface FieldOptions {
   autopilot?: boolean;
   rules?: Rules;
   rain?: string;
+  weather?: WeatherPlan;
   track?: string;
 }
 
@@ -109,6 +112,11 @@ export interface Rules {
 }
 
 const raceFile = "/sd/local/config/raceman/quickrace.xml";
+
+function planWeather(m: Weekend, plan: WeatherPlan): void {
+  m._sdWeatherConfigure(1, plan.start);
+  for (const shift of plan.shifts) m._sdWeatherShift(shift.at, shift.level);
+}
 
 export async function startField(options: FieldOptions): Promise<Weekend> {
   const plan = options.plan ?? planWeekend("corvus", 10, null);
@@ -154,6 +162,7 @@ export async function startField(options: FieldOptions): Promise<Weekend> {
     });
     m._sdSessionConfigure(options.kind, options.laps, 1, options.seed);
     if (options.autopilot ?? true) m._sdFieldAutopilot(1);
+    if (options.weather) planWeather(m, options.weather);
     if (options.rain)
       m.FS.writeFile(
         raceFile,
@@ -310,6 +319,7 @@ export function weatherOf(m: Weekend) {
     off: v[2] ?? 0,
     player: v[3] ?? 0,
     clock: v[4] ?? 0,
+    slickLimit: v[5] ?? 0,
     forecast: Array.from(v.slice(7, 13)),
   };
 }

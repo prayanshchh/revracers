@@ -409,6 +409,7 @@ const exported = [
   "_sdCarParamCount",
   "_sdViewKey",
   "_sdWeatherConfigure",
+  "_sdWeatherShift",
   "_sdWeatherSet",
   "_sdWeatherInfo",
   "_sdResync",

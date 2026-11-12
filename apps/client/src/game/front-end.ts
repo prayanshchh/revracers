@@ -4,6 +4,8 @@ import { button, el, loading, prompt } from "./dom.ts";
 import { countries, countryName, flagUrl, guessCountry } from "./flags.ts";
 import { playerMessage } from "./player-error.ts";
 import { ProfileScreen } from "./profile-screen.ts";
+import { type EventPick, type FootPrompt, RaceEvent } from "./race-event.ts";
+import { type Settings, trackOf } from "./settings.ts";
 import { LoadBar } from "./load-bar.ts";
 import { framings, type Studio } from "./studio.ts";
 import { teamLogo } from "./team-logos.ts";
@@ -67,6 +69,7 @@ export class FrontEnd {
     this.carLoader.querySelector<HTMLElement>(".loader") ?? undefined,
   );
   private carRequest = 0;
+  private event: RaceEvent | null = null;
   private readonly keyHandler = (event: KeyboardEvent): void => {
     const action = this.keys[event.key];
     if (!action) return;
@@ -83,6 +86,7 @@ export class FrontEnd {
   constructor(
     private readonly root: HTMLElement,
     private readonly studio: Studio,
+    private readonly settings: Settings,
   ) {
     this.stage = el("div", "stage");
     root.append(this.stage);
@@ -129,14 +133,33 @@ export class FrontEnd {
     this.stage.classList.add("enter");
   }
 
-  private footer(...prompts: [string, string, () => void][]): HTMLElement {
+  private footer(...prompts: FootPrompt[]): HTMLElement {
     const foot = el("footer", "front-foot");
-    for (const [glyph, label, action] of prompts) {
+    for (const [glyph, label, action, primary] of prompts) {
       const item = prompt(glyph, label);
+      item.classList.toggle("primary", primary === true);
       item.addEventListener("click", action);
       foot.append(item);
     }
     return foot;
+  }
+
+  async raceEvent(): Promise<EventPick> {
+    this.studio.frame(framings.empty);
+    this.hideCar();
+    this.root.classList.add("event-mode");
+    this.event ??= new RaceEvent(
+      {
+        show: (keys, ...nodes) => {
+          this.show(keys, ...nodes);
+        },
+        footer: (...prompts) => this.footer(...prompts),
+      },
+      this.settings,
+    );
+    const pick = await this.event.run();
+    this.root.classList.remove("event-mode");
+    return pick;
   }
 
   async welcome(): Promise<Driver> {
@@ -567,7 +590,7 @@ export class FrontEnd {
     const items: ListItem[] = [
       {
         label: "Race",
-        detail: "Set up a session at Hill Country Circuit",
+        detail: `Set up a session at ${trackOf(this.settings).label}`,
         run: () => {
           done({ action: "race", driver });
         },
