@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import { fieldStrategies } from "../../apps/client/src/game/ai-strategy.ts";
 import { planWeekend } from "../../apps/client/src/game/weekend.ts";
 import { driveStop, layoutOf } from "../support/pit-drive.ts";
 import type { RaceSystems } from "../support/race-systems.ts";
@@ -10,6 +11,7 @@ import {
   statsOf,
   subset,
   timingOf,
+  withStints,
 } from "../support/race-weekend.ts";
 import { startCircuit, wasm } from "../support/speed-dreams.ts";
 
@@ -35,7 +37,15 @@ describe.runIf(existsSync(wasm))("street circuit weekend", () => {
 
   test("cars stop in the pit lane and rejoin without hitting its walls", async () => {
     const laps = 20;
-    const plan = subset(planWeekend("corvus", 7, null), 8);
+    const base = subset(planWeekend("corvus", 7, null), 8);
+    const plan = withStints(
+      base,
+      fieldStrategies(base.entrants, base.slots, {
+        laps,
+        wearScale: 2,
+        seed: 4,
+      }),
+    );
     const m = await startField({
       kind: sessionKind.race,
       laps,

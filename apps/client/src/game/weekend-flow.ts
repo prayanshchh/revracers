@@ -39,7 +39,9 @@ export interface WeekendContext {
   stage: Stage;
   field: WeekendPlan;
   restart: (autostart: boolean) => void;
-  celebrate: (done: () => void) => boolean;
+  podium: (done: () => void) => Promise<boolean>;
+  onTiming: (timing: CarTiming[]) => void;
+  highlights: (done: () => void) => boolean;
 }
 
 export class WeekendFlow {
@@ -48,6 +50,7 @@ export class WeekendFlow {
   private timingClock = 0;
   private scale = 1;
   private readonly garage: GarageScreen;
+  private refresh = 0;
 
   constructor(private readonly ctx: WeekendContext) {
     this.timing = ctx.engine.timing();
@@ -100,6 +103,7 @@ export class WeekendFlow {
     if (now - this.timingClock < timingPeriod) return;
     this.timingClock = now;
     this.timing = engine.timing();
+    this.ctx.onTiming(this.timing);
     const info = engine.session();
     hud.updateField(cars, this.timing, info, this.penalties());
     if (this.garage.open) this.garage.update(this.timing, info);
@@ -251,20 +255,25 @@ export class WeekendFlow {
     sound.mute(true);
     this.timing = engine.timing();
     const mine = this.timing.find((row) => row.index === 0);
-    const won =
+    const onPodium =
       mine !== undefined &&
       mine.finished &&
       !mine.disqualified &&
-      mine.position === 1;
+      mine.position <= 3;
+    music.play(onPodium ? "victory" : "menu");
     const results = () => {
       this.raceResults();
     };
-    if (won && this.ctx.celebrate(results)) {
-      music.play("victory");
-      return;
-    }
-    music.play("menu");
-    results();
+    const highlights = () => {
+      if (!this.ctx.highlights(results)) results();
+    };
+    this.watchPodium(highlights);
+  }
+
+  private watchPodium(next: () => void): void {
+    void this.ctx.podium(next).then((started) => {
+      if (!started) next();
+    });
   }
 
   private raceResults(): void {
@@ -280,6 +289,21 @@ export class WeekendFlow {
       this.penalties(),
       [
         {
+          label: "Watch Highlights",
+          run: () => {
+            this.watchHighlights();
+          },
+        },
+        {
+          label: "Watch Podium",
+          run: () => {
+            hideClassification();
+            this.watchPodium(() => {
+              this.raceResults();
+            });
+          },
+        },
+        {
           label: "Restart Race",
           run: () => {
             restart(true);
@@ -293,9 +317,18 @@ export class WeekendFlow {
         },
       ],
     );
-    window.setInterval(() => {
+    if (this.refresh) return;
+    this.refresh = window.setInterval(() => {
       this.timing = engine.timing();
       updateClassificationRows(field.entrants, this.timing, this.penalties());
     }, resultsRefresh);
+  }
+
+  private watchHighlights(): void {
+    hideClassification();
+    const back = () => {
+      this.raceResults();
+    };
+    if (!this.ctx.highlights(back)) back();
   }
 }

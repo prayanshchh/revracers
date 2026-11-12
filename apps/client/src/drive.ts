@@ -5,6 +5,7 @@ import {
   type PitDrive,
   type PitLayout,
 } from "./game/pitstop.ts";
+import crewUrl from "../../../content/tracks/hill-country/crew.glb?url";
 import "@fontsource-variable/saira/wdth.css";
 import "./drive.css";
 import "./front.css";
@@ -14,6 +15,7 @@ import * as THREE from "three/webgpu";
 import {
   boostMode,
   ersModes,
+  fuelBurnPerLap,
   fuelMixes,
   nextErsMode,
   OvertakeDetector,
@@ -38,6 +40,7 @@ import {
   driverOutbox,
   rememberDriver,
 } from "./game/api.ts";
+import { fieldStrategies } from "./game/ai-strategy.ts";
 import { playBuildUp, type Weather } from "./game/buildup.ts";
 import { type BuildUpVenue, buildUpVenue } from "./game/buildup-venues.ts";
 import type { GridSpot } from "./game/buildup-shots.ts";
@@ -63,8 +66,12 @@ import { LapTrace } from "./game/laptrace.ts";
 import { Menu, type MenuAction } from "./game/menu.ts";
 import type { CarStatus } from "./game/mfd.ts";
 import { type PadCommands, PadLink } from "./game/pad.ts";
+import { PhotoMode } from "./game/photo-mode.ts";
+import { PitWall, type PitWallContext } from "./game/pit-wall.ts";
 import { PlayerError, playerMessage } from "./game/player-error.ts";
-import { readyCard } from "./game/ready-card.ts";
+import { PodiumCeremony, type PodiumPlace } from "./game/podium.ts";
+import { Radio } from "./game/radio.ts";
+import { readyCard, type StrategyChoice } from "./game/ready-card.ts";
 import { Atmosphere } from "./game/atmosphere.ts";
 import { RaceLog } from "./game/race-log.ts";
 import { loadReference, rememberReference } from "./game/reference.ts";
@@ -89,7 +96,6 @@ import {
   type PlayerSeat,
   seatDriver,
   startingGrid,
-  teamOf,
   teams,
 } from "./game/teams.ts";
 import {
@@ -355,6 +361,7 @@ function raceControls(
   hud: Hud,
   settings: Settings,
   race: boolean,
+  planned: () => number | null,
 ) {
   let cruise = settings.ersMode === boostMode ? 1 : settings.ersMode;
   let padBoost = 0;
@@ -372,7 +379,7 @@ function raceControls(
     return idealCompound(
       Math.max(weather.lineWater, weather.forecast[0] ?? 0),
       weather,
-      fitted > 2 ? 1 : nextCompound(fitted),
+      planned() ?? (fitted > 2 ? 1 : nextCompound(fitted)),
     );
   };
   const pickTyre = (compound: number) => {
@@ -494,11 +501,7 @@ function raceSystems(
     dynamicWeather: settings.rain === "dynamic",
     weatherSeed: Math.floor(Math.random() * 1_000_000) + 1,
     compound: stage === "qualifying" ? 0 : compoundIndex(settings.compound),
-    wearScale: wearScale(
-      stage === "qualifying" ? "real" : settings.tyreWear,
-      stage === "race" ? "race" : "practice",
-      Math.max(settings.laps, wearShortestRace),
-    ),
+    wearScale: sessionWear(settings, stage),
     isRace: stage === "race",
     ersMode: settings.ersMode,
     fuelMix: settings.fuelMix,
@@ -507,18 +510,46 @@ function raceSystems(
   };
 }
 
+function sessionWear(settings: Settings, stage: Stage | null): number {
+  return wearScale(
+    stage === "qualifying" ? "real" : settings.tyreWear,
+    stage === "race" ? "race" : "practice",
+    Math.max(settings.laps, wearShortestRace),
+  );
+}
+
+function withStrategies(
+  field: WeekendPlan,
+  settings: Settings,
+  seed: number,
+): WeekendPlan {
+  const stints = fieldStrategies(field.entrants, field.slots, {
+    laps: settings.laps,
+    wearScale: sessionWear(settings, "race"),
+    seed,
+  });
+  return {
+    ...field,
+    entrants: field.entrants.map((entrant, i) => ({
+      ...entrant,
+      stints: stints[i] ?? [],
+    })),
+  };
+}
+
 function sessionPlan(
   settings: Settings,
   stage: Stage,
   field: WeekendPlan,
 ): SessionPlan {
+  const seed = Math.floor(Math.random() * 1_000_000);
   return {
     kind: stage === "race" ? sessionKinds.race : sessionKinds.qualifying,
     laps: settings.laps,
     difficulty: difficultyScale(settings.difficulty),
-    seed: Math.floor(Math.random() * 1_000_000),
+    seed,
     reference: fieldReferenceLap,
-    field,
+    field: stage === "race" ? withStrategies(field, settings, seed) : field,
   };
 }
 
@@ -547,6 +578,42 @@ function prepareSession(settings: Settings): SessionSetup {
   };
 }
 
+function podiumPlaces(
+  engine: Engine,
+  field: WeekendPlan | null,
+  seat: PlayerSeat,
+): PodiumPlace[] {
+  if (!field) return [];
+  return engine
+    .timing()
+    .filter((row) => !row.retired && !row.disqualified)
+    .sort((a, b) => a.position - b.position)
+    .slice(0, 3)
+    .flatMap((row) => {
+      const entrant = field.entrants[row.index];
+      if (!entrant) return [];
+      const driver = seatDriver(seat, entrant);
+      return [
+        {
+          car: row.index,
+          name: `${driver.first} ${driver.last.toUpperCase()}`.trim(),
+          team: entrant.team,
+          teamId: entrant.car,
+          colour: entrant.colour,
+          player: entrant.player,
+        },
+      ];
+    });
+}
+
+function replayNames(field: WeekendPlan | null, seat: PlayerSeat): string[] {
+  return field
+    ? field.entrants.map((entrant) =>
+        entrant.player ? "You" : seatDriver(seat, entrant).last,
+      )
+    : ["You"];
+}
+
 function rivalCars(field: WeekendPlan | null): string[] {
   return (field?.entrants ?? []).slice(1).map((entrant) => entrant.car);
 }
@@ -569,6 +636,7 @@ function hudOptions(
   lights: StartLights,
   turns: CourseTurn[],
   onLap: HudOptions["onLap"],
+  onSector: HudOptions["onSector"],
 ): HudOptions {
   return {
     stewards: {
@@ -587,6 +655,7 @@ function hudOptions(
     startHint: setup.stage === "race" && settings.startType === "standing",
     rewindRetired: false,
     onLap,
+    onSector,
   };
 }
 
@@ -1092,6 +1161,38 @@ async function bootEngine(): ReturnType<typeof loadSpeedDreams> {
   return module;
 }
 
+function pitWallFor(
+  parts: Pick<PitWallContext, "engine" | "hud" | "trace" | "radio" | "fastest">,
+  settings: Settings,
+  setup: SessionSetup,
+  wear: number,
+): PitWall {
+  const race = setup.stage === "race";
+  return new PitWall({
+    ...parts,
+    entrants: setup.field?.entrants ?? null,
+    race,
+    qualifying: setup.stage === "qualifying",
+    totalLaps: race ? settings.laps : null,
+    trackLength: parts.engine.trackLength(),
+    wearScale: wear,
+    chatter: settings.engineer,
+  });
+}
+
+function strategyChoice(
+  stage: Stage | null,
+  wall: PitWall,
+): StrategyChoice | null {
+  if (stage !== "race") return null;
+  return {
+    plans: wall.options,
+    choose: (index) => {
+      wall.choose(index);
+    },
+  };
+}
+
 async function main(): Promise<void> {
   if (!canvas || !hudRoot) throw new Error("drive page markup is missing");
   fitStage();
@@ -1169,6 +1270,7 @@ async function main(): Promise<void> {
     reference,
   );
   const { turns } = await fetchJson<{ turns: CourseTurn[] }>(circuit.map);
+  let wall: PitWall | null = null;
   const hud = new Hud(
     hudRoot,
     trace,
@@ -1182,11 +1284,38 @@ async function main(): Promise<void> {
         turns,
         (lap) => {
           log?.lap(lap, compoundId(engine.tyreInfo().compound));
+          wall?.onLap(lap, performance.now() / 1000);
+        },
+        (index, status) => {
+          wall?.onSector(index, status);
         },
       ),
       entry.tutorial,
     ),
   );
+  const radio = new Radio(element("[data-radio-root]"), () => ({
+    on: settings.engineerVoice,
+    volume: settings.engineerVolume,
+    subtitles: settings.hud.radio,
+  }));
+  const pitWall = pitWallFor(
+    {
+      engine,
+      hud,
+      trace,
+      radio,
+      fastest: (time) => {
+        replay?.fastestLap(
+          engine.frame()[frameIndex.time] ?? 0,
+          `Fastest lap - ${lapTime(time)}`,
+        );
+      },
+    },
+    settings,
+    setup,
+    raceSystems(settings, stage, lights, interventions).wearScale,
+  );
+  wall = pitWall;
   const pad = padLink();
   const sound = await soundStart;
 
@@ -1240,13 +1369,16 @@ async function main(): Promise<void> {
     if (paused || finished()) return;
     paused = true;
     sound.mute(true);
+    radio.mute(true);
     void menu.run(true).then((action) => {
-      if (action === "resume" || action === "replay") {
+      if (action === "resume" || action === "replay" || action === "photo") {
         pad.close();
         hud.setParts(settings.hud);
         paused = false;
         sound.mute(coach?.quiet ?? false);
+        radio.mute(false);
         if (action === "replay") openReplay();
+        if (action === "photo") livePhoto();
         return;
       }
       leave(action);
@@ -1255,6 +1387,86 @@ async function main(): Promise<void> {
 
   const freshPress = (event: KeyboardEvent) =>
     event.type === "keydown" && !event.repeat && coach?.touring !== true;
+  const names = replayNames(field, seat);
+  let photoFrom: "live" | "replay" | "podium" = "live";
+  const podium = new PodiumCeremony({
+    engine,
+    scene,
+    root: element("[data-podium-root]"),
+    rigUrl: crewUrl,
+    event: track.label,
+  });
+  const playPodium = async (done: () => void): Promise<boolean> => {
+    const shown = (on: boolean) => {
+      hudRoot.hidden = !on;
+      radio.mute(!on);
+    };
+    shown(false);
+    const started = await podium.play(
+      podiumPlaces(engine, setup.field, seat),
+      performance.now() / 1000,
+      () => {
+        shown(true);
+        done();
+      },
+    );
+    if (!started) shown(true);
+    return started;
+  };
+  if (params.has("debug"))
+    Object.assign(window, {
+      f1Podium: () => playPodium(() => undefined),
+    });
+  const staged = (now: number): boolean => {
+    const source = photo.active ? photo : podium.active ? podium : null;
+    if (!source) return false;
+    scene.setCinematic(source.update(now));
+    const { frame, cars } = source === photo ? photo.scene : podium;
+    scene.update(frame);
+    scene.updateField(cars);
+    draw();
+    return true;
+  };
+  const photo = new PhotoMode(element("[data-photo-root]"), canvas, {
+    draw,
+    names,
+    close: () => {
+      if (photoFrom === "replay") replay?.photoClosed();
+      if (photoFrom === "podium") podium.photoClosed();
+      if (photoFrom !== "live") return;
+      scene.setCinematic(null);
+      hudRoot.hidden = false;
+      engine.resync(performance.now() / 1000);
+      sound.mute(false);
+      radio.mute(false);
+    },
+  });
+  const livePhoto = () => {
+    if (podium.active) {
+      photoFrom = "podium";
+      podium.photoOpened();
+      photo.show(
+        podium.frame,
+        podium.cars,
+        podium.focusCar,
+        performance.now() / 1000,
+        podium.anchor,
+      );
+      return;
+    }
+    if (finished() || replay?.active) return;
+    photoFrom = "live";
+    hudRoot.hidden = true;
+    sound.mute(true);
+    radio.mute(true);
+    photo.show(
+      engine.frame(),
+      scene.fieldCars ?? engine.cars(),
+      0,
+      performance.now() / 1000,
+    );
+  };
+
   const phoneKey = (event: KeyboardEvent) => {
     if (event.code !== "KeyP" || buildingUp || typing(event)) return;
     event.preventDefault();
@@ -1266,7 +1478,9 @@ async function main(): Promise<void> {
   window.addEventListener("keydown", phoneKey, true);
   window.addEventListener("keyup", phoneKey, true);
 
-  const controls = raceControls(engine, hud, settings, stage === "race");
+  const controls = raceControls(engine, hud, settings, stage === "race", () =>
+    pitWall.nextCompound(),
+  );
 
   const drive = (down: boolean, event: KeyboardEvent) => {
     if (down && event.code === "Space") pitPressed = true;
@@ -1288,8 +1502,27 @@ async function main(): Promise<void> {
     if (wanted) openReplay();
     return wanted;
   };
+  const photoKey = (down: boolean, event: KeyboardEvent): boolean => {
+    if (photo.active) {
+      photo.key(event, down);
+      return true;
+    }
+    if (replay?.active) return false;
+    const wanted =
+      down && event.key.toLowerCase() === "o" && !event.repeat && !paused;
+    if (wanted) livePhoto();
+    return wanted;
+  };
+  const podiumKey = (down: boolean, event: KeyboardEvent): boolean => {
+    if (!podium.active) return false;
+    podium.key(event, down);
+    return true;
+  };
+  const sceneKey = (down: boolean, event: KeyboardEvent): boolean =>
+    podiumKey(down, event) || replayKey(down, event);
   const onKey = (down: boolean) => (event: KeyboardEvent) => {
-    if (buildingUp || replayKey(down, event)) return;
+    if (buildingUp || waiting || photoKey(down, event)) return;
+    if (sceneKey(down, event)) return;
     if (event.key === "Escape") {
       event.preventDefault();
       if (down && !event.repeat) pause();
@@ -1320,16 +1553,17 @@ async function main(): Promise<void> {
     root: element("[data-replay-root]"),
     reelRoot: element("[data-reel-root]"),
     hidden: [hudRoot],
-    names: field
-      ? field.entrants.map((entrant) =>
-          entrant.player ? "You" : seatDriver(seat, entrant).last,
-        )
-      : ["You"],
+    names,
     totalLaps: stage === "race" ? settings.laps : null,
     onTrack: () =>
       pitPhase === "track" && !finished() && (flow?.flashbackAllowed ?? true),
     mute: (muted) => {
       sound.mute(muted);
+      radio.mute(muted);
+    },
+    photo: (frame, cars, target) => {
+      photoFrom = "replay";
+      photo.show(frame, cars, target, performance.now() / 1000);
     },
   });
   const incident = new IncidentCam(
@@ -1342,7 +1576,13 @@ async function main(): Promise<void> {
   );
   const showIncidents = (messages: StewardMessage[]) => {
     const name = (car: number) => driverName(setup.field, car);
-    for (const message of messages)
+    for (const message of messages) {
+      const mine = message.car === 0 || message.other === 0;
+      if (message.stage === stewardStage.flag && mine)
+        replay.incident(
+          message.time - message.value,
+          flagCaption(message, name, turns),
+        );
       if (message.stage === stewardStage.flag)
         incident.play(
           message.car,
@@ -1351,6 +1591,7 @@ async function main(): Promise<void> {
           flagTitle(message),
           flagCaption(message, name, turns),
         );
+    }
   };
   document.body.dataset["driveStatus"] = "running";
   warmInBackground(
@@ -1428,6 +1669,10 @@ async function main(): Promise<void> {
     );
     if (control.serviceNow) {
       servedTyre = tyre;
+      replay.pitStop(
+        frame[frameIndex.time] ?? 0,
+        `Pit stop - ${compounds[tyre]?.label ?? ""} tyres`,
+      );
       engine.setPitCompound(tyre);
       engine.pitService(startFuel, control.wingChange);
       controls.wingServed();
@@ -1451,9 +1696,17 @@ async function main(): Promise<void> {
       stage,
       field,
       restart,
-      celebrate: (done) =>
-        replay.celebrate(
-          { first: seat.first, last: seat.last, team: teamOf(seat.team).name },
+      podium: playPodium,
+      onTiming: (timing) => {
+        pitWall.receive(timing);
+      },
+      highlights: (done) =>
+        replay.highlightsReel(
+          {
+            label: "Race Highlights",
+            name: `${seat.first} ${seat.last.toUpperCase()}`.trim(),
+            detail: track.label,
+          },
           done,
         ),
     });
@@ -1570,6 +1823,14 @@ async function main(): Promise<void> {
     sound.update(audio);
     const status = engine.carStatus();
     hud.update(frame, info, tyres, energy, status, now, steward, weather);
+    pitWall.update(now, {
+      frame,
+      inPitLane: control.phase !== "track",
+      weather,
+      wingDamage: Math.max(status.damage.wingLeft, status.damage.wingRight),
+      fuel: info.fuel,
+      fuelPerLap: fuelBurnPerLap(energy.lastLapFuel),
+    });
     beepLights();
     hud.updatePit(control);
     watchBest();
@@ -1648,7 +1909,11 @@ async function main(): Promise<void> {
   leaveStill(coach);
   waiting = readyFirst(params, coach);
   if (waiting)
-    void readyCard(element("[data-ready=root]"), pad).then(() => {
+    void readyCard(
+      element("[data-ready=root]"),
+      pad,
+      strategyChoice(stage, pitWall),
+    ).then(() => {
       waiting = false;
     });
   openWeekend();
@@ -1662,6 +1927,7 @@ async function main(): Promise<void> {
       return;
     }
     const now = performance.now() / 1000;
+    if (staged(now)) return;
     if (replay.active) {
       replay.frame(now);
       draw();

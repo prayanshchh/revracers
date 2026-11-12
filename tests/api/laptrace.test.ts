@@ -63,11 +63,13 @@ describe("sector deltas against the stored personal best", () => {
     ]);
   });
 
-  test("a sector set earlier this session raises the bar for the next lap", () => {
+  test("a sector set earlier this session becomes the personal best to beat", () => {
     const trace = new LapTrace(length, boundaries, reference);
-    drive(trace, 1, [8.5, 10.5, 12]);
-    const state = atEndOfLap(trace, 2, [8.8, 10.5, 12]);
-    expect(state.status[0]).toBe("faster");
+    drive(trace, 1, [9.6, 10.5, 12]);
+    expect(atEndOfLap(trace, 2, [9.7, 10.5, 12]).status[0]).toBe("slower");
+    const again = new LapTrace(length, boundaries, reference);
+    drive(again, 1, [9.6, 10.5, 12]);
+    expect(atEndOfLap(again, 2, [9.5, 10.5, 12]).status[0]).toBe("faster");
   });
 
   test("a first lap that starts up the road from the line never becomes the best", () => {
@@ -120,5 +122,43 @@ describe("sector deltas against the stored personal best", () => {
     trace.sample(1, 60, 6, 0);
     expect(trace.delta(50, 5)).toBeNull();
     expect(trace.delta(55, 5.2)).toBeCloseTo(-0.3, 5);
+  });
+});
+
+describe("sector colours against the whole field", () => {
+  test("purple only when no car on the grid has gone faster, green for my own best", () => {
+    const trace = new LapTrace(length, boundaries, reference);
+    trace.setRivals([9.6, 9.0, 9.0]);
+    const first = atEndOfLap(trace, 1, [9.5, 10.5, 10]);
+    expect(first.status.slice(0, 2)).toEqual(["pb", "faster"]);
+    expect(first.deltas[0]).toBeCloseTo(-0.1, 5);
+    expect(first.deltas[1]).toBeCloseTo(1.5, 5);
+    drive(trace, 1, [9.5, 10.5, 10]);
+    trace.setRivals([9.2, 9.0, 9.0]);
+    const second = atEndOfLap(trace, 2, [9.4, 10.4, 10]);
+    expect(second.status.slice(0, 2)).toEqual(["faster", "faster"]);
+    expect(second.deltas[0]).toBeCloseTo(0.2, 5);
+    drive(trace, 2, [9.4, 10.4, 10]);
+    const third = atEndOfLap(trace, 3, [9.45, 10.6, 10]);
+    expect(third.status.slice(0, 2)).toEqual(["slower", "slower"]);
+  });
+
+  test("a stored personal best from another session does not count in a race", () => {
+    const trace = new LapTrace(length, boundaries, reference);
+    trace.setRivals([null, null, null]);
+    const state = atEndOfLap(trace, 1, [12, 12, 12]);
+    expect(state.status.slice(0, 2)).toEqual(["pb", "pb"]);
+    expect(state.deltas.slice(0, 2)).toEqual([null, null]);
+  });
+
+  test("a flashback restores the personal bests the sectors were judged against", () => {
+    const trace = new LapTrace(length, boundaries);
+    trace.setRivals([20, 20, 20]);
+    drive(trace, 1, [10, 10, 10]);
+    const saved = trace.save();
+    drive(trace, 2, [9, 9, 9]);
+    trace.load(saved);
+    const state = atEndOfLap(trace, 2, [9.5, 10.5, 10]);
+    expect(state.status.slice(0, 2)).toEqual(["pb", "slower"]);
   });
 });

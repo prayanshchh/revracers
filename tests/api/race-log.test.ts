@@ -157,6 +157,7 @@ describe("RaceLog", () => {
     best: true,
     delta: null,
     valid: true,
+    full: true,
   };
 
   test("a session with no laps writes nothing", async () => {

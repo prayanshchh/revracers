@@ -529,6 +529,35 @@ function handOut(wanted: HandDraft, out: HandGoal, side: number): void {
   out.palm.normalize();
 }
 
+export function draftGoal(
+  draft: Draft,
+  goal: BodyGoal,
+  stature: number,
+  raises: readonly number[],
+  look: V3 | null,
+): void {
+  const [hf, hl, hu] = draft.hips;
+  goal.hips.set(hl, hu * stature, hf);
+  goal.lean = draft.lean;
+  goal.twist = draft.twist;
+  goal.side = draft.side;
+  draft.hands.forEach((wanted, i) => {
+    const out = goal.hands[i];
+    if (out) handOut(wanted, out, i);
+  });
+  draft.feet.forEach((wanted, i) => {
+    const out = goal.feet[i];
+    if (!out) return;
+    out.ball.set(wanted.ball[1], ballHeight + (raises[i] ?? 0), wanted.ball[0]);
+    out.heel = wanted.heel;
+    out.yaw = wanted.yaw;
+    out.pole.set(wanted.pole[1], wanted.pole[2], wanted.pole[0]).normalize();
+  });
+  goal.look = look
+    ? (goal.look ?? new THREE.Vector3()).set(look[1], look[2], look[0])
+    : null;
+}
+
 export class PitCrew {
   readonly root = new THREE.Group();
   private readonly members: Member[] = [];
@@ -1648,27 +1677,15 @@ export class PitCrew {
   private toGoal(member: Member, draft: Draft): void {
     const look = this.settle(member, draft);
     const { goal } = member;
-    const [hf, hl, hu] = draft.hips;
-    goal.hips.set(hl, hu * member.rig.stature, hf);
-    goal.lean = draft.lean;
-    goal.twist = draft.twist;
-    goal.side = draft.side;
-    draft.hands.forEach((wanted, i) => {
-      const out = goal.hands[i];
-      if (out) handOut(wanted, out, i);
-    });
-    draft.feet.forEach((wanted, i) => {
-      const out = goal.feet[i];
-      if (!out) return;
-      const raise = (wanted as FootDraft & { raise?: number }).raise ?? 0;
-      out.ball.set(wanted.ball[1], ballHeight + raise, wanted.ball[0]);
-      out.heel = wanted.heel;
-      out.yaw = wanted.yaw;
-      out.pole.set(wanted.pole[1], wanted.pole[2], wanted.pole[0]).normalize();
-    });
-    goal.look = look
-      ? (goal.look ?? new THREE.Vector3()).set(look[1], look[2], look[0])
-      : null;
+    draftGoal(
+      draft,
+      goal,
+      member.rig.stature,
+      draft.feet.map(
+        (wanted) => (wanted as FootDraft & { raise?: number }).raise ?? 0,
+      ),
+      look,
+    );
     member.rig.keepReach(
       goal,
       [draft.hands[0].hold ?? 0, draft.hands[1].hold ?? 0],

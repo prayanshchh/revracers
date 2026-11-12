@@ -87,7 +87,7 @@ const double softCompound = 0;
 const double wornPitLimit = 0.9;
 const double wornFlagLimit = 0.98;
 const int shortRaceLaps = 20;
-const int shortRaceCompound = 1;
+const int defaultRaceCompound = 1;
 const double missedCompoundPenalty = 30.0;
 const double damagePitLimit = 0.35;
 const double flatPitLimit = 0.6;
@@ -102,6 +102,9 @@ const double weatherLookLow = 30.0;
 const double weatherLookHigh = 150.0;
 const int hardFromLaps = 28;
 const int mediumFromLaps = 11;
+const int maxSectors = 4;
+const double sectorJump = 150.0;
+const int sectorFields = 3 * maxSectors;
 
 struct Stint
 {
@@ -163,6 +166,18 @@ struct Timing
     double pinX = 0;
     double pinY = 0;
     double pinYaw = 0;
+    int sectorLap = -1;
+    bool fromLine = false;
+    bool lastLapFull = false;
+    int nextBoundary = 0;
+    double lastDistance = 0;
+    double lastClock = 0;
+    int tracePoint = -1;
+    double splits[maxSectors] = {0, 0, 0, 0};
+    double sectorNow[maxSectors] = {0, 0, 0, 0};
+    double sectorLast[maxSectors] = {0, 0, 0, 0};
+    double sectorBest[maxSectors] = {0, 0, 0, 0};
+    double trace[timingPoints + 1] = {};
 };
 
 struct PassEvent
@@ -210,6 +225,14 @@ int playerStartCompound = -1;
 std::vector<int> startSlots;
 std::vector<int> carBays;
 bool playerChangedCompound = false;
+double sessionSectors[maxSectors] = {0, 0, 0, 0};
+int sessionSectorCars[maxSectors] = {-1, -1, -1, -1};
+double fastestLap = 0;
+int fastestCar = -1;
+int fastestLapNumber = 0;
+double fastestTrace[timingPoints + 1] = {};
+double lineShape[timingPoints + 1] = {};
+bool lineShapeReady = false;
 
 double uniform(double low, double high)
 {
@@ -389,7 +412,7 @@ void closeLapsRace(tSituation *s)
         t.laps = car->_laps;
         t.lastLap = car->_lastLapTime;
         sdAiSetLapNoise(i, 1.0 + uniform(-raceFormSwing, raceFormSwing));
-        if (car->_laps > 1 && car->_lastLapTime > 0 && !sdStewardsLastLapInvalid(i) && (t.bestLap == 0 || car->_lastLapTime < t.bestLap))
+        if (car->_laps > 1 && car->_lastLapTime > 0 && t.lastLapFull && !sdStewardsLastLapInvalid(i) && (t.bestLap == 0 || car->_lastLapTime < t.bestLap))
             t.bestLap = car->_lastLapTime;
     }
 }
@@ -498,7 +521,7 @@ void raceStrategy(tSituation *s)
             continue;
         if (weatherCall(s, i))
             continue;
-        bool hasNext = !t.weatherStop && totalLaps >= shortRaceLaps && t.stintIndex + 1 < plan.stints.size();
+        bool hasNext = !t.weatherStop && t.stintIndex + 1 < plan.stints.size();
         bool dueNext = hasNext && (double)car->_laps >= std::max(2.0, plan.stints[t.stintIndex + 1].from * totalLaps + t.pitJitter);
         double wearNow = sdTyresWorstWear(i);
         double perLap = car->_laps > t.stintStartLap ? (wearNow - t.stintStartWear) / (car->_laps - t.stintStartLap) : 0.0;
@@ -584,6 +607,189 @@ void parkInGarage(tSituation *s, int i)
     }
     t.status = STATUS_GARAGE;
     sdAiSetTask(i, AI_GARAGE);
+}
+
+int sectorBounds(double *bounds)
+{
+    tTrack *track = ReInfo->track;
+    int count = std::min(track->numberOfSectors - 1, maxSectors - 1);
+    int kept = 0;
+    for (int k = 0; k < count; k++)
+        if (track->sectors[k] > 0 && track->sectors[k] < track->length)
+            bounds[kept++] = track->sectors[k];
+    std::sort(bounds, bounds + kept);
+    return kept;
+}
+
+bool timedLap(int i)
+{
+    return kind == KIND_RACE || timing[i].run == RUN_FLYING;
+}
+
+void improveSector(int i, int k, double time)
+{
+    Timing &t = timing[i];
+    if (time <= 0)
+        return;
+    if (t.sectorBest[k] == 0 || time < t.sectorBest[k])
+        t.sectorBest[k] = time;
+    if (sessionSectors[k] == 0 || time < sessionSectors[k])
+    {
+        sessionSectors[k] = time;
+        sessionSectorCars[k] = i;
+    }
+}
+
+void noteSector(int i, int k, double time)
+{
+    timing[i].sectorNow[k] = time;
+    if (timedLap(i) && !sdStewardsLapInvalid(i))
+        improveSector(i, k, time);
+}
+
+void noteFastest(int i, double lap, int lapNumber, const double *trace)
+{
+    if (lap <= 0 || (fastestLap > 0 && lap >= fastestLap))
+        return;
+    fastestLap = lap;
+    fastestCar = i;
+    fastestLapNumber = lapNumber;
+    std::copy(trace, trace + timingPoints + 1, fastestTrace);
+}
+
+void startSectorLap(Timing &t, int lap, bool fromLine, double distance, double clock)
+{
+    t.sectorLap = lap;
+    t.fromLine = fromLine;
+    t.nextBoundary = 0;
+    t.lastDistance = distance;
+    t.lastClock = clock;
+    t.tracePoint = fromLine ? 0 : -1;
+    t.trace[0] = 0;
+    std::fill(t.splits, t.splits + maxSectors, 0.0);
+    std::fill(t.sectorNow, t.sectorNow + maxSectors, 0.0);
+}
+
+void closeSectorLap(tCarElt *car, int i, int count)
+{
+    Timing &t = timing[i];
+    if (car->_laps <= 1 || t.nextBoundary != count || (count == 0 && !t.fromLine))
+        return;
+    double lap = car->_lastLapTime;
+    double from = count > 0 ? t.splits[count - 1] : 0.0;
+    bool valid = timedLap(i) && !sdStewardsLastLapInvalid(i);
+    t.sectorNow[count] = lap - from;
+    if (valid)
+        improveSector(i, count, t.sectorNow[count]);
+    std::copy(t.sectorNow, t.sectorNow + maxSectors, t.sectorLast);
+    if (!t.fromLine || !valid || t.tracePoint < timingPoints - 1)
+        return;
+    for (int p = t.tracePoint + 1; p < timingPoints; p++)
+        t.trace[p] = t.trace[t.tracePoint];
+    t.trace[timingPoints] = lap;
+    noteFastest(i, lap, car->_laps - 1, t.trace);
+}
+
+void followTrace(Timing &t, double distance, double clock, double length)
+{
+    if (t.tracePoint < 0)
+        return;
+    int reached = std::min(timingPoints - 1, (int)floor(distance / length * timingPoints));
+    for (int p = t.tracePoint + 1; p <= reached; p++)
+    {
+        double at = p * length / timingPoints;
+        double span = distance - t.lastDistance;
+        double share = span > 1e-6 ? (at - t.lastDistance) / span : 1.0;
+        t.trace[p] = t.lastClock + (clock - t.lastClock) * std::max(0.0, std::min(1.0, share));
+    }
+    t.tracePoint = std::max(t.tracePoint, reached);
+}
+
+void clockSectors(tSituation *s, int i, const double *bounds, int count, double length)
+{
+    tCarElt *car = s->cars[i];
+    Timing &t = timing[i];
+    double distance = car->_distFromStartLine;
+    double clock = car->_curLapTime;
+    if (car->_laps != t.sectorLap)
+    {
+        bool crossed = t.sectorLap >= 0 && car->_laps == t.sectorLap + 1;
+        t.lastLapFull = crossed && t.fromLine && t.nextBoundary == count;
+        if (crossed)
+            closeSectorLap(car, i, count);
+        startSectorLap(t, car->_laps, crossed && distance < sectorJump, distance, clock);
+        return;
+    }
+    double moved = distance - t.lastDistance;
+    if (moved < -sectorJump || moved > sectorJump)
+    {
+        t.fromLine = false;
+        t.tracePoint = -1;
+        t.nextBoundary = count + 1;
+    }
+    else if (moved > 0)
+    {
+        while (t.nextBoundary < count && t.lastDistance < bounds[t.nextBoundary] && distance >= bounds[t.nextBoundary])
+        {
+            int k = t.nextBoundary;
+            double share = (bounds[k] - t.lastDistance) / moved;
+            double at = t.lastClock + (clock - t.lastClock) * share;
+            t.splits[k] = at;
+            if (k > 0 || t.fromLine)
+                noteSector(i, k, at - (k == 0 ? 0.0 : t.splits[k - 1]));
+            t.nextBoundary++;
+        }
+        followTrace(t, distance, clock, length);
+    }
+    t.lastDistance = distance;
+    t.lastClock = clock;
+}
+
+void buildLineShape(double length)
+{
+    if (lineShapeReady)
+        return;
+    double total = 0;
+    int steps = timingPoints * 8;
+    double step = length / steps;
+    lineShape[0] = 0;
+    for (int k = 0; k < steps; k++)
+    {
+        total += step / std::max(1.0, sdAiLineSpeed(std::min(length - 0.01, (k + 0.5) * step)));
+        if ((k + 1) % 8 == 0)
+            lineShape[(k + 1) / 8] = total;
+    }
+    for (int p = 0; p <= timingPoints; p++)
+        lineShape[p] /= std::max(1e-6, total);
+    lineShapeReady = true;
+}
+
+double shapeAt(double distance, double length)
+{
+    double x = std::max(0.0, std::min(1.0, distance / length)) * timingPoints;
+    int low = std::min(timingPoints - 1, (int)floor(x));
+    return lineShape[low] + (lineShape[low + 1] - lineShape[low]) * (x - low);
+}
+
+void simulateSectors(int i, double lap)
+{
+    double length = sdAiLength();
+    buildLineShape(length);
+    double bounds[maxSectors];
+    int count = sectorBounds(bounds);
+    Timing &t = timing[i];
+    double previous = 0;
+    for (int k = 0; k <= count; k++)
+    {
+        double at = k < count ? lap * shapeAt(bounds[k], length) : lap;
+        noteSector(i, k, at - previous);
+        previous = at;
+    }
+    std::copy(t.sectorNow, t.sectorNow + maxSectors, t.sectorLast);
+    double trace[timingPoints + 1];
+    for (int p = 0; p <= timingPoints; p++)
+        trace[p] = lap * lineShape[p];
+    noteFastest(i, lap, 1, trace);
 }
 
 void recordRunLap(tSituation *s, int i, double lap, bool valid)
@@ -728,7 +934,10 @@ void qualifyingTick(tSituation *s)
 void simulateRun(tSituation *s, int i)
 {
     double evolution = 1.0 - 0.01 * ((double)segment + 1.0) / 3.0 + 0.01;
-    recordRunLap(s, i, expectedLap(i) * evolution * (1.0 + uniform(-simulatedNoise, simulatedNoise)), true);
+    double lap = expectedLap(i) * evolution * (1.0 + uniform(-simulatedNoise, simulatedNoise));
+    timing[i].run = RUN_FLYING;
+    simulateSectors(i, lap);
+    recordRunLap(s, i, lap, true);
     endRun(s, i);
 }
 
@@ -795,7 +1004,7 @@ void beginRace(tSituation *s)
         timing[i].pitJitter = uniform(-1.2, 1.2) * std::min(1.0, totalLaps / 20.0 + 0.3);
         timing[i].weatherPatience = weatherUniform(weatherPatienceLow, weatherPatienceHigh);
         timing[i].weatherLook = weatherUniform(weatherLookLow, weatherLookHigh);
-        int dry = totalLaps < shortRaceLaps ? shortRaceCompound : plan.stints.empty() ? sdTyresCompound(i) : plan.stints[0].compound;
+        int dry = plan.stints.empty() ? defaultRaceCompound : plan.stints[0].compound;
         int start = sdWeatherIdealCompound(sdWeatherFutureLine(0), dry);
         timing[i].weatherStop = start != dry;
         sdTyresService(i, start);
@@ -864,6 +1073,11 @@ void sdSessionBegin(tSituation *s)
     stats = Stats();
     passLog.clear();
     phase = PHASE_RUNNING;
+    std::fill(sessionSectors, sessionSectors + maxSectors, 0.0);
+    std::fill(sessionSectorCars, sessionSectorCars + maxSectors, -1);
+    fastestLap = 0;
+    fastestCar = -1;
+    fastestLapNumber = 0;
     int capacity = timingPoints * timingLaps;
     for (int i = 0; i < n; i++)
     {
@@ -934,6 +1148,11 @@ void sdSessionAfterStep(tSituation *s)
         return;
     holdParked(s);
     trackContacts(s);
+    double bounds[maxSectors];
+    int count = sectorBounds(bounds);
+    double length = ReInfo->track->length;
+    for (int i = 0; i < s->_ncars && i < (int)timing.size(); i++)
+        clockSectors(s, i, bounds, count, length);
 }
 
 int sdSessionKindOf()
@@ -1109,6 +1328,39 @@ EMSCRIPTEN_KEEPALIVE void sdQualifyingTimes(int index, double *out)
         out[i] = timing[index].segmentTimes[i];
 }
 
+EMSCRIPTEN_KEEPALIVE int sdFieldSectors(double *out)
+{
+    int n = (int)timing.size();
+    for (int i = 0; i < n; i++)
+    {
+        const Timing &t = timing[i];
+        double *c = &out[i * sectorFields];
+        for (int k = 0; k < maxSectors; k++)
+        {
+            c[k] = t.sectorNow[k];
+            c[maxSectors + k] = t.sectorLast[k];
+            c[2 * maxSectors + k] = t.sectorBest[k];
+        }
+    }
+    double *tail = &out[n * sectorFields];
+    for (int k = 0; k < maxSectors; k++)
+    {
+        tail[k] = sessionSectors[k];
+        tail[maxSectors + k] = sessionSectorCars[k];
+    }
+    tail[2 * maxSectors] = fastestLap;
+    tail[2 * maxSectors + 1] = fastestCar;
+    tail[2 * maxSectors + 2] = fastestLapNumber;
+    return n;
+}
+
+EMSCRIPTEN_KEEPALIVE int sdSessionBestTrace(double *out)
+{
+    for (int p = 0; p <= timingPoints; p++)
+        out[p] = fastestTrace[p];
+    return fastestCar;
+}
+
 EMSCRIPTEN_KEEPALIVE int sdSessionPasses(double *out, int max, int from)
 {
     int total = (int)passLog.size();
@@ -1189,6 +1441,16 @@ EMSCRIPTEN_KEEPALIVE void sdSessionSimulate()
 {
     if (kind == KIND_QUALIFYING && phase != PHASE_COMPLETE && phase != PHASE_WEEKEND_DONE)
         simulateRemaining(ReInfo->s);
+}
+
+EMSCRIPTEN_KEEPALIVE int sdSessionStartTyres(int compound)
+{
+    if (kind == KIND_QUALIFYING || ReInfo->s->currentTime > 0)
+        return 0;
+    sdTyresService(0, compound);
+    playerStartCompound = sdTyresCompound(0);
+    playerChangedCompound = false;
+    return 1;
 }
 
 EMSCRIPTEN_KEEPALIVE void sdSessionPitCompound(int compound)

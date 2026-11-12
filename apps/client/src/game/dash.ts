@@ -1,5 +1,6 @@
 import { boostMode, type EnergyInfo } from "./energy.ts";
 import { putAttr, putData, putStyle, putText } from "./hud-dom.ts";
+import { seeded } from "./seeded.ts";
 
 interface Point {
   x: number;
@@ -166,17 +167,6 @@ const liveSvg = `
   <polygon class="pedal-bar throttle" data-hud="in-throttle" points="" />
 </g>
 `;
-
-function seeded(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 function streak(context: CanvasRenderingContext2D, random: () => number): void {
   const x = random() * 110;

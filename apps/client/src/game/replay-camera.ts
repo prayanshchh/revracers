@@ -24,12 +24,39 @@ const heliUp = 48;
 const heliFov = 26;
 const sideOffset = 6.5;
 
+interface MountedCamera {
+  back: number;
+  side: number;
+  rise: number;
+  aim: [number, number, number];
+  fov: number;
+}
+
+const mounted: Record<string, MountedCamera> = {
+  onboard: { back: 0.15, side: 0, rise: 0.84, aim: [-12, 0, 0.35], fov: 72 },
+  nose: { back: -1.75, side: 0, rise: 0.6, aim: [-22, 0, 0.35], fov: 66 },
+  rear: { back: 2.25, side: 0, rise: 1.0, aim: [14, 0, 0.55], fov: 58 },
+  wheel: {
+    back: -0.95,
+    side: 0.78,
+    rise: 0.5,
+    aim: [-16, 0.35, 0.35],
+    fov: 66,
+  },
+  blimp: { back: 70, side: 45, rise: 165, aim: [-25, 0, 0], fov: 17 },
+};
+
 const replayCameras = [
   { id: "tv", label: "TV Camera" },
   { id: "chase", label: "Chase" },
   { id: "tcam", label: "T-Cam" },
+  { id: "onboard", label: "Cockpit" },
+  { id: "nose", label: "Nose Cam" },
+  { id: "wheel", label: "Wheel Cam" },
+  { id: "rear", label: "Rear Wing Cam" },
   { id: "side", label: "Trackside Follow" },
   { id: "heli", label: "Helicopter" },
+  { id: "blimp", label: "Blimp" },
 ] as const;
 
 export type CameraId = (typeof replayCameras)[number]["id"];
@@ -82,6 +109,10 @@ export class ReplayCamera {
 
   get label(): string {
     return replayCameras[this.camera]?.label ?? "";
+  }
+
+  get id(): CameraId {
+    return replayCameras[this.camera]?.id ?? "tv";
   }
 
   cut(): void {
@@ -162,6 +193,13 @@ export class ReplayCamera {
         eye: at(offset(heliBack, heliSide, heliUp)),
         target: at(offset(0, 0, 0)),
         fov: heliFov,
+      };
+    const mount = mounted[id];
+    if (mount)
+      return {
+        eye: at(offset(mount.back, mount.side, mount.rise)),
+        target: at(offset(...mount.aim)),
+        fov: mount.fov,
       };
     return this.tvPose();
   }

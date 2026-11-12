@@ -9,7 +9,7 @@ function heavyRainRace(): void {
 }
 
 if (process.platform !== "linux") {
-  test("rain, replay cameras and a flashback put nothing new on the GPU", async ({
+  test("rain, every replay camera, a photo and a flashback put nothing new on the GPU", async ({
     page,
   }) => {
     test.setTimeout(420_000);
@@ -28,10 +28,22 @@ if (process.platform !== "linux") {
     const overlay = page.locator("[data-replay-root]");
     await page.keyboard.press("r");
     await expect(overlay).toBeVisible();
-    for (let camera = 0; camera < 5; camera++) {
+    for (let camera = 0; camera < 10; camera++) {
       await page.waitForTimeout(700);
       await page.keyboard.press("c");
     }
+    await page.keyboard.press("o");
+    const panel = page.locator("[data-photo=panel]");
+    await expect(panel).toBeVisible();
+    await page.keyboard.press("g");
+    const saved = page.waitForEvent("download");
+    await page.keyboard.press("Enter");
+    expect((await saved).suggestedFilename()).toMatch(
+      /^revracers-\d{4}-\d{2}-\d{2}-\d{6}\.png$/,
+    );
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(overlay).toBeVisible();
     await page.keyboard.down("ArrowLeft");
     await page.waitForTimeout(800);
     await page.keyboard.up("ArrowLeft");

@@ -244,6 +244,18 @@ export class GarageScreen {
   }
 }
 
+const pointsTable = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
+
+function racePoints(row: CarTiming): number {
+  if (!row.finished || row.disqualified) return 0;
+  return pointsTable[row.position - 1] ?? 0;
+}
+
+function fastestBest(timing: CarTiming[]): number {
+  const times = timing.map((row) => row.best).filter((t) => t > 0);
+  return times.length > 0 ? Math.min(...times) : 0;
+}
+
 export interface ClassificationAction {
   label: string;
   run: () => void;
@@ -266,28 +278,51 @@ function driverCells(entrant: Entrant | undefined): HTMLTableCellElement[] {
   return [cell(entrant.name), team];
 }
 
+function fastestCell(best: number): HTMLTableCellElement {
+  const td = cell("", "time purple");
+  td.innerHTML = '<svg class="fl-mark"><use href="#stopwatch" /></svg>';
+  td.append(lapText(best));
+  return td;
+}
+
+function raceCells(
+  row: CarTiming,
+  leader: CarTiming | undefined,
+  fastest: number,
+  penalty: string,
+): HTMLTableCellElement[] {
+  const purple = fastest > 0 && row.best === fastest;
+  const points = racePoints(row);
+  return [
+    cell(String(row.pits), "stops"),
+    purple ? fastestCell(row.best) : cell(lapText(row.best), "time"),
+    cell(raceGap(row, leader), "gap"),
+    cell(penalty, "pen"),
+    cell(points > 0 ? String(points) : "", "pts"),
+  ];
+}
+
 function classificationRow(
   row: CarTiming,
   entrant: Entrant | undefined,
   leader: CarTiming | undefined,
   mode: "race" | "qualifying",
   penalty: string,
+  fastest: number,
 ): HTMLTableRowElement {
-  const race = mode === "race";
   const tr = document.createElement("tr");
   tr.classList.toggle("me", row.index === 0);
   tr.append(
     cell(String(row.position), "pos"),
     ...driverCells(entrant),
     tyreCell(row.compound),
-    cell(lapText(race ? row.best : row.segmentBest || row.best), "time"),
-    cell(
-      race
-        ? raceGap(row, leader)
-        : qualifyingGap(row, leader?.segmentBest ?? 0),
-      "gap",
-    ),
-    cell(penalty, "pen"),
+    ...(mode === "race"
+      ? raceCells(row, leader, fastest, penalty)
+      : [
+          cell(lapText(row.segmentBest || row.best), "time"),
+          cell(qualifyingGap(row, leader?.segmentBest ?? 0), "gap"),
+          cell(penalty, "pen"),
+        ]),
   );
   return tr;
 }
@@ -304,6 +339,7 @@ function classificationRows(
     mode === "qualifying" && knockouts[segment]
       ? dangerFrom(timing, segment)
       : Infinity;
+  const fastest = fastestBest(timing);
   return order.map((row, index) => {
     const tr = classificationRow(
       row,
@@ -311,6 +347,7 @@ function classificationRows(
       order[0],
       mode,
       penalties[row.index] ?? "",
+      fastest,
     );
     tr.style.setProperty("--i", String(index));
     tr.classList.toggle("danger", !row.eliminated && row.position > danger);
@@ -342,7 +379,10 @@ export function showClassification(
 ): void {
   find("[data-results=tag]").textContent = subtitle;
   find("[data-results=title]").textContent = title;
-  const headers = ["Pos", "Driver", "Team", "Tyre", "Best", "Gap", "Pen"];
+  const headers =
+    mode === "race"
+      ? ["Pos", "Driver", "Team", "Tyre", "Stops", "Best", "Gap", "Pen", "Pts"]
+      : ["Pos", "Driver", "Team", "Tyre", "Best", "Gap", "Pen"];
   find("[data-results=head]").replaceChildren(
     ...headers.map((label) => {
       const th = document.createElement("th");

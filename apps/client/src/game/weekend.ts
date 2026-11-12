@@ -7,7 +7,6 @@ interface SeasonDriver {
   qualifyingGap: number;
   raceGap: number;
   realGrid: number;
-  stints: { compound: number; from: number }[];
 }
 
 export interface Team {
@@ -145,7 +144,7 @@ function toEntrant(driver: SeasonDriver): Entrant {
     raceSpeed: 1 - (speedPerGap * driver.raceGap) / percent,
     power: 1 - (powerPerGap * gap) / percent,
     realGrid: driver.realGrid,
-    stints: driver.stints,
+    stints: [],
   };
 }
 

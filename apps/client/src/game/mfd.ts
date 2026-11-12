@@ -6,6 +6,14 @@ import {
   type WeatherInfo,
 } from "./weather.ts";
 import { putAttr, putData, putStyle, putText } from "./hud-dom.ts";
+import { type Plan, stintRange } from "./strategy.ts";
+
+export interface StrategyView {
+  plan: Plan | null;
+  lap: number;
+  boxLap: number | null;
+  lifeLaps: number | null;
+}
 
 interface PartDamage {
   wingLeft: number;
@@ -28,6 +36,7 @@ export interface CarStatus {
 
 export const mfdPages = [
   "quick",
+  "strategy",
   "weather",
   "temps",
   "wear",
@@ -265,7 +274,7 @@ export class Mfd {
   private shownForecast = "";
 
   update(tyres: TyreInfo, status: CarStatus, weather: WeatherInfo): void {
-    if (this.page === "quick") return;
+    if (this.page === "quick" || this.page === "strategy") return;
     if (this.page === "weather") {
       this.updateWeather(tyres, weather);
       return;
@@ -310,6 +319,57 @@ export class Mfd {
       dry,
     );
     set("tyre-call", call > 2 ? (compounds[call]?.label ?? "") : "Slicks");
+  }
+
+  private strategyKey = "";
+
+  showStrategy(view: StrategyView): void {
+    const key = JSON.stringify(view);
+    if (key === this.strategyKey) return;
+    this.strategyKey = key;
+    const host = this.root.querySelector<HTMLElement>(
+      "[data-hud=strategy-stints]",
+    );
+    const plan = view.plan;
+    host?.replaceChildren(
+      ...(plan?.stints ?? []).map((stint, i, stints) => {
+        const row = document.createElement("div");
+        row.className = "strategy-stint";
+        const tyre = compounds[stint.compound] ?? compounds[1];
+        const badge = document.createElement("i");
+        badge.textContent = tyre.letter;
+        badge.style.setProperty("--tyre", tyre.colour);
+        const name = document.createElement("b");
+        name.textContent = tyre.label;
+        const laps = document.createElement("span");
+        laps.textContent = stintRange(
+          { stints, stops: [], time: 0 },
+          i,
+          view.lap,
+        );
+        row.classList.toggle("now", i === 0);
+        row.append(badge, name, laps);
+        return row;
+      }),
+    );
+    const set = (id: string, text: string) => {
+      const node = this.root.querySelector<HTMLElement>(`[data-hud=${id}]`);
+      if (node) putText(node, text);
+    };
+    set(
+      "strategy-box",
+      view.boxLap === null
+        ? plan
+          ? "No stop"
+          : "Weather call"
+        : view.boxLap <= view.lap
+          ? "Box this lap"
+          : `Lap ${String(view.boxLap)}`,
+    );
+    set(
+      "strategy-life",
+      view.lifeLaps === null ? "-" : `${view.lifeLaps.toFixed(1)} laps`,
+    );
   }
 
   private setPage(page: Page): void {

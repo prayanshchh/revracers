@@ -517,6 +517,7 @@ export class Scene {
   private readonly shakeTurn = new THREE.Matrix4();
   private readonly shakeEye = new THREE.Vector3();
   private readonly cinematicLook = new THREE.Matrix4();
+  private readonly rollMatrix = new THREE.Matrix4();
   private shake: Shake | null = null;
   private lastFeel = 0;
   private readonly eye = new THREE.Vector3();
@@ -1310,6 +1311,8 @@ export class Scene {
   private applyCinematic(pose: CameraPose): void {
     const eye = new THREE.Vector3(...pose.eye);
     this.cinematicLook.lookAt(eye, new THREE.Vector3(...pose.target), upAxis);
+    if (pose.roll)
+      this.cinematicLook.multiply(this.rollMatrix.makeRotationZ(pose.roll));
     this.cinematicLook.setPosition(eye);
     this.camera.matrixWorld.copy(this.cinematicLook);
     this.camera.matrixWorldInverse.copy(this.cinematicLook).invert();

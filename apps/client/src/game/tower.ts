@@ -4,6 +4,7 @@ import { compounds } from "./tyres.ts";
 import type { Entrant } from "./weekend.ts";
 
 const aroundRows = 5;
+const moveShown = 6000;
 const statusGarage = 5;
 const statusOut = 1;
 const statusIn = 3;
@@ -62,9 +63,27 @@ interface TowerRow {
   shown: string;
 }
 
+function positionMoves(
+  before: Map<number, number>,
+  timing: { index: number; position: number }[],
+): Map<number, "up" | "down"> {
+  const moves = new Map<number, "up" | "down">();
+  for (const row of timing) {
+    const was = before.get(row.index);
+    if (was !== undefined && was !== row.position)
+      moves.set(row.index, row.position < was ? "up" : "down");
+    before.set(row.index, row.position);
+  }
+  return moves;
+}
+
 export class Tower {
   private readonly rows: TowerRow[];
   private full = false;
+  private readonly positions = new Map<number, number>();
+  private readonly moved = new Map<number, { way: string; until: number }>();
+  private readonly strip: HTMLElement;
+  private stripShown = "";
 
   constructor(
     private readonly list: HTMLElement,
@@ -73,6 +92,34 @@ export class Tower {
   ) {
     this.list.replaceChildren();
     this.rows = entrants.map(() => this.makeRow());
+    this.list.parentElement?.querySelector(".tower-fl")?.remove();
+    this.strip = document.createElement("div");
+    this.strip.className = "tower-fl";
+    this.strip.dataset["hud"] = "fastest-lap";
+    this.strip.hidden = true;
+    this.list.after(this.strip);
+  }
+
+  private showFastest(timing: CarTiming[], fastestCar: number): void {
+    const row = timing.find((t) => t.index === fastestCar);
+    const entrant = this.entrants[fastestCar];
+    const best = row?.best ?? 0;
+    const show = !this.qualifying && entrant !== undefined && best > 0;
+    const key = show ? `${entrant.code}|${lapText(best)}` : "";
+    if (key === this.stripShown) return;
+    this.stripShown = key;
+    this.strip.hidden = !show;
+    if (show)
+      this.paintFastest(entrant.player ? "YOU" : surname(entrant), best);
+  }
+
+  private paintFastest(name: string, best: number): void {
+    const icon = '<svg><use href="#stopwatch" /></svg>';
+    this.strip.innerHTML = `${icon}<small>Fastest Lap</small><span></span><b></b>`;
+    const label = this.strip.querySelector("span");
+    const time = this.strip.querySelector("b");
+    if (label) label.textContent = name;
+    if (time) time.textContent = lapText(best);
   }
 
   private makeRow(): TowerRow {
@@ -92,7 +139,10 @@ export class Tower {
     const pen = document.createElement("em");
     pen.className = "row-pen";
     pen.hidden = true;
-    root.append(pos, name, tyre, gap, pen);
+    const flag = document.createElement("i");
+    flag.className = "row-flag";
+    flag.innerHTML = '<svg><use href="#stopwatch" /></svg>';
+    root.append(pos, name, tyre, gap, flag, pen);
     root.hidden = true;
     this.list.append(root);
     return { root, pos, name, logo, label, tyre, gap, pen, shown: "" };
@@ -111,7 +161,18 @@ export class Tower {
     return ranked.slice(from, from + aroundRows);
   }
 
-  update(timing: CarTiming[], penalties: string[]): void {
+  private moves(timing: CarTiming[]): void {
+    const now = performance.now();
+    for (const [car, way] of positionMoves(this.positions, timing))
+      if (!this.qualifying)
+        this.moved.set(car, { way, until: now + moveShown });
+    for (const [car, move] of this.moved)
+      if (move.until < now) this.moved.delete(car);
+  }
+
+  update(timing: CarTiming[], penalties: string[], fastestCar = -1): void {
+    this.moves(timing);
+    this.showFastest(timing, fastestCar);
     const ranked = [...timing].sort((a, b) => a.position - b.position);
     const player = timing[0];
     const leaderBest = ranked[0]?.segmentBest ?? 0;
@@ -131,9 +192,13 @@ export class Tower {
         : raceGapText(data, player, isPlayer);
       const compound = compounds[data.compound] ?? compounds[1];
       const pen = penalties[data.index] ?? "";
-      const key = `${String(data.position)}|${entrant.code}|${gap}|${compound.letter}|${pen}`;
+      const fastest = data.index === fastestCar;
+      const move = this.moved.get(data.index)?.way ?? "";
+      const key = `${String(data.position)}|${entrant.code}|${gap}|${compound.letter}|${pen}|${String(fastest)}|${move}`;
       if (key === row.shown) return;
       row.shown = key;
+      row.root.classList.toggle("fl", fastest);
+      row.root.dataset["move"] = move;
       row.pos.textContent = String(data.position);
       row.label.textContent = surname(entrant);
       row.logo.replaceChildren(teamLogo(entrant.car, entrant.colour));

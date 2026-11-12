@@ -5,6 +5,7 @@ export interface LapResult {
   best: boolean;
   delta: number | null;
   valid: boolean;
+  full: boolean;
 }
 
 type SectorStatus = "pb" | "faster" | "slower";
@@ -34,6 +35,16 @@ export interface LapTraceState {
   sectorTimes: (number | null)[];
   sectorStatus: SectorState["status"];
   sectorDeltas: SectorState["deltas"];
+  sessionSectors: (number | null)[];
+}
+
+function below(time: number, reference: number | null | undefined): boolean {
+  return reference === null || reference === undefined || time < reference;
+}
+
+function smallest(...times: (number | null | undefined)[]): number | null {
+  const known = times.filter((t): t is number => t !== null && t !== undefined);
+  return known.length > 0 ? Math.min(...known) : null;
 }
 
 export class LapTrace {
@@ -47,6 +58,8 @@ export class LapTrace {
   private sectorStatus: SectorState["status"];
   private sectorDeltas: SectorState["deltas"];
   private readonly fastestSectors: number[];
+  private sessionSectors: (number | null)[];
+  private rivals: (number | null)[] | null = null;
 
   constructor(
     length: number,
@@ -63,6 +76,23 @@ export class LapTrace {
     );
     this.sectorStatus = this.sectorTimes.map(() => null);
     this.sectorDeltas = this.sectorTimes.map(() => null);
+    this.sessionSectors = this.sectorTimes.map(() => null);
+  }
+
+  setRivals(rivals: (number | null)[] | null): void {
+    this.rivals = rivals;
+  }
+
+  get onFullLap(): boolean {
+    return this.lap >= 1 && this.fromLine;
+  }
+
+  recorded(distance: number): boolean {
+    const bin = Math.max(
+      0,
+      Math.min(this.current.length - 1, Math.floor(distance)),
+    );
+    return this.lap >= 1 && !Number.isNaN(this.current[bin] ?? Number.NaN);
   }
 
   save(): LapTraceState {
@@ -76,6 +106,7 @@ export class LapTrace {
       sectorTimes: [...this.sectorTimes],
       sectorStatus: [...this.sectorStatus],
       sectorDeltas: [...this.sectorDeltas],
+      sessionSectors: [...this.sessionSectors],
     };
   }
 
@@ -93,6 +124,7 @@ export class LapTrace {
     this.sectorTimes = [...state.sectorTimes];
     this.sectorStatus = [...state.sectorStatus];
     this.sectorDeltas = [...state.sectorDeltas];
+    this.sessionSectors = [...state.sessionSectors];
   }
 
   get bestTime(): number | null {
@@ -200,21 +232,35 @@ export class LapTrace {
     });
   }
 
+  private references(index: number): {
+    personal: number | null;
+    overall: number | null;
+    delta: number | null;
+  } {
+    const field = this.rivals !== null;
+    const own = field ? null : this.bestSectors[index];
+    const personal = smallest(this.sessionSectors[index], own);
+    const rival = field ? this.rivals?.[index] : this.fastestSectors[index];
+    const overall = smallest(personal, rival);
+    return { personal, overall, delta: field ? overall : (own ?? null) };
+  }
+
   private closeSector(index: number, at: number): void {
     const start = index === 0 ? 0 : this.splitAt(index - 1);
     const time = at - start;
     this.sectorTimes[index] = time;
-    const reference = this.bestSectors[index];
+    const { personal, overall, delta } = this.references(index);
+    this.sectorDeltas[index] = delta === null ? null : time - delta;
+    this.sectorStatus[index] = below(time, overall)
+      ? "pb"
+      : below(time, personal)
+        ? "faster"
+        : "slower";
+    if (below(time, this.sessionSectors[index]))
+      this.sessionSectors[index] = time;
     const fastest = this.fastestSectors[index];
-    this.sectorDeltas[index] =
-      reference === undefined ? null : time - reference;
-    if (fastest === undefined || time < fastest) {
+    if (fastest === undefined || time < fastest)
       this.fastestSectors[index] = time;
-      this.sectorStatus[index] = "pb";
-      return;
-    }
-    this.sectorStatus[index] =
-      reference !== undefined && time < reference ? "faster" : "slower";
   }
 
   private splitAt(index: number): number {
@@ -236,6 +282,14 @@ export class LapTrace {
       this.best = trace;
       this.bestSectors = sectors;
     }
-    return { lap, time: lapTime, sectors, best, delta, valid };
+    return {
+      lap,
+      time: lapTime,
+      sectors,
+      best,
+      delta,
+      valid,
+      full: this.fromLine,
+    };
   }
 }

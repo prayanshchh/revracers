@@ -6,15 +6,16 @@ import { type CameraId, ReplayCamera, type Station } from "./replay-camera.ts";
 
 export interface ReelShot {
   tape: ReplayTape;
+  car: number;
   title: string;
   detail: string;
   camera: CameraId;
 }
 
-export interface Winner {
-  first: string;
-  last: string;
-  team: string;
+export interface ReelHeader {
+  label: string;
+  name: string;
+  detail: string;
 }
 
 const captionDelay = 0.6;
@@ -40,7 +41,7 @@ export class VictoryReel {
     this.cars = new Float64Array(carCount * carStride);
     this.view = new ReplayCamera(stations, trackLength);
     root.innerHTML = `
-      <div class="reel-head"><small>Race Winner</small><b data-reel="name"></b><span data-reel="team"></span></div>
+      <div class="reel-head"><small data-reel="label"></small><b data-reel="name"></b><span data-reel="team"></span></div>
       <div class="reel-caption" data-reel="caption"><b data-reel="title"></b><span data-reel="detail"></span></div>
       <div class="reel-dots" data-reel="dots"></div>
       <button type="button" class="reel-skip" data-reel="skip"><kbd>↵</kbd>Skip</button>`;
@@ -65,7 +66,7 @@ export class VictoryReel {
 
   play(
     shots: ReelShot[],
-    winner: Winner,
+    header: ReelHeader,
     wallNow: number,
     done: () => void,
   ): boolean {
@@ -75,8 +76,9 @@ export class VictoryReel {
     this.done = done;
     this.playing = true;
     this.lastWall = wallNow;
-    putText(this.part("name"), `${winner.first} ${winner.last.toUpperCase()}`);
-    putText(this.part("team"), winner.team);
+    putText(this.part("label"), header.label);
+    putText(this.part("name"), header.name);
+    putText(this.part("team"), header.detail);
     this.part("dots").replaceChildren(
       ...usable.map(() => document.createElement("i")),
     );
@@ -100,7 +102,7 @@ export class VictoryReel {
     this.index = index;
     this.time = shot.tape.start;
     this.view.use(shot.camera);
-    this.view.follow(0);
+    this.view.follow(shot.car);
     putText(this.part("title"), shot.title);
     putText(this.part("detail"), shot.detail);
     this.part("caption").classList.remove("on");

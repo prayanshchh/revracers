@@ -121,7 +121,17 @@
         <div class="timer-delta part-delta" data-hud="delta" data-state="idle">
           <svg><use href="#stopwatch" /></svg
           ><span data-hud="delta-label">Delta</span
-          ><b data-hud="delta-value">--.---</b>
+          ><em data-hud="delta-ref"></em><b data-hud="delta-value">--.---</b>
+        </div>
+        <div class="timer-gaps part-gaps" data-hud="gaps" hidden>
+          <div data-hud="gap-ahead" data-trend="">
+            <i>Ahead</i><span data-hud="gap-ahead-name"></span
+            ><b data-hud="gap-ahead-value"></b>
+          </div>
+          <div data-hud="gap-behind" data-trend="">
+            <i>Behind</i><span data-hud="gap-behind-name"></span
+            ><b data-hud="gap-behind-value"></b>
+          </div>
         </div>
         <div class="timer-extra" data-hud="extra">
           <div class="timer-extra-in">
@@ -140,6 +150,11 @@
         <div class="toast-body">
           <b data-hud="toast-title"></b><span data-hud="toast-detail"></span>
         </div>
+      </section>
+
+      <section class="streak" data-hud="streak">
+        <i class="streak-mark"></i>
+        <div><b>Clean Lap</b><span data-hud="streak-count"></span></div>
       </section>
 
       <section class="steward" data-hud="steward" data-kind="">
@@ -298,6 +313,16 @@
               ><kbd>M</kbd>
             </div>
           </div>
+          <div class="mfd-page strategy" data-for="strategy">
+            <div class="weather-title">Race Strategy</div>
+            <div class="strategy-stints" data-hud="strategy-stints"></div>
+            <div class="quick-row selected">
+              <span>Next Stop</span><b data-hud="strategy-box">-</b><kbd></kbd>
+            </div>
+            <div class="quick-row">
+              <span>Tyre Life</span><b data-hud="strategy-life">-</b><kbd></kbd>
+            </div>
+          </div>
           <div class="mfd-page weather" data-for="weather">
             <div class="weather-title">Weather Forecast</div>
             <div class="forecast" data-hud="forecast"></div>
@@ -332,10 +357,12 @@
         <span><kbd>Esc</kbd> Menu</span><span><kbd>Arrows</kbd> Drive</span
         ><span><kbd>E</kbd><kbd>Q</kbd> Shift</span><span><kbd>Y</kbd> MFD</span
         ><span data-help="phone"><kbd>P</kbd> Phone</span
-        ><span><kbd>R</kbd> Replay</span><span><kbd>C</kbd> Cameras</span
-        ><span><kbd>F2–F11</kbd> Cameras</span>
+        ><span><kbd>R</kbd> Replay</span><span><kbd>O</kbd> Photo</span
+        ><span><kbd>C</kbd> Cameras</span><span><kbd>F2–F11</kbd> Cameras</span>
       </div>
     </div>
+
+    <section class="radio" data-radio-root hidden></section>
 
     <div class="menu" data-menu="root" hidden>
       <div class="stage">
@@ -363,6 +390,9 @@
           <button type="button" data-menu="replay" hidden>
             <i class="btn-glyph">V</i>Replay &amp; Flashback
           </button>
+          <button type="button" data-menu="photo" hidden>
+            <i class="btn-glyph">O</i>Photo Mode
+          </button>
           <button type="button" data-menu="quit" hidden>
             <i class="btn-glyph">M</i>Main Menu
           </button>
@@ -381,7 +411,9 @@
     <div class="records" data-records="root" hidden></div>
 
     <div class="replay" data-replay-root hidden></div>
+    <div class="photo" data-photo-root hidden></div>
     <div class="reel" data-reel-root hidden></div>
+    <div class="reel podium-ui" data-podium-root hidden></div>
     <div class="results" data-results="root" hidden>
       <div class="stage">
         <div class="results-tag" data-results="tag">Results (Overall)</div>
@@ -501,6 +533,14 @@
           </svg>
           <span class="ready-side right">Tilt right</span>
         </div>
+        <section class="ready-strategy" data-ready="strategy" hidden>
+          <h3>Race Strategy <small>Your engineer recommends Plan A</small></h3>
+          <div class="ready-plans" data-ready="plans"></div>
+          <p class="ready-plan-hint">
+            Press <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> or click a plan. Your
+            starting tyres follow the plan.
+          </p>
+        </section>
         <h2>Drive with your phone</h2>
         <p data-ready="unlinked">
           Press <kbd>P</kbd> and scan the code to connect your phone.

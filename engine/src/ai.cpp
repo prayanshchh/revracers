@@ -93,6 +93,9 @@ const double outLapHoldSpeed = 0.68;
 const double pitPendingDistance = 160.0;
 const double pitRampBefore = 60.0;
 const double pitRampAfter = 25.0;
+const double approachCheck = 60.0;
+const double approachSlope = 0.32;
+const double laneJoin = 40.0;
 const double pitReleaseClear = 45.0;
 const double stopRun = 34.0;
 const double turnRun = 54.0;
@@ -1344,8 +1347,10 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
         double soon = std::min(targetSpeedAt(driver, pos + std::max(4.0, v * 0.25), 0.0), sqrt(limit * limit + 2.0 * 26.0 * std::max(0.0, wrap(p.wallStart - 40.0 - pos - v * 0.25))));
         const auto path = [&](double at) { return approachPath(at); };
         steerAndGo(index, driver, car, s, path, speed, soon, dt);
-        bool reached = car->_trkPos.toMiddle + pitShift(pos) > p.pitWall + 0.6;
-        if (onArc(pos, p.wallStart - 18.0, p.wallEnd) && !reached)
+        double across = p.pitWall + 0.6 - car->_trkPos.toMiddle - pitShift(pos);
+        bool reached = across < 0;
+        bool hopeless = onArc(pos, p.wallStart - approachCheck, p.wallStart) && across > wrap(p.wallStart - pos) * approachSlope;
+        if ((onArc(pos, p.wallStart - 18.0, p.wallEnd) && !reached) || hopeless)
         {
             driver.pit = PIT_NONE;
             driver.pitPending = true;
@@ -2005,7 +2010,11 @@ void sdAiDrive(int index, tCarElt *car, tSituation *s)
     if (driver.pitPending && driver.pit == PIT_NONE && wrap(model.pit.entry - pos) < pitPendingDistance + 250.0)
         driver.laneTarget = 0;
     if (driver.pit == PIT_NONE && onArc(pos, model.pit.wallStart, model.pit.wallEnd) && car->_trkPos.toMiddle + pitShift(pos) > model.pit.pitWall)
-        driver.pit = PIT_EXIT;
+    {
+        bool stopping = driver.pitPending && onArc(pos, model.pit.wallStart, model.pit.wallStart + laneJoin);
+        driver.pit = stopping ? PIT_LANE : PIT_EXIT;
+        driver.pitPending = driver.pitPending && !stopping;
+    }
     if (driver.pit != PIT_NONE)
     {
         sdEnergySetMode(index, 0);

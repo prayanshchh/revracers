@@ -79,6 +79,19 @@ export interface Weekend extends SpeedDreams {
   };
 }
 
+export function withStints(
+  plan: WeekendPlan,
+  stints: { compound: number; from: number }[][],
+): WeekendPlan {
+  return {
+    ...plan,
+    entrants: plan.entrants.map((entrant, i) => ({
+      ...entrant,
+      stints: stints[i] ?? [],
+    })),
+  };
+}
+
 export function subset(plan: WeekendPlan, cars: number): WeekendPlan {
   const kept = plan.entrants
     .map((_, index) => index)
