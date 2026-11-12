@@ -166,3 +166,12 @@ const venues: Record<string, BuildUpVenue> = {
 export function buildUpVenue(circuit: string): BuildUpVenue {
   return venues[circuit] ?? hillCountry;
 }
+
+export function airTemperature(
+  venue: BuildUpVenue,
+  season: Season,
+  rain: number,
+  overcast: boolean,
+): number {
+  return (venue.temperatures[season] ?? 27) - rain * 3 - (overcast ? 2 : 0);
+}

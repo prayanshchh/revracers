@@ -16,6 +16,7 @@ import {
   hudParts,
   readSetup,
   saveSettings,
+  sessionSummary,
   type Settings,
   type SetupItem,
   type SetupSource,
@@ -186,16 +187,6 @@ function decimals(step: number): number {
 function infoKey(id: string): string {
   if (id.startsWith("gear-")) return "gear";
   return setupInfo[id] ? id : id.replace(/^(front|rear)-/, "");
-}
-
-function stripMode(s: Settings): string {
-  if (s.session === "race") return `Race - ${String(s.laps)} Laps`;
-  if (s.session === "qualifying") return "Qualifying - Q1 Q2 Q3";
-  if (s.session === "weekend")
-    return s.qualifying === "skip"
-      ? `Race From The Back - ${String(s.laps)} Laps`
-      : `Qualifying + Race - ${String(s.laps)} Laps`;
-  return "Practice";
 }
 
 export class Menu {
@@ -737,7 +728,7 @@ export class Menu {
     this.find("subtitle").textContent = tab.setup
       ? `${car.label} - ${custom ? "Custom Setup" : "Default Setup"}`
       : `${trackOf(s).label} - ${car.label}`;
-    this.find("strip-mode").textContent = stripMode(s);
+    this.find("strip-mode").textContent = sessionSummary(s);
     this.find("strip-track").textContent = trackOf(s).label;
     const label = (options: readonly Option[], id: string) =>
       options.find((c) => c.id === id)?.label ?? id;

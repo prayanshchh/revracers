@@ -13,13 +13,17 @@ export const tracks = [
     detail: "Austin · 5.48 km",
     category: "circuit",
     length: 5528,
+    hour: 14.8,
+    difficulty: "Medium",
   },
   {
     id: "neon-boulevard",
     label: "Neon Boulevard Circuit",
-    detail: "Las Vegas · 6.21 km · Night",
+    detail: "Las Vegas · 6.20 km · Night",
     category: "circuit",
     length: 6210,
+    hour: 22,
+    difficulty: "Hard",
   },
 ] as const;
 
@@ -201,6 +205,7 @@ export interface Settings {
   timeOfDay: ChoiceId<"timeOfDay">;
   clouds: ChoiceId<"clouds">;
   rain: ChoiceId<"rain">;
+  weatherSeed: number;
   season: ChoiceId<"season">;
   transmission: ChoiceId<"transmission">;
   racingLine: ChoiceId<"racingLine">;
@@ -218,6 +223,16 @@ export interface Settings {
   steerDeadZone: number;
   setup: Record<string, Record<string, number>>;
   hud: Record<HudPart, boolean>;
+}
+
+export function sessionSummary(s: Settings): string {
+  if (s.session === "race") return `Race - ${String(s.laps)} Laps`;
+  if (s.session === "qualifying") return "Qualifying - Q1 Q2 Q3";
+  if (s.session === "weekend")
+    return s.qualifying === "skip"
+      ? `Race From The Back - ${String(s.laps)} Laps`
+      : `Qualifying + Race - ${String(s.laps)} Laps`;
+  return "Practice";
 }
 
 export const hudParts = {
@@ -258,6 +273,7 @@ export const defaults: Settings = {
   timeOfDay: "from track",
   clouds: "scarce clouds",
   rain: "none",
+  weatherSeed: 1,
   season: "now",
   transmission: "auto",
   racingLine: "full",

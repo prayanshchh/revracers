@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { pastSchool, seedPlayer } from "../support/player.ts";
 import { slowNetwork } from "../support/slow-network.ts";
+import { startEvent } from "../support/race-event.ts";
 
 interface LoadScreen {
   showing: boolean;
@@ -135,7 +136,7 @@ test.describe("opening", () => {
         timeout: 180_000,
       });
       await page.getByRole("button", { name: /^Race/ }).click();
-      await page.locator('[data-menu="start"]').click();
+      await startEvent(page);
       await expect
         .poll(async () => (await loadScreen(page)).showing, {
           timeout: 30_000,
