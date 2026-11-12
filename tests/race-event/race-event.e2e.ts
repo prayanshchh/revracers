@@ -24,6 +24,8 @@ function practiceAtHillCountry(): void {
   );
 }
 
+const lfsCheckedOut = process.platform !== "linux";
+
 async function openEvent(page: Page, query = ""): Promise<void> {
   await page.goto(`/?intro=off${query}`);
   await expect(page.locator(".front-hub")).toBeVisible({ timeout: 60_000 });
@@ -82,7 +84,7 @@ test.describe("race event screens", () => {
       "data-still",
       "neon-boulevard/night-light-cloud",
     );
-    await expect.poll(() => shown(hero)).toBe(true);
+    if (lfsCheckedOut) await expect.poll(() => shown(hero)).toBe(true);
     await card("weather", "heavy rain").click();
     await expect(hero).toHaveAttribute(
       "data-still",
@@ -93,7 +95,7 @@ test.describe("race event screens", () => {
       "data-still",
       "neon-boulevard/noon-heavy-rain",
     );
-    await expect.poll(() => shown(hero)).toBe(true);
+    if (lfsCheckedOut) await expect.poll(() => shown(hero)).toBe(true);
     await expect(card("weather", "storm").locator(".ev-shot")).toHaveAttribute(
       "data-still",
       "neon-boulevard/thumb/noon-storm",
@@ -159,7 +161,7 @@ test.describe("race event screens", () => {
     );
   });
 
-  if (process.platform !== "linux")
+  if (lfsCheckedOut)
     test("the session runs on the circuit, in the weather and on the tyre picked on the event screens", async ({
       page,
       context,

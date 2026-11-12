@@ -13,6 +13,7 @@ import { wasm } from "../support/speed-dreams.ts";
 import { tracks } from "../../apps/client/src/game/settings.ts";
 import {
   sessionSeconds,
+  type WeatherPlan,
   weatherPlan,
 } from "../../apps/client/src/game/weather-plan.ts";
 
@@ -20,6 +21,7 @@ const fieldSize = 22;
 const wet = 4;
 const inter = 3;
 const stepsPerSecond = 500;
+const rampSeconds = 90;
 
 function family(compound: number): "slick" | "inter" | "wet" {
   if (compound === wet) return "wet";
@@ -94,18 +96,24 @@ describe.runIf(existsSync(wasm))("rain and a drying track", () => {
     expect(met).toBeLessThan(middle);
   });
 
-  test("dynamic weather over a five-lap race turns the call between slicks and wet tyres, both when rain arrives and when the track dries", async () => {
+  test("dynamic weather over a five-lap race turns the call between slicks and wet tyres, both when rain arrives and when the track dries, without the rain ever jumping", async () => {
     const laps = 5;
     const length = tracks[0].length;
     const duration = Math.round(sessionSeconds("race", laps, length));
-    const plans = (["rain", "drying"] as const).map((story) => {
-      for (let seed = 1; seed < 400; seed++) {
-        const plan = weatherPlan(seed, duration);
-        if (plan.story === story) return plan;
-      }
-      throw new Error(`no ${story} plan`);
-    });
-    for (const plan of plans) {
+    const plans = Array.from({ length: 2000 }, (_, i) =>
+      weatherPlan(i + 1, duration),
+    );
+    const gap = (plan: WeatherPlan) =>
+      plan.story === "rain" && plan.shifts.length === 2
+        ? (plan.shifts[1]?.at ?? 0) - (plan.shifts[0]?.at ?? 0)
+        : Infinity;
+    const heavier = plans.reduce((best, plan) =>
+      gap(plan) < gap(best) ? plan : best,
+    );
+    expect(gap(heavier)).toBeLessThan(rampSeconds - 10);
+    const drying = plans.find((plan) => plan.story === "drying");
+    if (!drying) throw new Error("no drying plan");
+    for (const plan of [heavier, drying]) {
       const m = await startField({
         kind: sessionKind.race,
         laps,
@@ -114,11 +122,17 @@ describe.runIf(existsSync(wasm))("rain and a drying track", () => {
       });
       const promised = weatherOf(m).forecast[0] ?? 0;
       const calls: string[] = [];
+      let rain = weatherOf(m).rain;
       seconds(m, duration, (second) => {
         const w = weatherOf(m);
         const call = w.line >= w.slickLimit ? "wet" : "slick";
         if (calls.at(-1) !== call) calls.push(call);
         if (second === 300) expect(w.rain).toBeCloseTo(promised, 3);
+        expect(
+          Math.abs(w.rain - rain),
+          `second ${String(second)}`,
+        ).toBeLessThan(1 / rampSeconds + 1e-6);
+        rain = w.rain;
       });
       expect(calls, plan.story).toEqual(
         plan.story === "rain" ? ["slick", "wet"] : ["wet", "slick"],

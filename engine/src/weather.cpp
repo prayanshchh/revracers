@@ -47,16 +47,16 @@ double rainAt(double t)
 {
     if (!dynamicMode || timeline.empty())
         return staticRain;
-    double value = timeline.front().rain;
-    for (size_t i = 1; i < timeline.size(); i++)
+    double from = timeline.front().rain;
+    double target = from;
+    double began = 0;
+    for (size_t i = 1; i < timeline.size() && t >= timeline[i].at; i++)
     {
-        const Shift &shift = timeline[i];
-        if (t < shift.at)
-            break;
-        double blend = clamp01((t - shift.at) / rampSeconds);
-        value = timeline[i - 1].rain + (shift.rain - timeline[i - 1].rain) * blend;
+        from += (target - from) * clamp01((timeline[i].at - began) / rampSeconds);
+        target = timeline[i].rain;
+        began = timeline[i].at;
     }
-    return value;
+    return from + (target - from) * clamp01((t - began) / rampSeconds);
 }
 
 double settle(double water, double target, double dt)
