@@ -117,6 +117,24 @@ describe("highlights reel", () => {
     expect(story[2]?.camera).toBe("chase");
   });
 
+  test("a fastest lap on the final lap still makes the highlights, cut where the footage ends", () => {
+    const { highlights, cuts, run } = recorder();
+    run(58);
+    highlights.moment({
+      time: 60,
+      from: 52,
+      to: 62,
+      detail: "Fastest lap",
+      camera: "chase",
+      weight: 8,
+    });
+    run(60.5);
+    expect(highlights.story(10).map((clip) => clip.detail)).toEqual([
+      "Fastest lap",
+    ]);
+    expect(cuts).toEqual([[52, 60.5]]);
+  });
+
   test("a flashback drops moments that have not happened yet", () => {
     const { highlights, run } = recorder();
     highlights.moment({

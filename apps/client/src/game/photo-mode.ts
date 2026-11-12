@@ -134,8 +134,8 @@ export class PhotoMode {
   private cars = new Float64Array(0);
   private target = 0;
   private anchor: PhotoAnchor | null = null;
-  private orbit = defaultOrbit();
-  private look = defaultLook();
+  private readonly orbit = defaultOrbit();
+  private readonly look = defaultLook();
   private readonly held = new Set<string>();
   private lastWall = 0;
   private drag: { x: number; y: number } | null = null;
@@ -378,8 +378,8 @@ export class PhotoMode {
   }
 
   private reset(): void {
-    this.orbit = defaultOrbit();
-    this.look = defaultLook();
+    Object.assign(this.orbit, defaultOrbit());
+    Object.assign(this.look, defaultLook());
     this.refresh();
   }
 

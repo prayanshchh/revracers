@@ -48,7 +48,7 @@ function state(over: Partial<RaceState> = {}): RaceState {
 }
 
 function briefed(chatter: Chatter = "full"): Engineer {
-  const engineer = new Engineer(chatter);
+  const engineer = new Engineer(() => chatter);
   engineer.brief(state({ started: false, time: -3 }));
   engineer.drain();
   return engineer;
@@ -60,7 +60,7 @@ function topics(calls: RadioCall[]): string[] {
 
 describe("race engineer", () => {
   test("the pre-race brief gives the strategy and the planned stop lap", () => {
-    const engineer = new Engineer("full");
+    const engineer = new Engineer(() => "full");
     engineer.brief(state({ started: false, time: -3 }));
     const [brief] = engineer.drain();
     expect(brief?.text).toContain("medium - hard");
@@ -179,10 +179,23 @@ describe("race engineer", () => {
         loud.update(state({ lap: 6, lapShare: 0.7, plan: oneStopFrom(6) })),
       ),
     ).toContain("box");
-    const silent = new Engineer("off");
+    const silent = new Engineer(() => "off");
     silent.brief(state({ started: false }));
     silent.passed(1, true, "RUIZ", 1, null);
     expect(silent.drain()).toEqual([]);
+  });
+
+  test("changing the engineer setting mid-race takes effect at once", () => {
+    let chatter: Chatter = "full";
+    const engineer = new Engineer(() => chatter);
+    engineer.brief(state({ started: false, time: -3 }));
+    engineer.drain();
+    chatter = "off";
+    engineer.passed(10, true, "RUIZ", 4, null);
+    expect(engineer.drain()).toEqual([]);
+    chatter = "full";
+    engineer.passed(40, true, "ODA", 3, null);
+    expect(topics(engineer.drain())).not.toEqual([]);
   });
 
   test("the chequered flag gets one message that matches the result", () => {

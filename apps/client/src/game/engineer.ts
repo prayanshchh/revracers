@@ -152,7 +152,7 @@ export class Engineer {
   private lastPlan = "";
   private counter = 0;
 
-  constructor(private readonly chatter: Chatter) {}
+  constructor(private readonly chatter: () => Chatter) {}
 
   private ready(topic: string, now: number, repeat: number): boolean {
     const last = this.said.get(topic);
@@ -166,8 +166,9 @@ export class Engineer {
     priority: number,
     tone: Tone = "info",
   ): void {
-    if (this.chatter === "off") return;
-    if (this.chatter === "reduced" && priority < 2) return;
+    const chatter = this.chatter();
+    if (chatter === "off") return;
+    if (chatter === "reduced" && priority < 2) return;
     this.said.set(topic, now);
     this.counter++;
     this.pending.push({ topic, text, priority, tone });

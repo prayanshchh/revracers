@@ -1,4 +1,5 @@
 import { type CarTiming, type Engine, sessionPhase } from "./engine.ts";
+import { podiumSettled } from "./field-timing.ts";
 import type { Hud } from "./hud.ts";
 import type { PitStop } from "./pitstop.ts";
 import type { Scene } from "./scene.ts";
@@ -51,6 +52,7 @@ export class WeekendFlow {
   private scale = 1;
   private readonly garage: GarageScreen;
   private refresh = 0;
+  private podiumNext: (() => void) | null = null;
 
   constructor(private readonly ctx: WeekendContext) {
     this.timing = ctx.engine.timing();
@@ -109,6 +111,7 @@ export class WeekendFlow {
     if (this.garage.open) this.garage.update(this.timing, info);
     if (this.ctx.stage === "qualifying") this.updateQualifying();
     else if (!this.finished && this.playerDone()) this.raceFinished();
+    else if (this.podiumNext) this.watchPodium(this.podiumNext);
   }
 
   private penalties(): string[] {
@@ -271,6 +274,20 @@ export class WeekendFlow {
   }
 
   private watchPodium(next: () => void): void {
+    const { engine } = this.ctx;
+    const { phase } = engine.session();
+    const over = phase === sessionPhase.complete || phase === sessionPhase.done;
+    if (!podiumSettled(engine.timing(), over)) {
+      if (!this.podiumNext) {
+        this.setScale(fastForward);
+        this.raceResults();
+      }
+      this.podiumNext = next;
+      return;
+    }
+    if (this.podiumNext) this.setScale(1);
+    this.podiumNext = null;
+    hideClassification();
     void this.ctx.podium(next).then((started) => {
       if (!started) next();
     });
@@ -297,7 +314,6 @@ export class WeekendFlow {
         {
           label: "Watch Podium",
           run: () => {
-            hideClassification();
             this.watchPodium(() => {
               this.raceResults();
             });

@@ -98,3 +98,19 @@ export function newFastest(
   if (!before) return after;
   return after.time < before.time - 1e-9 ? after : null;
 }
+
+interface Classified {
+  position: number;
+  finished: boolean;
+  retired: boolean;
+  disqualified: boolean;
+}
+
+export function podiumSettled(timing: Classified[], over: boolean): boolean {
+  if (over) return true;
+  return timing
+    .filter((row) => !row.retired && !row.disqualified)
+    .sort((a, b) => a.position - b.position)
+    .slice(0, 3)
+    .every((row) => row.finished);
+}

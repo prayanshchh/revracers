@@ -111,12 +111,13 @@ export class Highlights {
     for (const moment of due)
       this.momentClips.push({
         ...moment,
-        tape: this.copy(moment.from, moment.to),
+        tape: this.copy(moment.from, Math.min(moment.to, this.last)),
       });
   }
 
   story(count: number): StoryClip[] {
     this.flushAll();
+    this.cutMoments(Infinity);
     const passes: StoryClip[] = this.clips.map((clip) => ({
       from: clip.from,
       car: clip.car,

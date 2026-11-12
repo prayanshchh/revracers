@@ -35,6 +35,9 @@ const rainSoon = 0.2;
 const forecastStep = 5;
 const fuelNominal = 1.35;
 
+const sameLap = (a: FastestLap | null, b: FastestLap | null) =>
+  a?.car === b?.car && a?.time === b?.time;
+
 export interface PitWallContext {
   engine: Engine;
   hud: Hud;
@@ -46,7 +49,7 @@ export interface PitWallContext {
   totalLaps: number | null;
   trackLength: number;
   wearScale: number;
-  chatter: Chatter;
+  chatter: () => Chatter;
   fastest: (lapTime: number) => void;
 }
 
@@ -253,9 +256,23 @@ export class PitWall {
     trace.setRivals(rivalBests(field, trace.boundaries.length + 1));
     const current = fastestOf(field);
     const fresh = newFastest(this.fastest, current);
+    if (!sameLap(this.fastest, current)) this.showReference(current);
     this.fastest = current;
     hud.setFastestCar(current ? current.car : -1);
     if (fresh) this.announceFastest(fresh, now);
+  }
+
+  private showReference(lap: FastestLap | null): void {
+    const { engine, hud, trackLength } = this.ctx;
+    hud.setFieldReference(
+      lap
+        ? {
+            trace: engine.bestTrace().trace,
+            length: trackLength,
+            label: `FL ${lap.car === 0 ? "YOU" : this.holderName(lap.car)}`,
+          }
+        : null,
+    );
   }
 
   private holderName(car: number): string {
@@ -264,14 +281,9 @@ export class PitWall {
   }
 
   private announceFastest(fresh: FastestLap, now: number): void {
-    const { engine, hud, trackLength } = this.ctx;
+    const { hud } = this.ctx;
     const mine = fresh.car === 0;
     const name = this.holderName(fresh.car);
-    hud.setFieldReference({
-      trace: engine.bestTrace().trace,
-      length: trackLength,
-      label: `FL ${mine ? "YOU" : name}`,
-    });
     if (mine && this.ctx.race) this.ctx.fastest(fresh.time);
     if (!mine && (this.ctx.qualifying || fresh.lap < 2)) return;
     hud.fastestLap(name, fresh.time, now);

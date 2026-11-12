@@ -10,6 +10,7 @@ import {
   standing,
   type V3,
 } from "../../apps/client/src/game/crew-motion.ts";
+import { podiumSettled } from "../../apps/client/src/game/field-timing.ts";
 import { Prop } from "../../apps/client/src/game/podium-props.ts";
 
 const frame = 1 / 60;
@@ -81,5 +82,35 @@ describe("podium celebration", () => {
     ];
     expect([0.5, 2.5, 3.6].some((now) => prop.spraying(now))).toBe(false);
     expect(prop.spraying(3.9)).toBe(true);
+  });
+
+  test("the podium waits until the top three have taken the flag, not just the player", () => {
+    const row = (
+      index: number,
+      position: number,
+      finished: boolean,
+      retired = false,
+    ) => ({ index, position, finished, retired, disqualified: false });
+    const retiredEarly = [
+      row(0, 9, false, true),
+      row(1, 1, false),
+      row(2, 2, false),
+      row(3, 3, false),
+    ];
+    expect(podiumSettled(retiredEarly, false)).toBe(false);
+    const thirdStillRacing = [
+      row(0, 1, true),
+      row(1, 2, true),
+      row(2, 3, false),
+    ];
+    expect(podiumSettled(thirdStillRacing, false)).toBe(false);
+    const thirdRetired = [
+      row(0, 1, true),
+      row(1, 2, true),
+      row(2, 3, false, true),
+      row(3, 4, true),
+    ];
+    expect(podiumSettled(thirdRetired, false)).toBe(true);
+    expect(podiumSettled(thirdStillRacing, true)).toBe(true);
   });
 });

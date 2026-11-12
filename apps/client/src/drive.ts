@@ -1176,7 +1176,7 @@ function pitWallFor(
     totalLaps: race ? settings.laps : null,
     trackLength: parts.engine.trackLength(),
     wearScale: wear,
-    chatter: settings.engineer,
+    chatter: () => settings.engineer,
   });
 }
 
