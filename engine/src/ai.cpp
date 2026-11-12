@@ -826,7 +826,7 @@ void updateForecasts(tSituation *s)
                 if (driver.passOn)
                 {
                     double goal = driver.passing >= 0 ? driver.passGoal : f.l[k];
-                    f.l[k] = driver.passLateral + std::max(-passRate * t, std::min(passRate * t, goal - driver.passLateral));
+                    f.l[k] = lateral + std::max(-passRate * t, std::min(passRate * t, goal - lateral));
                 }
             }
             else
@@ -947,7 +947,11 @@ double candidateCost(const Driver &driver, tCarElt *car, const std::vector<Rival
 
 bool attackerBehind(int index, int i, double gap)
 {
-    return human(i) && !drivers[index].opening && gap < attackOverlap - forecasts[index].halfLong[0] - forecasts[i].halfLong[0];
+    const Forecast &me = forecasts[index];
+    const Forecast &f = forecasts[i];
+    double overlap = gap + me.halfLong[0] + f.halfLong[0];
+    bool inLine = fabs(f.l[0] - me.l[0]) < me.halfLat[0] + f.halfLat[0];
+    return human(i) && !drivers[index].opening && overlap < (inLine ? attackOverlap : 0.0);
 }
 
 void gatherRivals(tCarElt *car, tSituation *s, int index, std::vector<Rival> &rivals)
@@ -2260,6 +2264,11 @@ void sdAiDrive(int index, tCarElt *car, tSituation *s)
     double wanted = passStricken(index, driver, car, s, laneLateralAt(pos + v * 0.05, driver.lane), dt, &passCap);
     double speedFactor = (driver.blueFlag ? yieldSpeed : 1.0) * driver.caution;
     double lateral = lateralSafety(index, car, s, wanted, &speedFactor);
+    if (driver.passOn && lateral != wanted)
+    {
+        driver.passLateral = lateral;
+        driver.passGoal = lateral;
+    }
     bool defends = driver.task == AI_RACE && !driver.blueFlag && driver.caution >= 1.0;
     if (defends && targetSpeedAt(driver, pos + v * 2.0, driver.lane) > slowCornerSpeed && holdsInside(index, car, s))
         speedFactor = std::max(speedFactor, insideLateBrake);
