@@ -65,6 +65,8 @@ const int planSteps = 18;
 const double planStep = 0.22;
 const double accelModel = 9.0;
 const double forecastAccel = 6.0;
+const double stillSpeed = 10.0;
+const double stillAccel = 1.0;
 const double offTrackSpeed = 26.0;
 const double offTrackDamaged = 0.45;
 const double limpLeak = 0.6;
@@ -752,6 +754,7 @@ void updateForecasts(tSituation *s)
         double angle = relativeYaw(car);
         bool lost = trackBeyond(car) > 1.5 && driver.pit == PIT_NONE;
         bool ai = (i > 0 || sdFieldPlayerOnAi()) && !lost && fabs(angle) < 1.0;
+        bool still = i == 0 && !sdFieldPlayerOnAi() && v < stillSpeed && car->_accel_x < stillAccel;
         double vl = v * sin(angle);
         double decelNow = std::min(0.0, (double)car->_accel_x);
         double startSpeed = v;
@@ -771,6 +774,8 @@ void updateForecasts(tSituation *s)
             double next = std::min(limit, v + forecastAccel * planStep);
             next = std::max(next, v - 40.0 * planStep);
             next = std::min(next, std::max(0.0, startSpeed + decelNow * std::min(t, 0.5)) + forecastAccel * std::max(0.0, t - 0.5));
+            if (still)
+                next = std::max(0.0, startSpeed + decelNow * t);
             v = std::max(0.0, next);
             f.s[k] = f.s[k - 1] + v * planStep;
             if (ai && driver.pit != PIT_NONE)
@@ -1510,6 +1515,7 @@ void updatePush(int index, Driver &driver, tCarElt *car, tSituation *s, double d
     double pos = car->_distFromStartLine;
     double v = std::max(5.0, (double)car->_speed_x);
     double wanted = 0;
+    bool capped = true;
     driver.opening = sdRaceControlSinceSignal(s) < openingLapTime;
     if (driver.task == AI_RACE && !driver.blueFlag && driver.caution >= 1.0 && !sdRaceControlRacingHeld())
     {
@@ -1540,7 +1546,8 @@ void updatePush(int index, Driver &driver, tCarElt *car, tSituation *s, double d
         else
         {
             wanted = std::max(chasing ? 1.0 + attack : 0.0, defend);
-            if (alongside || slowCornerAhead(driver, pos, v))
+            capped = alongside || slowCornerAhead(driver, pos, v);
+            if (capped)
                 wanted = std::min(wanted, 1.0);
         }
         double heat = sdTyresHeat(index);
@@ -1548,6 +1555,8 @@ void updatePush(int index, Driver &driver, tCarElt *car, tSituation *s, double d
         if (heat > margin)
             wanted = std::max(0.0, wanted - (heat - margin) * hotBackOff);
     }
+    if (capped)
+        driver.push = std::min(driver.push, 1.0);
     double rate = wanted > driver.push ? pushRise : pushFall;
     double step = rate * dt;
     driver.push += std::max(-step, std::min(step, wanted - driver.push));
