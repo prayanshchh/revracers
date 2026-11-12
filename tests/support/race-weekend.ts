@@ -61,6 +61,7 @@ export interface Weekend extends SpeedDreams {
   _sdQualifyingTimes: (index: number, out: number) => void;
   _sdTiming: (out: number) => void;
   _sdCars: (out: number) => void;
+  _sdTyresInfo: (out: number) => void;
   _sdFieldPits: (out: number) => void;
   _sdSessionPasses: (out: number, max: number, from: number) => number;
   _sdRaceControlConfigure: (
@@ -100,6 +101,7 @@ export interface FieldOptions {
   rules?: Rules;
   rain?: string;
   track?: string;
+  difficulty?: number;
 }
 
 export interface Rules {
@@ -152,7 +154,12 @@ export async function startField(options: FieldOptions): Promise<Weekend> {
       for (const stint of entrant.stints)
         m._sdFieldStint(index, stint.compound, stint.from);
     });
-    m._sdSessionConfigure(options.kind, options.laps, 1, options.seed);
+    m._sdSessionConfigure(
+      options.kind,
+      options.laps,
+      options.difficulty ?? 1,
+      options.seed,
+    );
     if (options.autopilot ?? true) m._sdFieldAutopilot(1);
     if (options.rain)
       m.FS.writeFile(

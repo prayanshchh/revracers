@@ -2013,6 +2013,11 @@ bool sdStewardsPlayerTrouble(int index)
     return index >= 0 && index < (int)cars.size() && cars[index].playerTrouble;
 }
 
+int sdStewardsTrouble(int index)
+{
+    return index >= 0 && index < (int)cars.size() ? cars[index].trouble : 0;
+}
+
 bool sdStewardsSpun(int index, double seconds)
 {
     return index >= 0 && index < (int)cars.size() && maxSlipBetween(cars[index], now - seconds, now) > spinSlip;
