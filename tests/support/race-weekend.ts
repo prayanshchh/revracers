@@ -129,6 +129,14 @@ export interface Rules {
 
 const raceFile = "/sd/local/config/raceman/quickrace.xml";
 
+function configureRules(m: Weekend, rules: Rules): void {
+  m._sdRaceControlConfigure(
+    rules.safetyCar ?? 2,
+    rules.redFlags === false ? 0 : 1,
+    rules.rollingStart ? 1 : 0,
+  );
+}
+
 function planWeather(m: Weekend, plan: WeatherPlan): void {
   m._sdWeatherConfigure(1, plan.start);
   for (const shift of plan.shifts) m._sdWeatherShift(shift.at, shift.level);
@@ -147,13 +155,8 @@ function configureSession(m: Weekend, options: FieldOptions): void {
 
 export async function startField(options: FieldOptions): Promise<Weekend> {
   const plan = options.plan ?? planWeekend("corvus", 10, null);
-  const rules = options.rules ?? {};
   return startCircuit<Weekend>((m) => {
-    m._sdRaceControlConfigure(
-      rules.safetyCar ?? 2,
-      rules.redFlags === false ? 0 : 1,
-      rules.rollingStart ? 1 : 0,
-    );
+    configureRules(m, options.rules ?? {});
     m._sdTyresConfigure(1, options.wear ?? 1);
     m._sdEnergyConfigure(options.kind === sessionKind.race ? 1 : 0, 1, 1, 1);
     const add = m.cwrap("sdFieldAdd", "null", [
