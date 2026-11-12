@@ -157,14 +157,31 @@ export class Highlights {
   private rewind(time: number, total: number): void {
     this.seen = Math.min(this.seen, total);
     const kept = (passes: Pass[]) => passes.filter((p) => p.time <= time);
-    this.clips = this.clips
-      .map((clip) => ({ ...clip, passes: kept(clip.passes) }))
-      .filter((clip) => clip.passes.length > 0);
     for (const [car, open] of this.pending) {
       open.passes = kept(open.passes);
       if (open.passes.length === 0) this.pending.delete(car);
     }
-    this.moments = this.moments.filter((m) => m.time <= time);
-    this.momentClips = this.momentClips.filter((m) => m.time <= time);
+    const clips = this.clips
+      .map((clip) => ({ ...clip, passes: kept(clip.passes) }))
+      .filter((clip) => clip.passes.length > 0);
+    this.clips = clips.filter((clip) => clip.to <= time);
+    for (const clip of clips) if (clip.to > time) this.reopen(clip);
+    const moments = this.momentClips.filter((m) => m.time <= time);
+    this.momentClips = moments.filter((m) => m.to <= time);
+    this.moments = [
+      ...this.moments.filter((m) => m.time <= time),
+      ...moments.filter((m) => m.to > time),
+    ];
+  }
+
+  private reopen(clip: Clip): void {
+    const open = this.pending.get(clip.car);
+    const passes = [...clip.passes, ...(open?.passes ?? [])];
+    this.pending.set(clip.car, {
+      from: Math.min(clip.from, open?.from ?? clip.from),
+      to: Math.max(...passes.map((pass) => pass.time)) + after,
+      car: clip.car,
+      passes,
+    });
   }
 }

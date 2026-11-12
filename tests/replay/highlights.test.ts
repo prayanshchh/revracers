@@ -135,6 +135,36 @@ describe("highlights reel", () => {
     expect(cuts).toEqual([[52, 60.5]]);
   });
 
+  test("a flashback re-cuts saved clips whose footage ran past the rewind point", () => {
+    const { highlights, cuts, run } = recorder();
+    run(20, [pass(20, 6)]);
+    highlights.moment({
+      time: 21,
+      from: 17,
+      to: 25,
+      detail: "Contact with Ruiz",
+      camera: "tv",
+      weight: 7,
+    });
+    run(26);
+    expect(cuts).toEqual([
+      [15, 22.5],
+      [17, 25],
+    ]);
+    highlights.update(22, 1, []);
+    run(22.2);
+    expect(cuts).toHaveLength(2);
+    run(26);
+    expect(cuts.slice(2)).toEqual([
+      [15, 22.5],
+      [17, 25],
+    ]);
+    expect(highlights.story(10).map((clip) => clip.detail || "pass")).toEqual([
+      "pass",
+      "Contact with Ruiz",
+    ]);
+  });
+
   test("a flashback drops moments that have not happened yet", () => {
     const { highlights, run } = recorder();
     highlights.moment({

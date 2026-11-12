@@ -10,6 +10,7 @@ import {
   carStatus,
   gridOf,
   passesOf,
+  pitPhasesOf,
   qualifyingTimes,
   runUntilComplete,
   sessionKind,
@@ -24,6 +25,7 @@ import {
   type Weekend,
   withStints,
 } from "../support/race-weekend.ts";
+import { aiPitPhase } from "../../apps/client/src/game/frame-layout.ts";
 import { layout } from "../support/pit-drive.ts";
 import { repoRoot } from "../support/repo.ts";
 import { wasm } from "../support/speed-dreams.ts";
@@ -191,6 +193,35 @@ describe.runIf(existsSync(wasm))("race weekend on the real engine", () => {
     const pits = timingOf(m, 6).map((car) => car.pits);
     expect(pits.slice(1)).toEqual([0, 0, 1, 1, 0]);
     expect(timingOf(m, 6)[4]?.compound).toBe(0);
+  });
+
+  test("teammates due on the same lap stop one after the other, never together", async () => {
+    const laps = 10;
+    const twoStints = [
+      { compound: 1, from: 0 },
+      { compound: 0, from: 0.5 },
+    ];
+    const plan = withStints(subset(planWeekend("corvus", 0, null), 6), [
+      [],
+      [],
+      twoStints,
+      twoStints,
+      twoStints,
+      twoStints,
+    ]);
+    const m = await startField({ kind: sessionKind.race, laps, seed: 4, plan });
+    const teams: [number, number][] = [
+      [2, 3],
+      [4, 5],
+    ];
+    let together = 0;
+    runUntilComplete(m, (laps + 1) * lapSeconds, undefined, () => {
+      const phases = pitPhasesOf(m, 6);
+      const pitting = (car: number) => (phases[car] ?? 0) !== aiPitPhase.none;
+      for (const [a, b] of teams) if (pitting(a) && pitting(b)) together++;
+    });
+    expect(timingOf(m, 6).map((car) => car.pits)).toEqual([0, 0, 1, 1, 1, 1]);
+    expect(together).toBe(0);
   });
 
   test("twenty laps on generated strategies: stops, fresh rubber, fuel to the flag", async () => {

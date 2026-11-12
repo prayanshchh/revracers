@@ -1,7 +1,12 @@
 import { existsSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { HeapHistory } from "../../apps/client/src/game/flashback.ts";
-import { sessionKind, startField } from "../support/race-weekend.ts";
+import {
+  sessionKind,
+  sessionOf,
+  startField,
+  timingOf,
+} from "../support/race-weekend.ts";
 import { wasm } from "../support/speed-dreams.ts";
 import { carStride } from "../../apps/client/src/game/frame-layout.ts";
 
@@ -90,5 +95,32 @@ describe.runIf(existsSync(wasm))("flashback", () => {
       replayed.push(cars());
     }
     expect(replayed).toEqual(original);
+  });
+
+  test("a flashback to before a tyre change puts the two-compound rule back", async () => {
+    const m = await startField({ kind: sessionKind.race, laps: 20, seed: 5 });
+    const history = new HeapHistory(() => new Uint8Array(m.HEAPF64.buffer));
+    let time = 0;
+    const run = (seconds: number) => {
+      const until = time + seconds;
+      while (time < until) {
+        m._sdStep(stepsPerChunk);
+        time += chunkSeconds;
+        history.tick(time, chunkSeconds, () => time);
+      }
+    };
+    run(20);
+    const fitted = timingOf(m, 1)[0]?.compound ?? 0;
+    expect(sessionOf(m).changedCompound).toBe(false);
+    const changedAt = time;
+    m._sdSessionPitCompound(fitted === 2 ? 1 : 2);
+    m._sdPitService(50, 0);
+    run(3);
+    expect(sessionOf(m).changedCompound).toBe(true);
+    const moment = history.rewind(changedAt - 1, time);
+    if (!moment) throw new Error("no flashback point was kept");
+    expect(moment.time).toBeLessThan(changedAt);
+    expect(sessionOf(m).changedCompound).toBe(false);
+    expect(timingOf(m, 1)[0]?.compound).toBe(fitted);
   });
 });

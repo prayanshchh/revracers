@@ -505,6 +505,15 @@ bool weatherCall(tSituation *s, int i)
     return true;
 }
 
+static bool teammateStopping(tSituation *s, int i)
+{
+    int team = (sdAiBayOf(i) - firstTeamBay) / 2;
+    for (int j = 0; j < s->_ncars; j++)
+        if (j != i && (sdAiBayOf(j) - firstTeamBay) / 2 == team && (sdAiInPitLane(j) || sdAiPitPending(j)))
+            return true;
+    return false;
+}
+
 void raceStrategy(tSituation *s)
 {
     int playerTyre = sdTyresCompound(0);
@@ -530,6 +539,8 @@ void raceStrategy(tSituation *s)
         bool wornOut = wearNow + perLap * 1.1 > wornPitLimit && !lastsToFlag;
         bool emergency = lapsLeft > 1 && t.pits <= (int)plan.stints.size() + 1 && (wornOut || sdCarDamageShare(i) > damagePitLimit || sdTyresWorstLeak(i) > flatPitLimit);
         if (!dueNext && !emergency)
+            continue;
+        if (!emergency && teammateStopping(s, i))
             continue;
         int compound = sdTyresCompound(i);
         if (hasNext)
@@ -1290,6 +1301,7 @@ EMSCRIPTEN_KEEPALIVE void sdSessionInfo(double *out)
     out[9] = sdStewardsOffTracks(0);
     out[10] = timing.empty() ? 0 : playerQueued ? -1 : timing[0].run;
     out[11] = onTrack;
+    out[12] = playerChangedCompound ? 1 : 0;
 }
 
 EMSCRIPTEN_KEEPALIVE void sdTiming(double *out)

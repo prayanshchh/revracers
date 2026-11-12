@@ -138,7 +138,6 @@ export class PitWall {
   private readonly trends = new GapTrends();
   private stintStart = { lap: 1, wear: 0, compound: -1 };
   private observed: number | null = null;
-  private readonly usedDry = new Set<number>();
   private cleanStreak = 0;
   private lapContacts = 0;
   private lapOffTracks = 0;
@@ -206,7 +205,8 @@ export class PitWall {
     return planRace({
       laps: left,
       wearPerLap: this.wearPerLap(compound),
-      twoCompounds: total >= twoCompoundLaps && this.usedDry.size < 2,
+      twoCompounds:
+        total >= twoCompoundLaps && !this.ctx.engine.session().changedCompound,
       pitLoss: defaultPitLoss,
       start:
         lap > 1 || fitted !== null
@@ -390,7 +390,6 @@ export class PitWall {
         wear: state.wear,
         compound: state.compound,
       };
-      if (state.compound <= 2) this.usedDry.add(state.compound);
       this.observed = null;
     }
   }

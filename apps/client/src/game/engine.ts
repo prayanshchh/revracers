@@ -125,6 +125,7 @@ export interface SessionInfo {
   offTracks: number;
   playerRun: number;
   onTrack: number;
+  changedCompound: boolean;
 }
 
 export interface CarTiming {
@@ -154,7 +155,7 @@ export interface CarTiming {
 }
 
 const timingStride = 20;
-const sessionFields = 12;
+const sessionFields = 13;
 const practiceGridSlot = 1;
 const messageBatch = 32;
 const passBatch = 32;
@@ -374,6 +375,7 @@ export class Engine {
       offTracks: at(9),
       playerRun: at(10),
       onTrack: at(11),
+      changedCompound: at(12) !== 0,
     };
   }
 

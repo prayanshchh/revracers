@@ -12,7 +12,7 @@ import type { WeatherPlan } from "../../apps/client/src/game/weather-plan.ts";
 import { type SpeedDreams, startCircuit } from "./speed-dreams.ts";
 
 const timingStride = 20;
-const sessionFields = 12;
+const sessionFields = 13;
 const statFields = 6;
 const stepsPerCall = 20;
 const secondsPerCall = stepsPerCall / 500;
@@ -54,6 +54,7 @@ export interface Weekend extends SpeedDreams {
     seed: number,
   ) => void;
   _sdSessionInfo: (out: number) => void;
+  _sdSessionPitCompound: (compound: number) => void;
   _sdSessionStats: (out: number) => void;
   _sdSessionAdvance: () => number;
   _sdSessionSimulate: () => void;
@@ -220,6 +221,7 @@ export function sessionOf(m: Weekend) {
     toRun: v[3] ?? 0,
     playerRun: v[10] ?? 0,
     onTrack: v[11] ?? -1,
+    changedCompound: v[12] === 1,
   };
 }
 
@@ -372,6 +374,16 @@ interface BoxVisit {
 const crewAhead = 6;
 const crewBehind = 4.5;
 const neighbourReach = 40;
+
+export function pitPhasesOf(m: Weekend, cars: number): number[] {
+  const pits = read(m, cars * pitStateSize, (p) => {
+    m._sdFieldPits(p);
+  });
+  return Array.from(
+    { length: cars },
+    (_, car) => pits[car * pitStateSize + aiPit.phase] ?? 0,
+  );
+}
 
 export function watchBoxes(
   m: Weekend,
