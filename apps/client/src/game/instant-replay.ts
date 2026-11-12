@@ -235,13 +235,8 @@ export class InstantReplay {
     header: ReelHeader,
     done: () => void,
   ): boolean {
-    shots.push({
-      tape: this.tape.copy(this.tape.end - finishSeconds, this.tape.end),
-      title: this.lapLabel(this.ctx.totalLaps ?? 1),
-      detail: "Takes the chequered flag",
-      camera: "chase",
-      car: 0,
-    });
+    const ending = this.ending();
+    if (ending) shots.push(ending);
     const { scene } = this.ctx;
     const started = this.reel.play(
       shots,
@@ -258,6 +253,20 @@ export class InstantReplay {
     scene.atmosphere.detail = true;
     for (const node of this.ctx.hidden) node.hidden = true;
     return true;
+  }
+
+  private ending(): ReelShot | null {
+    const mine = this.ctx.engine.timing().find((row) => row.index === 0);
+    if (!mine || (!mine.finished && !mine.retired)) return null;
+    const tape = this.tape.copy(this.tape.end - finishSeconds, this.tape.end);
+    const lap = mine.finished ? (this.ctx.totalLaps ?? 1) : lapOfClip(tape);
+    return {
+      tape,
+      title: this.lapLabel(lap),
+      detail: mine.finished ? "Takes the chequered flag" : "Out of the race",
+      camera: "chase",
+      car: 0,
+    };
   }
 
   private passCaption(passes: Pass[]): string {

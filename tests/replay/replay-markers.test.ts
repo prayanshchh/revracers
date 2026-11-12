@@ -11,11 +11,16 @@ const markers: Marker[] = [
   { time: 25, kind: "incident", label: "Contact" },
 ];
 
-function walk(start: number, step: 1 | -1, count: number): number[] {
+function walk(
+  start: number,
+  step: 1 | -1,
+  count: number,
+  footage = { start: 0, end: 60 },
+): number[] {
   const seen: number[] = [];
   let time = start;
   for (let k = 0; k < count; k++) {
-    const next = eventAfter(markers, time, step);
+    const next = eventAfter(markers, time, step, footage);
     if (!next) break;
     seen.push(next.time);
     time = next.time - eventLead;
@@ -30,5 +35,11 @@ describe("replay event jumps", () => {
 
   test("jumping back from the live end walks backwards without sticking on the event just shown", () => {
     expect(walk(60, -1, 10)).toEqual([40, 25, 10]);
+  });
+
+  test("events whose footage has left the replay buffer are skipped", () => {
+    const kept = { start: 20, end: 60 };
+    expect(walk(60, -1, 10, kept)).toEqual([40, 25]);
+    expect(walk(20, 1, 10, kept)).toEqual([25, 40]);
   });
 });

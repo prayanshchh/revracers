@@ -3,7 +3,12 @@ import { carField, carStride, frameIndex } from "./frame-layout.ts";
 import { putData, putStyle, putText } from "./hud-dom.ts";
 import type { ReplayTape } from "./replay.ts";
 import { ReplayCamera, type Station } from "./replay-camera.ts";
-import { eventAfter, eventLead, type Marker } from "./replay-markers.ts";
+import {
+  eventAfter,
+  eventLead,
+  inFootage,
+  type Marker,
+} from "./replay-markers.ts";
 
 const openBefore = 8;
 const shuttle = 4;
@@ -165,6 +170,7 @@ export class ReplayView {
   }
 
   setHidden(hidden: boolean): void {
+    if (hidden) this.hold = 0;
     this.root.hidden = hidden || !this.open;
   }
 
@@ -183,7 +189,7 @@ export class ReplayView {
   }
 
   private jump(step: 1 | -1): void {
-    const marker = eventAfter(this.hooks.markers(), this.time, step);
+    const marker = eventAfter(this.hooks.markers(), this.time, step, this.tape);
     if (marker) {
       this.seek(marker.time - eventLead);
       this.playing = true;
@@ -305,9 +311,7 @@ export class ReplayView {
   }
 
   private updateMarkers(): void {
-    const shown = this.hooks
-      .markers()
-      .filter((m) => m.time >= this.tape.start && m.time <= this.tape.end);
+    const shown = inFootage(this.hooks.markers(), this.tape);
     const key = `${String(this.tape.start)}|${String(this.tape.end)}|${String(shown.length)}`;
     if (key === this.markersShown) return;
     this.markersShown = key;
