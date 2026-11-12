@@ -46,7 +46,7 @@ const speedPerGap = 1.2;
 const powerPerGap = 2.4;
 const percent = 100;
 const difficultyMax = 110;
-const difficultyStep = 0.001;
+const difficultyStep = 0.0021;
 const stageKey = "revracers.weekend";
 const liveryOrder = [
   "meridian",

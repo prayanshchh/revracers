@@ -29,7 +29,7 @@ import {
   type Prop,
   type PropKey,
 } from "./podium-props.ts";
-import { seeded } from "./seeded.ts";
+import { seeded } from "./random.ts";
 
 export const parcLength = 8.6;
 export const podiumTimes = {

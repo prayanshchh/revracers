@@ -5,7 +5,7 @@ import {
   type Plan,
   twoCompoundLaps,
 } from "./strategy.ts";
-import { seeded } from "./seeded.ts";
+import { seeded } from "./random.ts";
 
 export interface StintPlan {
   compound: number;

@@ -201,13 +201,13 @@ describe.runIf(existsSync(wasm))("race weekend on the real engine", () => {
       fieldStrategies(base.entrants, base.slots, {
         laps,
         wearScale: 2,
-        seed: 6,
+        seed: 12,
       }),
     );
     const m = await startField({
       kind: sessionKind.race,
       laps,
-      seed: 2,
+      seed: 12,
       wear: 2,
       plan,
     });

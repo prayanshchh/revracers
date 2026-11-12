@@ -1,0 +1,1223 @@
+.front.event-mode::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #07060c;
+  pointer-events: none;
+}
+
+.front .stage.enter > .ev-page {
+  animation: none;
+}
+
+.ev-page {
+  position: absolute;
+  inset: 0;
+  color: #fff;
+}
+
+.front .stage.enter > .ev-page[data-dir="next"] .ev-slidein {
+  animation: ev-from-right 0.65s var(--ease) both;
+}
+
+.front .stage.enter > .ev-page[data-dir="back"] .ev-slidein {
+  animation: ev-from-left 0.65s var(--ease) both;
+}
+
+.front .stage.enter > .ev-page .ev-rise {
+  animation: ev-rise 0.6s 0.08s var(--ease) both;
+}
+
+.front .stage.enter > .ev-page > .ev-steps,
+.front .stage.enter > .ev-page > .ev-backdrop,
+.front .stage.enter > .ev-page > .ev-hero {
+  animation: ev-fade 0.6s both;
+}
+
+.front-foot .prompt.primary {
+  border-radius: 3px;
+  background: #e10600;
+  font-weight: 700;
+}
+
+.front-foot .prompt.primary .btn-glyph {
+  border-color: #fff;
+}
+
+.ev-page .flag {
+  width: 30px;
+  height: 22px;
+  border-radius: 2px;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 25%);
+}
+
+.ev-steps {
+  position: absolute;
+  left: 100px;
+  top: 60px;
+  z-index: 3;
+  display: flex;
+  gap: 10px;
+}
+
+.ev-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 50px;
+  padding: 0 22px 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: rgb(12 10 18 / 62%);
+  backdrop-filter: blur(10px);
+  color: rgb(255 255 255 / 50%);
+  font: inherit;
+  cursor: default;
+}
+
+.ev-step i {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 12%);
+  font-size: 16px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.ev-step b {
+  font-size: 18px;
+  font-weight: 800;
+  font-stretch: 112%;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ev-step span {
+  color: rgb(255 255 255 / 75%);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.ev-step span:empty {
+  display: none;
+}
+
+.ev-step.current {
+  background: #fff;
+  color: #101014;
+}
+
+.ev-step.current i {
+  background: #e10600;
+  color: #fff;
+}
+
+.ev-step.done {
+  color: #fff;
+  cursor: pointer;
+}
+
+.ev-step.done i {
+  background: #e10600;
+}
+
+.ev-step.done:hover {
+  background: rgb(40 36 52 / 80%);
+}
+
+.ev-place {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ev-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 6px;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 16%);
+  font-size: 15px;
+}
+
+.ev-tag .wx-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.ev-tag.night {
+  background: rgb(70 60 200 / 55%);
+}
+
+.ev-tag.day {
+  background: rgb(230 150 20 / 55%);
+}
+
+.wx-icon {
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wx-icon .solid {
+  fill: currentColor;
+}
+
+.wx-icon .fill {
+  fill: currentColor;
+  stroke: rgb(18 16 24 / 90%);
+  stroke-width: 2.4;
+  paint-order: stroke;
+}
+
+.wx-icon text {
+  fill: rgb(18 16 24);
+  stroke: none;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.row-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tyre-art {
+  overflow: visible;
+}
+
+.tyre-art .rubber {
+  fill: #141418;
+  stroke: #34343c;
+  stroke-width: 3;
+}
+
+.tyre-art .band {
+  fill: none;
+  stroke: var(--tyre);
+  stroke-width: 9;
+}
+
+.tyre-art text {
+  fill: #fff;
+  font-size: 34px;
+  font-weight: 800;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.ev-outline {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 6px 18px rgb(0 0 0 / 55%));
+}
+
+.ev-outline .casing {
+  fill: none;
+  stroke: rgb(10 10 16 / 70%);
+  stroke-width: 46;
+  stroke-linejoin: round;
+}
+
+.ev-outline .line {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 22;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+}
+
+.ev-outline .start path {
+  fill: none;
+  stroke: #e10600;
+  stroke-width: 12;
+  stroke-linecap: round;
+}
+
+.ev-outline .start .arrow {
+  fill: #fff;
+  stroke: rgb(10 10 16 / 80%);
+  stroke-width: 5;
+  stroke-linejoin: round;
+}
+
+.ev-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.ev-backdrop img {
+  position: absolute;
+  inset: -60px;
+  width: calc(100% + 120px);
+  height: calc(100% + 120px);
+  object-fit: cover;
+  filter: blur(26px) saturate(1.3) brightness(0.42);
+  opacity: 0;
+  transition: opacity 0.9s;
+}
+
+.ev-backdrop img.active {
+  opacity: 1;
+}
+
+.ev-carousel {
+  position: absolute;
+  inset: 150px 0 auto;
+  height: 740px;
+}
+
+.ev-belt {
+  position: absolute;
+  left: 400px;
+  top: 0;
+  display: flex;
+  gap: 80px;
+  transform: translateX(calc(var(--at, 0) * -1200px));
+  transition: transform 0.8s cubic-bezier(0.2, 0.85, 0.15, 1);
+}
+
+.ev-belt.bump-left {
+  animation: ev-bump-left 0.45s var(--ease);
+}
+
+.ev-belt.bump-right {
+  animation: ev-bump-right 0.45s var(--ease);
+}
+
+.ev-slide {
+  flex: 0 0 1120px;
+  opacity: 0.35;
+  filter: saturate(0.5);
+  transform: scale(0.86);
+  cursor: pointer;
+  transition:
+    transform 0.8s cubic-bezier(0.2, 0.85, 0.15, 1),
+    opacity 0.8s,
+    filter 0.8s;
+}
+
+.ev-slide.active {
+  opacity: 1;
+  filter: none;
+  transform: none;
+  cursor: default;
+}
+
+.ev-slide-media {
+  position: relative;
+  height: 600px;
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 2px rgb(255 255 255 / 0%),
+    0 30px 80px rgb(0 0 0 / 55%);
+  transition: box-shadow 0.6s;
+}
+
+.ev-slide.active .ev-slide-media {
+  box-shadow:
+    0 0 0 3px #fff,
+    0 30px 80px rgb(0 0 0 / 55%);
+}
+
+.ev-slide-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.08);
+  transition: transform 6s ease-out;
+}
+
+.ev-slide.active .ev-slide-img {
+  transform: none;
+}
+
+.ev-slide-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(0deg, rgb(6 5 12 / 92%), transparent 55%),
+    linear-gradient(90deg, rgb(6 5 12 / 50%), transparent 50%);
+  pointer-events: none;
+}
+
+.ev-slide-title {
+  position: absolute;
+  left: 44px;
+  bottom: 38px;
+  z-index: 1;
+}
+
+.ev-slide-title h2 {
+  margin: 14px 0 4px;
+  font-size: 92px;
+  font-weight: 800;
+  font-stretch: 125%;
+  line-height: 0.95;
+  text-transform: uppercase;
+  text-shadow: 0 4px 24px rgb(0 0 0 / 50%);
+}
+
+.ev-slide-title p {
+  margin: 0;
+  color: rgb(255 255 255 / 78%);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.ev-slide-map {
+  position: absolute;
+  right: 34px;
+  top: 34px;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 330px;
+  height: 330px;
+  padding: 26px;
+  border-radius: 8px;
+  background: rgb(8 8 14 / 46%);
+  backdrop-filter: blur(10px);
+}
+
+.ev-slide .ev-outline .line {
+  stroke-dashoffset: 1;
+}
+
+.ev-slide.active .ev-outline .line {
+  animation: ev-draw 1.4s 0.3s var(--ease) both;
+}
+
+.ev-slide .ev-outline .start {
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+.ev-slide.active .ev-outline .start {
+  opacity: 1;
+  transition-delay: 1.4s;
+}
+
+.ev-facts {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  margin: 20px 0 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgb(14 12 20 / 82%);
+  backdrop-filter: blur(12px);
+}
+
+.ev-facts div {
+  padding: 16px 24px;
+  border-left: 1px solid rgb(255 255 255 / 10%);
+}
+
+.ev-facts div:first-child {
+  border-left: 0;
+}
+
+.ev-facts dt {
+  color: rgb(255 255 255 / 58%);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ev-facts dd {
+  margin: 4px 0 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.ev-arrow {
+  position: absolute;
+  top: 268px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 2px solid rgb(255 255 255 / 75%);
+  border-radius: 50%;
+  background: rgb(10 8 14 / 60%);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    opacity 0.4s,
+    background 0.2s;
+}
+
+.ev-arrow::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border: solid currentColor;
+  border-width: 0 4px 4px 0;
+}
+
+.ev-arrow.prev {
+  left: 368px;
+}
+
+.ev-arrow.prev::before {
+  margin-left: 8px;
+  transform: rotate(135deg);
+}
+
+.ev-arrow.next {
+  right: 368px;
+}
+
+.ev-arrow.next::before {
+  margin-right: 8px;
+  transform: rotate(-45deg);
+}
+
+.ev-arrow:hover {
+  background: #e10600;
+}
+
+.ev-arrow:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ev-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 900px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+
+.ev-dot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 35%);
+  cursor: pointer;
+  transition:
+    width 0.5s var(--ease),
+    background 0.5s;
+}
+
+.ev-dot.active {
+  width: 46px;
+  background: #fff;
+}
+
+.ev-count {
+  margin-left: 12px;
+  color: rgb(255 255 255 / 60%);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.ev-shot {
+  position: relative;
+  overflow: hidden;
+  background: #111018;
+}
+
+.ev-shot-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.55s;
+}
+
+.ev-shot-layer.in {
+  opacity: 1;
+}
+
+.ev-shot-layer img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ev-shot-layer.split .ev-shot-second {
+  clip-path: polygon(58% 0, 100% 0, 100% 100%, 42% 100%);
+}
+
+.ev-shot-layer.split::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    106deg,
+    transparent calc(50% - 2px),
+    rgb(255 255 255 / 90%) calc(50% - 1px),
+    rgb(255 255 255 / 90%) calc(50% + 1px),
+    transparent calc(50% + 2px)
+  );
+}
+
+.ev-shot-random {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(10 8 16 / 40%);
+  backdrop-filter: blur(5px);
+  color: #fff;
+  font-size: 56px;
+  font-weight: 800;
+  text-shadow: 0 2px 14px rgb(0 0 0 / 60%);
+}
+
+.ev-hero {
+  position: absolute;
+  inset: 0;
+}
+
+.ev-hero .ev-shot-random {
+  backdrop-filter: blur(14px);
+  font-size: 300px;
+}
+
+.ev-hero.blurred {
+  filter: blur(22px) brightness(0.55);
+  transform: scale(1.08);
+}
+
+.ev-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      90deg,
+      rgb(6 5 12 / 82%),
+      rgb(6 5 12 / 30%) 48%,
+      transparent 72%
+    ),
+    linear-gradient(
+      0deg,
+      rgb(6 5 12 / 96%) 8%,
+      rgb(6 5 12 / 55%) 42%,
+      transparent 62%
+    ),
+    linear-gradient(180deg, rgb(6 5 12 / 60%), transparent 20%);
+  pointer-events: none;
+}
+
+.ev-cond-head {
+  position: absolute;
+  left: 100px;
+  top: 150px;
+  width: 1000px;
+  text-shadow: 0 2px 18px rgb(0 0 0 / 45%);
+}
+
+.ev-cond-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  margin: 14px 0 6px;
+  font-size: 100px;
+  font-weight: 800;
+  font-stretch: 125%;
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.ev-cond-head h2 .wx-icon {
+  flex: none;
+  width: 96px;
+  height: 96px;
+  filter: drop-shadow(0 4px 14px rgb(0 0 0 / 40%));
+}
+
+.ev-cond-time {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.ev-chips {
+  display: flex;
+  gap: 10px;
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ev-chips li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 4px;
+  background: rgb(12 10 18 / 62%);
+  backdrop-filter: blur(8px);
+  font-size: 19px;
+  font-weight: 600;
+  text-shadow: none;
+}
+
+.ev-chips .row-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.ev-tyre-dot {
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 4px solid var(--tyre);
+  border-radius: 50%;
+  background: #141418;
+}
+
+.ev-tyre-dot + .ev-tyre-dot {
+  margin-left: -6px;
+}
+
+.ev-forecast {
+  display: inline-flex;
+  margin: 16px 0 0;
+  padding: 8px 16px;
+  border-left: 4px solid #2d8cff;
+  border-radius: 3px;
+  background: rgb(12 10 18 / 62%);
+  backdrop-filter: blur(8px);
+  font-size: 20px;
+  font-weight: 600;
+  text-shadow: none;
+}
+
+.ev-forecast:empty {
+  display: none;
+}
+
+.ev-cond-info {
+  max-width: 780px;
+  margin: 20px 0 0;
+  color: rgb(255 255 255 / 80%);
+  font-size: 21px;
+  line-height: 1.4;
+}
+
+.ev-strips {
+  position: absolute;
+  left: 100px;
+  right: 100px;
+  top: 548px;
+  display: grid;
+  gap: 16px;
+}
+
+.ev-strip {
+  transition: opacity 0.3s;
+}
+
+.ev-strip:not(.focus) {
+  opacity: 0.55;
+}
+
+.ev-strip h3 {
+  margin: 0 0 8px;
+  color: rgb(255 255 255 / 82%);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ev-strip.focus h3::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  margin-right: 10px;
+  background: #e10600;
+}
+
+.ev-strip-cards {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 12px;
+}
+
+.ev-cond {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(14 12 20 / 86%);
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.3s var(--ease),
+    box-shadow 0.3s;
+}
+
+.ev-cond .ev-shot {
+  aspect-ratio: 16 / 9;
+}
+
+.ev-cond-label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 7px;
+  height: 50px;
+  padding: 0 10px;
+}
+
+.ev-cond-label small {
+  grid-column: 1 / -1;
+  margin-top: -2px;
+}
+
+.ev-cond-label b {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ev-cond-label small {
+  overflow: hidden;
+  color: rgb(255 255 255 / 62%);
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.ev-cond-icon:empty {
+  display: none;
+}
+
+.ev-cond-icon .wx-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.ev-cond:hover {
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 45%);
+}
+
+.ev-cond.active {
+  box-shadow:
+    0 0 0 3px #fff,
+    0 14px 30px rgb(0 0 0 / 45%);
+}
+
+.ev-cond.active::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 4px;
+  background: #e10600;
+}
+
+.ev-strip.focus .ev-cond.active {
+  transform: translateY(-6px);
+}
+
+.ev-rows {
+  position: absolute;
+  left: 100px;
+  top: 150px;
+  width: 1000px;
+}
+
+.ev-row {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  align-items: center;
+  height: 62px;
+  margin-bottom: 6px;
+  padding: 0 10px 0 26px;
+  border-radius: 4px;
+  background: rgb(14 12 20 / 74%);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.ev-row:hover {
+  background: rgb(36 32 46 / 84%);
+}
+
+.ev-row.focus {
+  box-shadow: inset 5px 0 #e10600;
+  background: #fff;
+  color: #101014;
+}
+
+.ev-row-label {
+  font-size: 20px;
+  font-weight: 700;
+  font-stretch: 108%;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.ev-row-value {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+}
+
+.ev-row-step {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ev-row-step::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border: solid currentColor;
+  border-width: 0 3px 3px 0;
+}
+
+.ev-row-step.less::before {
+  margin-left: 6px;
+  transform: rotate(135deg);
+}
+
+.ev-row-step.more::before {
+  margin-right: 6px;
+  transform: rotate(-45deg);
+}
+
+.ev-row-step:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.ev-row-face {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+
+.ev-row-face b {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.ev-row-face small {
+  opacity: 0.62;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.ev-row-face small:empty {
+  display: none;
+}
+
+.ev-meter {
+  align-self: center;
+  width: 220px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgb(128 128 140 / 35%);
+}
+
+.ev-meter i {
+  display: block;
+  width: calc(var(--fill, 0) * 100%);
+  height: 100%;
+  background: #e10600;
+  transition: width 0.3s var(--ease);
+}
+
+.ev-tyres {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.ev-row.tyre {
+  height: 92px;
+}
+
+.ev-tyre-weather {
+  display: flex;
+  flex-basis: 100%;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ev-row-face .ev-tyre-weather {
+  font-size: 15px;
+}
+
+.ev-tyre-weather .wx-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.ev-tyre-pick {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  opacity: 0.45;
+  cursor: pointer;
+  transition:
+    transform 0.3s var(--ease),
+    opacity 0.3s;
+}
+
+.ev-tyre-pick .tyre-art {
+  width: 100%;
+  height: 100%;
+}
+
+.ev-tyre-pick.suggested::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.ev-tyre-pick.active {
+  opacity: 1;
+  transform: scale(1.3);
+}
+
+.ev-tyre-name {
+  min-width: 150px;
+  margin-left: 10px;
+  text-align: left;
+}
+
+.ev-row-info {
+  margin: 14px 0 0;
+  padding: 14px 22px;
+  border-radius: 4px;
+  background: rgb(14 12 20 / 62%);
+  backdrop-filter: blur(8px);
+  color: rgb(255 255 255 / 82%);
+  font-size: 19px;
+  line-height: 1.4;
+}
+
+.ev-summary {
+  position: absolute;
+  left: 1160px;
+  top: 150px;
+  width: 660px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgb(14 12 20 / 84%);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 30px 80px rgb(0 0 0 / 45%);
+}
+
+.ev-sum-media {
+  position: relative;
+  height: 330px;
+}
+
+.ev-sum-shot {
+  position: absolute;
+  inset: 0;
+}
+
+.ev-sum-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, rgb(14 12 20 / 96%), transparent 45%);
+}
+
+.ev-sum-map {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 150px;
+  height: 150px;
+  padding: 12px;
+  border-radius: 6px;
+  background: rgb(8 8 14 / 46%);
+  backdrop-filter: blur(8px);
+}
+
+.ev-sum-body {
+  position: relative;
+  margin-top: -64px;
+  padding: 0 30px 28px;
+}
+
+.ev-sum-body h3 {
+  margin: 8px 0 0;
+  font-size: 44px;
+  font-weight: 800;
+  font-stretch: 125%;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ev-sum-list {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ev-sum-list li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.ev-sum-list svg {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.ev-sum-tyre {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid rgb(255 255 255 / 12%);
+}
+
+.ev-sum-tyre .tyre-art {
+  flex: none;
+  width: 80px;
+  height: 80px;
+}
+
+.ev-sum-tyre div {
+  display: grid;
+  gap: 4px;
+}
+
+.ev-sum-tyre b {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.ev-warn {
+  color: #ffb020;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.ev-warn:empty {
+  display: none;
+}
+
+@keyframes ev-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(140px);
+  }
+}
+
+@keyframes ev-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-140px);
+  }
+}
+
+@keyframes ev-rise {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+}
+
+@keyframes ev-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ev-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes ev-bump-left {
+  35% {
+    translate: 40px 0;
+  }
+}
+
+@keyframes ev-bump-right {
+  35% {
+    translate: -40px 0;
+  }
+}

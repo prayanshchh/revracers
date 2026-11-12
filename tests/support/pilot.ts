@@ -49,6 +49,7 @@ export class Pilot {
   private readonly startX: number;
   private readonly startY: number;
   offset = 0;
+  cap = Infinity;
 
   constructor(
     private readonly m: RaceSystems,
@@ -79,7 +80,7 @@ export class Pilot {
   private targetSpeed(distance: number, speed: number): number {
     const at = (d: number) =>
       (line.profile.speed[lineIndex(d, this.length)] ?? 0) * this.scale;
-    return Math.min(at(distance + speed * 0.25), at(distance) + 3);
+    return Math.min(at(distance + speed * 0.25), at(distance) + 3, this.cap);
   }
 
   tick(): void {

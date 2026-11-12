@@ -72,6 +72,9 @@ const double flatTreadShare = 0.15;
 const double flatWearGain = 0.5;
 const double lockGripLoss = 0.25;
 const double slideWearGain = 1.5;
+const double overheatFrom = 10.0;
+const double overheatFade = 0.06;
+const double overheatFloor = 0.3;
 const double slideWearMax = 2.0;
 const double peakSlipStep = 0.002;
 const double peakSlipMax = 0.6;
@@ -231,6 +234,12 @@ double slideWear(const tWheel &wheel, const Tyre &tyre)
     return 1.0 + slideWearGain * std::max(0.0, std::min(slideWearMax, excess));
 }
 
+double slideShare(const tWheel &wheel, const Tyre &tyre)
+{
+    double slip = std::min(maxSlip, (double)wheel.tireSlip);
+    return slip > tyre.peakSlip ? (slip - tyre.peakSlip) / slip : 0.0;
+}
+
 double aquaplaning(const Compound &c, double water, double speed)
 {
     double excess = water * speed / aquaplaneSpeed - c.drain;
@@ -260,7 +269,10 @@ void updateThermal(Tyre &tyre, const tWheel &wheel, const Compound &c, double ax
     double load = wheel.forces.z / 1000.0;
     double flex = load * speed / aquaplaneSpeed * c.heat * (1.0 + (pressure - target) * pressureHeatGain);
     double wet = 1.0 + wetCoolGain * water;
-    double surfaceRate = slipHeat * power * c.heat * axle + flexHeat * flex * axle
+    double fade = std::max(overheatFloor, 1.0 - overheatFade * std::max(0.0, tyre.surface - c.high - overheatFrom));
+    double slip = slipHeat * power * c.heat * axle;
+    double slide = slip * slideShare(wheel, tyre);
+    double surfaceRate = (slip - slide + flexHeat * flex * axle) * fade + slide
         - (airCool + speedCool * speed) * wet * (tyre.surface - air)
         - (load > 0.05 ? trackCool * wet : 0.0) * (tyre.surface - track)
         - surfaceToCarcass * (tyre.surface - tyre.carcass);

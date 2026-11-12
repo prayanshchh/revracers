@@ -1,6 +1,6 @@
 import { boostMode, type EnergyInfo } from "./energy.ts";
 import { putAttr, putData, putStyle, putText } from "./hud-dom.ts";
-import { seeded } from "./seeded.ts";
+import { seeded } from "./random.ts";
 
 interface Point {
   x: number;

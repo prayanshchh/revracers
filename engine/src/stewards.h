@@ -84,6 +84,7 @@ void sdStewardsStep(tSituation *s);
 void sdStewardsNoteService(int index);
 void sdStewardsLapCompleted(int index);
 bool sdStewardsLapInvalid(int index);
+int sdStewardsTrouble(int index);
 bool sdStewardsLastLapInvalid(int index);
 double sdStewardsOwedTime(int index);
 double sdStewardsTimeAdded(int index);

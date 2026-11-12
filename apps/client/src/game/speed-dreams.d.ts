@@ -144,7 +144,8 @@ declare module "*/wasm/speed-dreams.js" {
       brake: number,
     ): void;
     _sdTyresConfigure(compound: number, scale: number): void;
-    _sdWeatherConfigure(dynamic: number, seed: number): void;
+    _sdWeatherConfigure(dynamic: number, startLevel: number): void;
+    _sdWeatherShift(at: number, level: number): void;
     _sdWeatherInfo(out: number): void;
     _sdResync(now: number): void;
     _sdInputRelease(): void;

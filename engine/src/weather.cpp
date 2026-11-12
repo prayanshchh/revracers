@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cmath>
-#include <random>
 #include <vector>
 #include <emscripten/emscripten.h>
 
@@ -20,16 +19,10 @@ const double lineBlend = 1.2;
 const double rainLevels = 3.0;
 const double slickLimit = 0.16;
 const double interLimit = 0.55;
-const double changeMinutesLow = 4.0;
-const double changeMinutesHigh = 11.0;
 const double rampSeconds = 90.0;
-const double timelineSeconds = 4.0 * 3600.0;
 const double forecastStep = 300.0;
 const int forecastPoints = 6;
 const double futureStep = 5.0;
-const double stayChance = 0.35;
-const double dryBias = 0.55;
-const double startWeights[4] = {0.45, 0.30, 0.18, 0.07};
 
 struct Shift
 {
@@ -38,7 +31,6 @@ struct Shift
 };
 
 bool dynamicMode = false;
-unsigned seed = 1;
 std::vector<Shift> timeline;
 double staticRain = 0;
 double rain = 0;
@@ -51,44 +43,20 @@ double clamp01(double value)
     return std::max(0.0, std::min(1.0, value));
 }
 
-void buildTimeline()
-{
-    timeline.clear();
-    std::mt19937 rng(seed);
-    auto uniform = [&](double low, double high) { return std::uniform_real_distribution<double>(low, high)(rng); };
-    int level = 0;
-    double pick = uniform(0, 1);
-    while (level < 3 && pick > startWeights[level])
-        pick -= startWeights[level++];
-    double at = 0;
-    timeline.push_back({0, level / rainLevels});
-    while (at < timelineSeconds)
-    {
-        at += uniform(changeMinutesLow, changeMinutesHigh) * 60.0;
-        double roll = uniform(0, 1);
-        if (roll >= stayChance)
-        {
-            bool drier = level == 3 || (level > 0 && uniform(0, 1) < dryBias);
-            level += drier ? -1 : 1;
-        }
-        timeline.push_back({at, level / rainLevels});
-    }
-}
-
 double rainAt(double t)
 {
     if (!dynamicMode || timeline.empty())
         return staticRain;
-    double value = timeline.front().rain;
-    for (size_t i = 1; i < timeline.size(); i++)
+    double from = timeline.front().rain;
+    double target = from;
+    double began = 0;
+    for (size_t i = 1; i < timeline.size() && t >= timeline[i].at; i++)
     {
-        const Shift &shift = timeline[i];
-        if (t < shift.at)
-            break;
-        double blend = clamp01((t - shift.at) / rampSeconds);
-        value = timeline[i - 1].rain + (shift.rain - timeline[i - 1].rain) * blend;
+        from += (target - from) * clamp01((timeline[i].at - began) / rampSeconds);
+        target = timeline[i].rain;
+        began = timeline[i].at;
     }
-    return value;
+    return from + (target - from) * clamp01((t - began) / rampSeconds);
 }
 
 double settle(double water, double target, double dt)
@@ -140,8 +108,6 @@ void sdWeatherReset()
 {
     tTrackLocalInfo &local = ReInfo->track->local;
     staticRain = clamp01(local.rain / rainLevels);
-    if (dynamicMode)
-        buildTimeline();
     weatherClock = 0;
     rain = rainAt(0);
     double start = dynamicMode ? rain : clamp01(local.water / rainLevels);
@@ -206,10 +172,18 @@ int sdWeatherIdealCompound(double water, int dryChoice)
 
 extern "C" {
 
-EMSCRIPTEN_KEEPALIVE void sdWeatherConfigure(int dynamic, int value)
+EMSCRIPTEN_KEEPALIVE void sdWeatherConfigure(int dynamic, double startLevel)
 {
     dynamicMode = dynamic != 0;
-    seed = (unsigned)std::max(1, value);
+    timeline.clear();
+    if (dynamicMode)
+        timeline.push_back({0, clamp01(startLevel / rainLevels)});
+}
+
+EMSCRIPTEN_KEEPALIVE void sdWeatherShift(double at, double level)
+{
+    if (dynamicMode && at > 0 && (timeline.empty() || at > timeline.back().at))
+        timeline.push_back({at, clamp01(level / rainLevels)});
 }
 
 EMSCRIPTEN_KEEPALIVE void sdWeatherSet(double rainNow, double line, double off)

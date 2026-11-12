@@ -9,6 +9,7 @@ import crewUrl from "../../../content/tracks/hill-country/crew.glb?url";
 import "@fontsource-variable/saira/wdth.css";
 import "./drive.css";
 import "./front.css";
+import "./event.css";
 import "./buildup.css";
 import "./tutorial.css";
 import * as THREE from "three/webgpu";
@@ -42,7 +43,11 @@ import {
 } from "./game/api.ts";
 import { fieldStrategies } from "./game/ai-strategy.ts";
 import { playBuildUp, type Weather } from "./game/buildup.ts";
-import { type BuildUpVenue, buildUpVenue } from "./game/buildup-venues.ts";
+import {
+  airTemperature,
+  type BuildUpVenue,
+  buildUpVenue,
+} from "./game/buildup-venues.ts";
 import type { GridSpot } from "./game/buildup-shots.ts";
 import { FrontEnd } from "./game/front-end.ts";
 import { Hud, type HudOptions, lapTime, signed } from "./game/hud.ts";
@@ -135,6 +140,7 @@ import {
   type WeekendPlan,
   type WeekendState,
 } from "./game/weekend.ts";
+import { sessionSeconds, weatherPlan } from "./game/weather-plan.ts";
 import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
 import { type Circuit, circuitOf } from "./game/circuits.ts";
@@ -498,8 +504,13 @@ function raceSystems(
       rollingStart: settings.startType === "rolling" && stage === "race",
       interventions,
     },
-    dynamicWeather: settings.rain === "dynamic",
-    weatherSeed: Math.floor(Math.random() * 1_000_000) + 1,
+    weather:
+      settings.rain === "dynamic"
+        ? weatherPlan(
+            settings.weatherSeed,
+            sessionSeconds(stage, settings.laps, trackOf(settings).length),
+          )
+        : null,
     compound: stage === "qualifying" ? 0 : compoundIndex(settings.compound),
     wearScale: sessionWear(settings, stage),
     isRace: stage === "race",
@@ -958,7 +969,7 @@ function raceLog(
 function weatherFor(
   settings: Settings,
   local: { rain: number; timeOfDay: number },
-  { temperatures, season: raceSeason }: BuildUpVenue,
+  venue: BuildUpVenue,
 ): Weather {
   const { rain } = local;
   const hour = local.timeOfDay / 3600;
@@ -967,10 +978,12 @@ function weatherFor(
   const overcast = ["many clouds", "full cover"].includes(settings.clouds);
   const clear = night ? "moon" : "sun";
   return {
-    temperature:
-      (temperatures[seasonOf(settings.season, raceSeason)] ?? 27) -
-      rain * 3 -
-      (overcast ? 2 : 0),
+    temperature: airTemperature(
+      venue,
+      seasonOf(settings.season, venue.season),
+      rain,
+      overcast,
+    ),
     label: `${weatherOf(settings).label} (${wet ? "Wet" : "Dry"})`,
     icon: wet ? "rain" : overcast ? "cloud" : clear,
   };
@@ -994,12 +1007,11 @@ function newcomer(driver: Driver | null): boolean {
 async function enterGame(
   renderer: THREE.WebGPURenderer,
   settings: Settings,
-  menu: Menu,
   music: Music,
   known: Driver | null,
 ): Promise<Entry> {
   const studio = new Studio(renderer);
-  const front = new FrontEnd(element("[data-front=root]"), studio);
+  const front = new FrontEnd(element("[data-front=root]"), studio, settings);
   front.open();
   music.opening();
   void studio.preloadTeams();
@@ -1021,11 +1033,8 @@ async function enterGame(
     rememberDriver(driver);
     settings.car = driver.team ?? settings.car;
     if (choice.action === "tutorial") return leave(true);
-    front.close();
     menuMusic(music);
-    const action = await menu.run(false);
-    if (action === "start") return leave(false);
-    front.open();
+    if ((await front.raceEvent()) === "start") return leave(false);
   }
 }
 
@@ -1033,7 +1042,6 @@ async function signIn(
   autostart: boolean,
   renderer: THREE.WebGPURenderer,
   settings: Settings,
-  menu: Menu,
   music: Music,
 ): Promise<Entry> {
   const known = await (schoolDriver() ?? currentDriver());
@@ -1041,7 +1049,7 @@ async function signIn(
     rememberTutorial("skipped");
   if (autostart) return { driver: known, tutorial: false };
   if (newcomer(known)) return { driver: known, tutorial: true };
-  const entry = await enterGame(renderer, settings, menu, music, known);
+  const entry = await enterGame(renderer, settings, music, known);
   saveWeekend(null);
   return entry;
 }
@@ -1068,7 +1076,6 @@ async function enter(
   params: URLSearchParams,
   renderer: THREE.WebGPURenderer,
   settings: Settings,
-  menu: Menu,
   music: Music,
 ): Promise<Started> {
   const autostart = consumeAutostart(params);
@@ -1077,7 +1084,7 @@ async function enter(
   if (early && (asked || !autostart)) return schoolEntry(early, asked);
   const entry = asked
     ? { driver: await (early ?? currentDriver()), tutorial: true }
-    : await signIn(autostart, renderer, settings, menu, music);
+    : await signIn(autostart, renderer, settings, music);
   if (await redeployed(entry.tutorial)) return never();
   return {
     driver: Promise.resolve(entry.driver),
@@ -1211,7 +1218,7 @@ async function main(): Promise<void> {
   const music = new Music(() => settings.musicVolume / 100);
   scoreLoadShow(music);
 
-  const entry = await enter(params, renderer, settings, menu, music);
+  const entry = await enter(params, renderer, settings, music);
   const { autostart } = entry;
   startTutorial(entry.tutorial, settings, menu);
 
