@@ -110,7 +110,7 @@ describe.runIf(existsSync(wasm))("flashback", () => {
       }
     };
     run(20);
-    const fitted = timingOf(m, 1)[0]?.compound ?? 0;
+    const fitted = timingOf(m, fieldSize)[0]?.compound ?? 0;
     expect(sessionOf(m).changedCompound).toBe(false);
     const changedAt = time;
     m._sdSessionPitCompound(fitted === 2 ? 1 : 2);
@@ -121,6 +121,6 @@ describe.runIf(existsSync(wasm))("flashback", () => {
     if (!moment) throw new Error("no flashback point was kept");
     expect(moment.time).toBeLessThan(changedAt);
     expect(sessionOf(m).changedCompound).toBe(false);
-    expect(timingOf(m, 1)[0]?.compound).toBe(fitted);
+    expect(timingOf(m, fieldSize)[0]?.compound).toBe(fitted);
   });
 });

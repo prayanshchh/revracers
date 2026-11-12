@@ -509,8 +509,13 @@ static bool teammateStopping(tSituation *s, int i)
 {
     int team = (sdAiBayOf(i) - firstTeamBay) / 2;
     for (int j = 0; j < s->_ncars; j++)
-        if (j != i && (sdAiBayOf(j) - firstTeamBay) / 2 == team && (sdAiInPitLane(j) || sdAiPitPending(j)))
+    {
+        const Timing &mate = timing[j];
+        if (j == i || mate.retired || mate.finished || mate.disqualified)
+            continue;
+        if ((sdAiBayOf(j) - firstTeamBay) / 2 == team && (sdAiInPitLane(j) || sdAiPitPending(j)))
             return true;
+    }
     return false;
 }
 
