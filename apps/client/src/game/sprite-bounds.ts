@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 export const atlasColumns = 8;
-export const atlasRows = 4;
+export const atlasRows = 8;
 export const alphaCutoff = 0.5;
 const spriteCells = atlasColumns * atlasRows;
 

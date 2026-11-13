@@ -1,9 +1,9 @@
 import * as THREE from "three/webgpu";
 import {
   atan,
-  dot,
   float,
   floor,
+  Fn,
   fract,
   fwidth,
   instancedBufferAttribute,
@@ -15,7 +15,6 @@ import {
   step,
   texture,
   time,
-  transformNormalToView,
   uniform,
   varying,
   vec2,
@@ -25,40 +24,50 @@ import {
 import table from "../../../../content/scenery/trees/trees.json";
 import { releaseOnceUploaded } from "./preload.ts";
 import { alphaTestedOrder, shadowOnlyLayer } from "./road.ts";
-import { foliageTint, foliageTurned, foliageTurning } from "./scenery-look.ts";
-import { SkyLitMaterial } from "./sky-ambient.ts";
+import {
+  cloudShade,
+  foliageTint,
+  foliageTurned,
+  foliageTurning,
+} from "./scenery-look.ts";
+import { canopyLight, floodlit, skyIrradiance } from "./sky-ambient.ts";
 
 const files = import.meta.glob<string>(
   "../../../../content/scenery/trees/*.webp",
   { query: "?url", import: "default", eager: true },
 );
 
-const stride = 8;
+export const treeStride = 8;
+const stride = treeStride;
 const tileSize = 1500;
 const turn = Math.PI * 2;
 const highRingFrom = Math.sin((22 * Math.PI) / 180);
 const frameInset = 0.012;
 const alphaCutoff = 0.42;
 const shadowCutoff = 0.5;
-const roundness = 0.55;
-const crownCentre = 0.58;
-const crownDepth = 0.7;
 const swayRate = 1.1;
 const swayReach = 0.012;
 const tintSpread = 0.16;
 const turnedFloor = 0.45;
-const backlight = 0.55;
-const backlightFocus = 3;
-const foliageRoughness = 0.86;
-const shadeFloor = 0.7;
-const leafGain = 1.7;
+const sunGain = 19;
+const skyGain = 10;
+const floodGain = 7.2;
+const sunContrast = 1.6;
+const skyFacing = 0.8;
+const sunFade = 0.2;
+const leafSaturation = 0.8;
 const anisotropyLimit = 4;
 const sheetColumns = 2;
 const leafGamma = 2.2;
 
-type Species = keyof typeof table.species;
+export type Species = keyof typeof table.species;
 const speciesNames = Object.keys(table.species) as Species[];
-const sheetRows = Math.ceil(speciesNames.length / sheetColumns);
+export const woodland: Species[] = ["oak", "elm", "ash", "shrub"];
+export const boulevard: Species[] = ["palm", "elm"];
+
+export function speciesIndex(name: Species): number {
+  return speciesNames.indexOf(name);
+}
 
 function fileUrl(name: string): string {
   const entry = Object.entries(files).find(([key]) => key.endsWith(`/${name}`));
@@ -66,10 +75,10 @@ function fileUrl(name: string): string {
   return entry[1];
 }
 
-export function treeDownloads(): string[] {
-  return speciesNames.flatMap((name) => [
+export function treeDownloads(kinds: Species[]): string[] {
+  return kinds.flatMap((name) => [
     fileUrl(`${name}.webp`),
-    fileUrl(`${name}-shape.webp`),
+    fileUrl(`${name}-light.webp`),
   ]);
 }
 
@@ -115,6 +124,7 @@ function frameUv(
   index: THREE.Node<"float">,
   across: THREE.Node<"float">,
   rise: THREE.Node<"float">,
+  sheetRows: number,
 ): THREE.Node<"vec2"> {
   const column = index.mod(table.columns);
   const row = floor(index.div(table.columns));
@@ -126,7 +136,11 @@ function frameUv(
   return cell.add(inSheet).div(vec2(sheetColumns, sheetRows));
 }
 
-function billboard(instances: Instances, view: View): Billboard {
+function billboard(
+  instances: Instances,
+  view: View,
+  sheetRows: number,
+): Billboard {
   const place = vec4(
     instancedBufferAttribute(instances.place) as ReturnType<typeof vec4>,
   );
@@ -168,37 +182,70 @@ function billboard(instances: Instances, view: View): Billboard {
     right,
     up,
     toward: facing,
-    first: frameUv(look.x, first.add(base), across, rise),
-    second: frameUv(look.x, second.add(base), across, rise),
+    first: frameUv(look.x, first.add(base), across, rise, sheetRows),
+    second: frameUv(look.x, second.add(base), across, rise, sheetRows),
     blend: fract(frame),
     across,
     rise,
   };
 }
 
+function sunShares(
+  toEye: THREE.Node<"vec3">,
+): [THREE.Node<"float">, THREE.Node<"float">, THREE.Node<"float">] {
+  const seen = normalize(vec2(toEye.x, toEye.z.negate()));
+  const flat = vec2(sunModel.x, sunModel.z.negate());
+  const low = flat.length();
+  const lit = flat.div(low.max(1e-4));
+  const cosine = seen.dot(lit);
+  const sine = seen.x.mul(lit.y).sub(seen.y.mul(lit.x));
+  const share = (turn: number) =>
+    cosine
+      .mul(Math.cos(turn))
+      .add(sine.mul(Math.sin(turn)))
+      .mul(2)
+      .add(1)
+      .div(3)
+      .max(0);
+  const [front, right, left] = table.sunTurns.map((degrees) =>
+    share((degrees * Math.PI) / 180),
+  ) as [THREE.Node<"float">, THREE.Node<"float">, THREE.Node<"float">];
+  const total = front.add(right).add(left).max(1e-3);
+  const directed = smoothstep(0.05, 0.5, low);
+  const even = float(1 / 3);
+  return [
+    mix(even, front.div(total), directed),
+    mix(even, right.div(total), directed),
+    mix(even, left.div(total), directed),
+  ];
+}
+
 function foliage(
   albedo: THREE.Texture,
-  form: THREE.Texture,
+  light: THREE.Texture,
   instances: Instances,
 ): THREE.Material {
-  const material = new SkyLitMaterial({
+  const sheetRows = rowsOf(albedo);
+  const material = new THREE.MeshBasicNodeMaterial({
     side: THREE.DoubleSide,
-    roughness: foliageRoughness,
-    metalness: 0,
     alphaTest: alphaCutoff,
     alphaToCoverage: true,
   });
   const [, high = 40] = table.rings;
   const tilt = (high * Math.PI) / 180;
-  const quad = billboard(instances, {
-    toward: (centre) => eyeModel.sub(centre),
-    ring: (direction) =>
-      step(highRingFrom, direction.y.div(direction.length())),
-    lean: (ring) => ({
-      sine: ring.mul(Math.sin(tilt)),
-      cosine: mix(float(1), float(Math.cos(tilt)), ring),
-    }),
-  });
+  const quad = billboard(
+    instances,
+    {
+      toward: (centre) => eyeModel.sub(centre),
+      ring: (direction) =>
+        step(highRingFrom, direction.y.div(direction.length())),
+      lean: (ring) => ({
+        sine: ring.mul(Math.sin(tilt)),
+        cosine: mix(float(1), float(Math.cos(tilt)), ring),
+      }),
+    },
+    sheetRows,
+  );
   material.positionNode = quad.position;
   const first = varying(quad.first);
   const second = varying(quad.second);
@@ -226,46 +273,48 @@ function foliage(
         ),
       ),
   );
-  const shape = mix(texture(form, first), texture(form, second), blend);
-  const right = varying(quad.right);
-  const up = varying(quad.up);
-  const toward = varying(quad.toward);
-  const across = varying(quad.across);
-  const rise = varying(quad.rise);
-  const slope = shape.xy.mul(2).sub(1);
-  const baked = vec3(slope, float(1).sub(slope.dot(slope)).max(0).sqrt());
-  const round = normalize(
-    vec3(across.mul(2), rise.sub(crownCentre).mul(2), float(crownDepth)),
-  );
-  const local = normalize(mix(baked, round, roundness));
-  const normal = normalize(
-    right.mul(local.x).add(up.mul(local.y)).add(toward.mul(local.z)),
-  );
-  material.normalNode = transformNormalToView(normal);
-  const depth = mix(float(shadeFloor), float(1), shape.z);
-  const lit = leaf.mul(tint).mul(leafGain);
-  material.colorNode = vec4(lit.mul(depth), alpha);
-  const view = normalize(varying(quad.direction));
-  const through = dot(view.negate(), sunModel)
-    .max(0)
-    .pow(backlightFocus)
-    .mul(backlight)
-    .mul(smoothstep(0, 0.25, sunModel.y));
-  material.emissiveNode = lit.mul(sunLight).mul(through).mul(0.25);
+  const shares = sunShares(quad.direction).map((share) => varying(share));
+  const baked = mix(texture(light, first), texture(light, second), blend).rgb;
+  const [front = float(0), right = float(0), left = float(0)] = shares;
+  const direct = baked.x
+    .mul(front)
+    .add(baked.y.mul(right))
+    .add(baked.z.mul(left))
+    .div(table.lightScale)
+    .pow(sunContrast)
+    .mul(smoothstep(0, sunFade, sunModel.y));
+  const lamps = Fn(() => canopyLight())();
+  const sun = sunLight.mul(cloudShade()).mul(lamps).mul(direct).mul(sunGain);
+  const sky = Fn(() =>
+    skyIrradiance(float(skyFacing)).mul(floodlit() ? floodGain : skyGain),
+  )();
+  const hue = leaf.mul(tint);
+  const lit = mix(
+    vec3(hue.dot(vec3(0.2126, 0.7152, 0.0722))),
+    hue,
+    leafSaturation,
+  )
+    .mul(sun.add(sky))
+    .div(Math.PI);
+  material.colorNode = vec4(lit, alpha);
   return material;
 }
 
 function shade(albedo: THREE.Texture, instances: Instances): THREE.Material {
   const material = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
   const level = sunModel.y.clamp(0.05, 0.98);
-  const quad = billboard(instances, {
-    toward: () => sunModel,
-    ring: () => shadowRing,
-    lean: () => ({
-      sine: level,
-      cosine: float(1).sub(level.mul(level)).sqrt(),
-    }),
-  });
+  const quad = billboard(
+    instances,
+    {
+      toward: () => sunModel,
+      ring: () => shadowRing,
+      lean: () => ({
+        sine: level,
+        cosine: float(1).sub(level.mul(level)).sqrt(),
+      }),
+    },
+    rowsOf(albedo),
+  );
   const spread = quad.place.w.mul(quad.look.z);
   material.positionNode = quad.position.sub(sunModel.mul(spread));
   const cover = mix(
@@ -278,9 +327,14 @@ function shade(albedo: THREE.Texture, instances: Instances): THREE.Material {
   return material;
 }
 
+function rowsOf(sheet: THREE.Texture): number {
+  return Number(sheet.userData["rows"]);
+}
+
 function sheet(pictures: ImageBitmap[], anisotropy: number): THREE.Texture {
   const [first] = pictures;
   if (!first) throw new Error("no tree pictures");
+  const sheetRows = Math.ceil(pictures.length / sheetColumns);
   const canvas = new OffscreenCanvas(
     first.width * sheetColumns,
     first.height * sheetRows,
@@ -302,6 +356,7 @@ function sheet(pictures: ImageBitmap[], anisotropy: number): THREE.Texture {
   map.premultiplyAlpha = true;
   map.colorSpace = THREE.NoColorSpace;
   map.anisotropy = Math.min(anisotropy, anisotropyLimit);
+  map.userData["rows"] = sheetRows;
   return releaseOnceUploaded(map);
 }
 
@@ -325,6 +380,7 @@ function instanced(
   indices: number[],
   material: (instances: Instances) => THREE.Material,
   spreadInTint: boolean,
+  kinds: Species[],
 ): THREE.InstancedMesh {
   const instances: Instances = {
     place: new THREE.InstancedBufferAttribute(
@@ -353,13 +409,14 @@ function instanced(
     const height = field(values, source + 3);
     const kind = Math.round(field(values, source + 4));
     const seed = field(values, source + 5);
-    const shape = table.species[speciesNames[kind] ?? "oak"];
+    const name = speciesNames[kind] ?? "oak";
+    const shape = table.species[name];
     const [low = 1, high = 1] = shape.sizes;
     const [lowDrop = 0, highDrop = 0] = shape.drops;
     instances.place.setXYZW(i, x, up, -north, height);
     instances.look.setXYZW(
       i,
-      kind,
+      Math.max(0, kinds.indexOf(name)),
       seed,
       spreadInTint ? shape.spread : (seed * 7.31) % 1,
       (seed * 13.7) % 1,
@@ -381,18 +438,27 @@ export class Trees {
 
   private constructor() {}
 
-  static async load(url: string, anisotropy: number): Promise<Trees> {
+  static async load(
+    source: string | Promise<Float32Array>,
+    anisotropy: number,
+    kinds: Species[],
+  ): Promise<Trees> {
     const loader = new THREE.ImageBitmapLoader();
     loader.setOptions({ premultiplyAlpha: "none" });
     const picture = (name: string) => loader.loadAsync(fileUrl(name));
-    const [response, colours, shapes] = await Promise.all([
-      fetch(url),
-      Promise.all(speciesNames.map((name) => picture(`${name}.webp`))),
-      Promise.all(speciesNames.map((name) => picture(`${name}-shape.webp`))),
+    const placed =
+      typeof source === "string"
+        ? fetch(source)
+            .then((response) => response.arrayBuffer())
+            .then((buffer) => new Float32Array(buffer))
+        : source;
+    const [values, colours, lights] = await Promise.all([
+      placed,
+      Promise.all(kinds.map((name) => picture(`${name}.webp`))),
+      Promise.all(kinds.map((name) => picture(`${name}-light.webp`))),
     ]);
     const albedo = sheet(colours, anisotropy);
-    const form = sheet(shapes, anisotropy);
-    const values = new Float32Array(await response.arrayBuffer());
+    const light = sheet(lights, anisotropy);
     const trees = new Trees();
     const plane = quadGeometry();
     const tiles = new Map<string, number[]>();
@@ -407,8 +473,9 @@ export class Trees {
         plane,
         values,
         indices,
-        (instances) => foliage(albedo, form, instances),
+        (instances) => foliage(albedo, light, instances),
         false,
+        kinds,
       );
       seen.renderOrder = alphaTestedOrder;
       seen.receiveShadow = false;
@@ -422,6 +489,7 @@ export class Trees {
         casters,
         (instances) => shade(albedo, instances),
         true,
+        kinds,
       );
       cast.castShadow = true;
       cast.receiveShadow = false;

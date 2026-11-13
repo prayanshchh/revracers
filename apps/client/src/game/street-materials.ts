@@ -3,12 +3,7 @@ import {
   float,
   floor,
   fract,
-  fwidth,
-  length,
-  max,
   mix,
-  mod,
-  select,
   sin,
   smoothstep,
   step,
@@ -17,13 +12,10 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
+import { floorHeight } from "./trackside-plan.ts";
 import { cityGlow } from "./street-city.ts";
-import { crowdRowSpan } from "./street-venue.ts";
 
-const seatWidth = 0.55;
-const occupied = 0.88;
 const garageDepth = 12;
-const floorHeight = 3.6;
 const mullion = 1.6;
 const garageTop = 8.5;
 const hallStrip = 1.6;
@@ -31,71 +23,6 @@ const hallRoom = 0.12;
 
 function hash(p: THREE.Node<"vec2">): THREE.Node<"float"> {
   return fract(sin(p.dot(vec2(127.1, 311.7))).mul(43758.5453));
-}
-
-function pick(
-  index: THREE.Node<"float">,
-  colours: [number, number, number][],
-): THREE.Node<"vec3"> {
-  let result: THREE.Node<"vec3"> = vec3(...(colours[0] ?? [0, 0, 0]));
-  colours.forEach((colour, i) => {
-    if (i === 0) return;
-    result = select(index.greaterThanEqual(i), vec3(...colour), result);
-  });
-  return result;
-}
-
-const shirts: [number, number, number][] = [
-  [0.03, 0.03, 0.035],
-  [0.04, 0.05, 0.12],
-  [0.7, 0.7, 0.72],
-  [0.45, 0.04, 0.04],
-  [0.03, 0.03, 0.035],
-  [0.08, 0.2, 0.45],
-  [0.6, 0.38, 0.05],
-  [0.12, 0.12, 0.13],
-  [0.55, 0.08, 0.3],
-  [0.05, 0.25, 0.12],
-];
-const skins: [number, number, number][] = [
-  [0.55, 0.38, 0.28],
-  [0.38, 0.24, 0.16],
-  [0.2, 0.12, 0.08],
-  [0.62, 0.46, 0.36],
-];
-
-export function crowdMaterial(): THREE.MeshStandardNodeMaterial {
-  const material = new THREE.MeshStandardNodeMaterial({
-    side: THREE.DoubleSide,
-  });
-  const along = uv().x.div(seatWidth);
-  const row = floor(uv().y.div(crowdRowSpan));
-  const rise = mod(uv().y, crowdRowSpan).div(0.95);
-  const seat = vec2(floor(along), row);
-  const x = fract(along).sub(0.5);
-  const jitter = hash(seat.add(3.3)).sub(0.5).mul(0.2);
-  const present = step(hash(seat), occupied);
-  const torso = smoothstep(0.36, 0.3, x.add(jitter).abs()).mul(
-    smoothstep(0.72, 0.66, rise),
-  );
-  const head = smoothstep(
-    0.15,
-    0.11,
-    length(vec2(x.add(jitter).mul(1.1), rise.sub(0.8))),
-  );
-  const shirt = pick(floor(hash(seat.add(7.1)).mul(shirts.length)), shirts);
-  const skin = pick(floor(hash(seat.add(1.9)).mul(skins.length)), skins);
-  const seatColour = vec3(0.05, 0.07, 0.14);
-  const person = mix(shirt.mul(torso), skin, head);
-  const body = torso.max(head).mul(present);
-  const far = smoothstep(0.4, 1.2, max(fwidth(along), fwidth(rise.mul(2))));
-  const average = mix(seatColour, vec3(0.16, 0.13, 0.13), occupied * 0.7);
-  material.colorNode = mix(mix(seatColour, person, body), average, far);
-  material.roughnessNode = float(0.9);
-  material.emissiveNode = mix(mix(seatColour, person, body), average, far).mul(
-    cityGlow.mul(0.35),
-  );
-  return material;
 }
 
 export function garageMaterial(): THREE.MeshStandardNodeMaterial {

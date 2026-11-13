@@ -19,13 +19,13 @@ START_LINE = 13016217986
 CIRCUIT_RELATION = 16696508
 PIT_LANE = 1223479152
 STREETS = (
-    ("Koval Lane", 13.5),
-    ("Westchester Drive", 13.0),
-    ("Sands Avenue", 14.0),
-    ("Spring Mountain Road", 15.0),
-    ("South Las Vegas Boulevard", 15.0),
-    ("West Harmon Avenue", 13.5),
-    ("East Harmon Avenue", 13.5),
+    ("Koval Lane", 11.7),
+    ("Westchester Drive", 11.2),
+    ("Sands Avenue", 12.2),
+    ("Spring Mountain Road", 13.2),
+    ("South Las Vegas Boulevard", 13.2),
+    ("West Harmon Avenue", 11.7),
+    ("East Harmon Avenue", 11.7),
 )
 
 _utm = Transformer.from_crs(4326, UTM, always_xy=True)

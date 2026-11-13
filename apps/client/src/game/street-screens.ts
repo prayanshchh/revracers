@@ -3,11 +3,15 @@ import {
   clamp,
   float,
   floor,
+  Fn,
   fract,
   fwidth,
+  If,
   max,
   min,
   mix,
+  mx_fractal_noise_float,
+  sin,
   smoothstep,
   step,
   texture,
@@ -52,6 +56,8 @@ const casing = 0.02;
 const boxDepth = 0.8;
 const wallDepth = 0.6;
 const post = 0.7;
+const flameShare = 0.2;
+const waveShare = 0.22;
 
 export function slide(
   atlas: THREE.Texture,
@@ -99,11 +105,21 @@ function screenMaterial(
     const pan = vec2(1).sub(reach).mul(local.sub(0.5).mul(drift).mul(sway));
     return panel.sub(0.5).mul(reach).add(0.5).add(pan);
   };
-  const picture = mix(
+  const stills = mix(
     slide(atlas, view(progress), current),
     slide(atlas, view(progress.sub(1)), next),
     smoothstep(1 - fade, 1, progress),
   );
+  const kind = fract(seed.mul(13.7));
+  const picture = Fn(() => {
+    const shown = stills.toVar();
+    If(kind.lessThan(flameShare), () => {
+      shown.assign(flames(panel, seed));
+    }).ElseIf(kind.lessThan(flameShare + waveShare), () => {
+      shown.assign(waves(panel, seed));
+    });
+    return shown;
+  })();
   const led = metres.div(ledPitch);
   const offset = fract(led).sub(0.5).abs();
   const lamp = smoothstep(0.5, 0.5 - ledGap, max(offset.x, offset.y));
@@ -123,6 +139,57 @@ function screenMaterial(
     front,
   );
   return material;
+}
+
+function flames(
+  panel: THREE.Node<"vec2">,
+  seed: THREE.Node<"float">,
+): THREE.Node<"vec3"> {
+  const rise = float(1).sub(panel.y);
+  const lick = mx_fractal_noise_float(
+    vec3(
+      panel.x.mul(3.2).add(seed.mul(9)),
+      rise.mul(2.4).sub(time.mul(1.5)),
+      time.mul(0.35),
+    ),
+    3,
+  );
+  const heat = clamp(float(1.15).sub(rise.mul(1.25)).add(lick.mul(0.6)), 0, 1);
+  const ember = vec3(0.75, 0.07, 0.01);
+  const core = vec3(1, 0.78, 0.22);
+  return mix(
+    vec3(0.012, 0.004, 0.002),
+    mix(ember, core, smoothstep(0.5, 0.95, heat)),
+    smoothstep(0.12, 0.5, heat),
+  );
+}
+
+function waves(
+  panel: THREE.Node<"vec2">,
+  seed: THREE.Node<"float">,
+): THREE.Node<"vec3"> {
+  const sweep = panel.x
+    .mul(2.2)
+    .add(sin(panel.y.mul(5).add(time.mul(1.1))).mul(0.22))
+    .sub(time.mul(0.45))
+    .add(seed.mul(5));
+  const band = sin(sweep.mul(Math.PI * 2))
+    .mul(0.5)
+    .add(0.5);
+  const pulse = sin(time.mul(2.3).add(panel.y.mul(7)))
+    .mul(0.5)
+    .add(0.5);
+  const first = mix(
+    vec3(0.9, 0.05, 0.42),
+    vec3(0.1, 0.25, 0.95),
+    fract(seed.mul(3.1)),
+  );
+  const second = mix(
+    vec3(1, 0.62, 0.05),
+    vec3(0.05, 0.85, 0.75),
+    fract(seed.mul(5.3)),
+  );
+  return mix(first, second, band).mul(pulse.mul(0.45).add(0.55));
 }
 
 function addSign(mesh: Mesh, sign: Sign): void {

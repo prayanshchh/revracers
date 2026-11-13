@@ -6,12 +6,12 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 
-SPECIES = ("oak", "elm", "ash", "shrub")
+SPECIES = ("oak", "elm", "ash", "shrub", "palm")
 COLOUR_QUALITY = 84
-SHAPE_QUALITY = 80
-SHAPE_SCALE = 2
+LIGHT_QUALITY = 84
+LIGHT_SCALE = 2
 SOLID = 0.35
-SHAPE_BLUR = 1.2
+LIGHT_BLUR = 0.6
 
 
 def srgb(linear):
@@ -42,18 +42,18 @@ def halve(image, scale):
 def pack(source, out, name):
     meta = json.loads((source / f"{name}.json").read_text())
     colour = np.load(source / f"{name}-colour.npy")
-    shape = np.load(source / f"{name}-shape.npy")
+    light = np.load(source / f"{name}-light.npy")
     alpha = colour[..., 3]
     rgb = bleed(srgb(np.clip(colour[..., :3], 0, 1)), alpha, meta["columns"], meta["rows"])
     rgba = np.concatenate([rgb, alpha[..., None]], -1)
     Image.fromarray((np.clip(rgba, 0, 1) * 255 + 0.5).astype(np.uint8)).save(
         out / f"{name}.webp", quality=COLOUR_QUALITY, alpha_quality=92, method=6, exact=True
     )
-    form = bleed(shape, alpha, meta["columns"], meta["rows"])
-    form = np.stack([gaussian_filter(form[..., c], SHAPE_BLUR) for c in (0, 1, 3)], -1)
-    form = halve(form, SHAPE_SCALE)
-    Image.fromarray((np.clip(form, 0, 1) * 255 + 0.5).astype(np.uint8)).save(out / f"{name}-shape.webp", quality=SHAPE_QUALITY, method=6)
-    return {key: meta[key] for key in ("sizes", "spread", "drops")}
+    lit = bleed(light, alpha, meta["columns"], meta["rows"])
+    lit = np.stack([gaussian_filter(lit[..., c], LIGHT_BLUR) for c in range(3)], -1)
+    lit = halve(lit, LIGHT_SCALE)
+    Image.fromarray((np.clip(lit, 0, 1) * 255 + 0.5).astype(np.uint8)).save(out / f"{name}-light.webp", quality=LIGHT_QUALITY, method=6)
+    return {key: meta[key] for key in ("sizes", "spread", "drops")}, {key: meta[key] for key in ("sunElevation", "sunTurns", "lightScale")}
 
 
 def main():
@@ -61,12 +61,14 @@ def main():
     out = Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
     first = json.loads((source / f"{SPECIES[0]}.json").read_text())
+    packed = {name: pack(source, out, name) for name in SPECIES}
     table = {
         "columns": first["columns"],
         "rows": first["rows"],
         "azimuths": first["azimuths"],
         "rings": first["rings"],
-        "species": {name: pack(source, out, name) for name in SPECIES},
+        **packed[SPECIES[0]][1],
+        "species": {name: packed[name][0] for name in SPECIES},
     }
     (out / "trees.json").write_text(json.dumps(table, indent=2) + "\n")
 

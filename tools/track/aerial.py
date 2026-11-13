@@ -1,10 +1,11 @@
 import json
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 from pyproj import Transformer
-from scipy.ndimage import binary_closing, binary_fill_holes, binary_opening, distance_transform_edt, gaussian_filter, gaussian_filter1d, label, map_coordinates, median_filter
+from scipy.ndimage import binary_closing, binary_dilation, binary_fill_holes, binary_opening, distance_transform_edt, gaussian_filter, gaussian_filter1d, label, map_coordinates, median_filter
 
+from brands import font
 from geo import DEM_ORIGIN, Osm
 
 Image.MAX_IMAGE_PIXELS = None
@@ -58,6 +59,36 @@ KERB_MIN_LENGTH = 18
 KERB_WIDTH = 1.5
 PHOTO_BLACK = 0.38
 PHOTO_WHITE = 0.92
+PAINT_NAMES = ("asphalt", "grass", "teal", "red", "white", "blue", "burgundy", "kerb")
+PAINT_STRAY_AREA = 220.0
+PAINT_STRAY_HEARD = 0.3
+PAINT_STRAY_GRASS = 0.6
+PAINT_KERB_STRIPE = 2.4
+PAINT_KERB_WIDTH = 1.5
+PAINT_KERB_CLEAR = 5.5
+PAINT_VERGE_NAMES = ("red", "teal")
+PAINT_FRESH_NAMES = ("red", "teal", "blue", "white")
+PAINT_VERGE_JOIN = (13, 3)
+PAINT_VERGE_KEEP = (21, 5)
+PAINT_PANEL_CLEAR = 0.3
+PAINT_PANEL_FILL = 0.82
+PAINT_PANEL_PITCH = 2.4
+PAINT_WORD_SIZE = 240
+PAINT_WORD_WEIGHT = 800
+PAINT_PANELS = (
+    ("AURENNE", 140.0, -1, 7.6, 12.6, 400.0, "navy"),
+    ("MARLOWE", 2053.0, -1, 10.2, 27.0, 106.0, "burgundy"),
+    ("NIMBARA", 2684.0, -1, 9.6, 17.6, 68.0, "sky"),
+    ("NORTHWIND", 2915.0, -1, 10.5, 18.5, 60.0, "blue"),
+)
+PAINT_PANEL_NAMES = ("red", "teal", "blue", "white", "burgundy", "sky", "navy")
+PAINT_SHARP_REACH = 2
+PAINT_UNKNOWN = 255
+PAINT_REACH = 45.0
+PAINT_HEARD = 0.25
+PAINT_MAJORITY = 0.6
+PAINT_SPECK = (9, 3)
+PAINT_VERGE = 12.0
 TERRAIN_DOWNSAMPLE = 2
 TERRAIN_QUALITY = 90
 GRASS_GRADE = np.array([0.88, 1.02, 0.72], np.float32)
@@ -219,28 +250,188 @@ def fill_to_edge(found, lateral, half):
                     break
 
 
-def shape_field(mask, row_metres):
+def shape_field(mask, row_metres, sharp=None):
     clean = median_filter(mask.astype(np.uint8), size=3, mode="nearest").astype(np.float32)
     shape = gaussian_filter(clean, SHAPE_SIGMA, mode=("wrap", "nearest")) > 0.5
+    if sharp is not None:
+        shape = np.where(sharp, mask, shape)
     sampling = (row_metres, LATERAL_STEP)
     distance = distance_transform_edt(shape, sampling=sampling) - distance_transform_edt(~shape, sampling=sampling)
     field = gaussian_filter(distance.astype(np.float32), FIELD_SMOOTHING, mode=("wrap", "nearest"))
     return np.clip(0.5 + field / (2 * FIELD_REACH), 0, 1)
 
 
-def write_masks(sample, lateral, half, walls, row_metres, directory):
+def painted_layout(source, rows, lateral):
+    path = source / "paint.png"
+    if not path.exists():
+        return None
+    seen = np.asarray(Image.open(path))
+    bins = seen.shape[1]
+    row = np.arange(rows) * seen.shape[0] // rows
+    column = np.clip(np.floor((lateral + PAINT_REACH) / (2 * PAINT_REACH) * bins).astype(int), 0, bins - 1)
+    layout = seen[row][:, column].copy()
+    layout[:, np.abs(lateral) >= PAINT_REACH] = PAINT_UNKNOWN
+    return layout
+
+
+def recoloured_patches(found, layout):
+    shown = {name: mask.copy() for name, mask in found.items()}
+    for name in ("burgundy", "sky", "navy"):
+        shown[name] = np.zeros_like(found["red"])
+    known = (layout != PAINT_UNKNOWN) & (layout != PAINT_NAMES.index("grass")) & (layout != PAINT_NAMES.index("kerb"))
+    for name in ("red", "teal", "blue", "white"):
+        patches, count = label(found[name])
+        if count == 0:
+            continue
+        votes = np.zeros((count + 1, len(PAINT_NAMES)), np.int64)
+        np.add.at(votes, (patches[known], layout[known]), 1)
+        area = np.bincount(patches.ravel(), minlength=count + 1)
+        heard = votes.sum(axis=1)
+        winner = votes.argmax(axis=1)
+        sure = (heard >= PAINT_HEARD * area) & (votes.max(axis=1) >= PAINT_MAJORITY * np.maximum(heard, 1))
+        sure[0] = False
+        for index, target in enumerate(PAINT_NAMES):
+            if target in (name, "grass", "kerb"):
+                continue
+            moved = (sure & (winner == index))[patches]
+            if not moved.any():
+                continue
+            shown[name] &= ~moved
+            shown[target] |= moved
+    return shown
+
+
+def without_stray_paving(shown, layout, row_metres):
+    paved = shown["asphalt"] | shown["concrete"]
+    patches, count = label(paved)
+    if count == 0:
+        return
+    area = np.bincount(patches.ravel(), minlength=count + 1) * row_metres * LATERAL_STEP
+    heard = np.bincount(patches[layout != PAINT_UNKNOWN], minlength=count + 1)
+    green = (layout == PAINT_NAMES.index("grass")) | (layout == PAINT_NAMES.index("teal"))
+    grass = np.bincount(patches[green], minlength=count + 1)
+    cells = np.bincount(patches.ravel(), minlength=count + 1)
+    stray = (area < PAINT_STRAY_AREA) & (heard >= PAINT_STRAY_HEARD * cells) & (grass >= PAINT_STRAY_GRASS * np.maximum(heard, 1))
+    stray[0] = False
+    gone = stray[patches]
+    shown["asphalt"] &= ~gone
+    shown["concrete"] &= ~gone
+
+
+def painted_kerbs(shown, layout, lateral, half, row_metres):
+    beside = np.abs(lateral)[None, :] - half[:, None]
+    rows = (layout == PAINT_NAMES.index("kerb")).any(axis=1)
+    sides = [(layout == PAINT_NAMES.index("kerb"))[:, lateral * sign > 0].any(axis=1) for sign in (1, -1)]
+    kerb = np.zeros(layout.shape, bool)
+    for sign, on in zip((1, -1), sides):
+        kerb |= on[:, None] & (lateral * sign > 0)[None, :] & (beside >= 0) & (beside <= PAINT_KERB_WIDTH)
+    kerb &= rows[:, None]
+    cleared = np.zeros(layout.shape, bool)
+    for sign, on in zip((1, -1), sides):
+        cleared |= on[:, None] & (lateral * sign > 0)[None, :] & (beside >= 0) & (beside <= PAINT_KERB_CLEAR)
+    for name in ("asphalt", "concrete", "white"):
+        shown[name] &= ~cleared
+    stripe = (np.floor(np.arange(layout.shape[0]) * row_metres / PAINT_KERB_STRIPE).astype(int) % 2 == 0)[:, None]
+    for name in ("teal", "blue", "burgundy"):
+        shown[name] &= ~kerb
+    shown["red"] |= kerb
+    shown["white"] = (shown["white"] & ~kerb) | (kerb & ~stripe)
+    return kerb
+
+
+def wordmark(name, fonts):
+    face = font(fonts, "montserrat", PAINT_WORD_SIZE, PAINT_WORD_WEIGHT)
+    canvas = Image.new("L", (PAINT_WORD_SIZE * (len(name) + 2), PAINT_WORD_SIZE * 2), 0)
+    ImageDraw.Draw(canvas).text((PAINT_WORD_SIZE // 2, PAINT_WORD_SIZE // 4), name, font=face, fill=255)
+    return np.asarray(canvas.crop(canvas.getbbox()))
+
+
+def panel_ground(rows, lateral, walls, row_metres, panel):
+    _, centre, side, near, far, length, _ = panel
+    first = int(round((centre - length / 2) / row_metres))
+    index = (first + np.arange(int(round(length / row_metres)))) % rows
+    columns = np.nonzero((side * lateral >= near) & (side * lateral <= far))[0]
+    limit = walls[index, 0 if side > 0 else 1] - PAINT_PANEL_CLEAR
+    return index, columns, (side * lateral[columns])[None, :] < limit[:, None]
+
+
+def panel_cells(shape, lateral, walls, row_metres):
+    cells = np.zeros(shape, bool)
+    for panel in PAINT_PANELS:
+        index, columns, open_ground = panel_ground(shape[0], lateral, walls, row_metres, panel)
+        cells[np.ix_(index, columns)] |= open_ground
+    return cells
+
+
+def stamped_panels(shown, lateral, walls, row_metres, fonts):
+    inked = np.zeros(shown["red"].shape, bool)
+    for panel in PAINT_PANELS:
+        name, _, side, _, _, _, colour = panel
+        index, columns, open_ground = panel_ground(inked.shape[0], lateral, walls, row_metres, panel)
+        span = len(index)
+        for other in PAINT_PANEL_NAMES:
+            shown[other][np.ix_(index, columns)] &= ~open_ground
+        shown[colour][np.ix_(index, columns)] |= open_ground
+        mark = wordmark(name, fonts)
+        inner_columns = int(len(columns) * PAINT_PANEL_FILL)
+        scale = min(span * PAINT_PANEL_FILL / mark.shape[1], inner_columns / mark.shape[0])
+        size = (max(1, int(mark.shape[1] * scale)), max(1, int(mark.shape[0] * scale)))
+        text = np.asarray(Image.fromarray(mark).resize(size, Image.LANCZOS)) > 110
+        laid = text[:, ::-1].T if side < 0 else text[::-1, :].T
+        column0 = (len(columns) - laid.shape[1]) // 2
+        across = columns[column0 : column0 + laid.shape[1]]
+        count = max(1, int(span / (laid.shape[0] * PAINT_PANEL_PITCH)))
+        for k in range(count):
+            row0 = int((k + 0.5) * span / count - laid.shape[0] / 2)
+            along = index[row0 : row0 + laid.shape[0]]
+            letters = laid & open_ground[row0 : row0 + laid.shape[0], column0 : column0 + laid.shape[1]]
+            shown["white"][np.ix_(along, across)] |= letters
+            shown[colour][np.ix_(along, across)] &= ~letters
+            inked[np.ix_(along, across)] |= letters
+    return inked
+
+
+def repainted(found, lateral, half, layout, walls, row_metres, fonts):
+    if layout is None:
+        return recoloured_patches(found, np.full(found["red"].shape, PAINT_UNKNOWN, np.uint8)), None
+    shown = recoloured_patches(found, layout)
+    paints = ("red", "teal", "blue", "white", "burgundy")
+    beside = np.abs(lateral)[None, :] - half[:, None]
+    verge = (beside > 0) & (beside < PAINT_VERGE)
+    taken = np.logical_or.reduce([shown[name] for name in paints])
+    plain = (found["asphalt"] | found["concrete"]) & ~taken
+    for name in PAINT_FRESH_NAMES:
+        fresh = binary_opening(plain & (layout == PAINT_NAMES.index(name)), structure=np.ones(PAINT_SPECK, bool))
+        shown[name] |= fresh
+    for name in PAINT_VERGE_NAMES:
+        seen = binary_closing(layout == PAINT_NAMES.index(name), structure=np.ones(PAINT_VERGE_JOIN, bool))
+        shown[name] |= binary_opening(seen & verge & ~taken & ~plain, structure=np.ones(PAINT_VERGE_KEEP, bool))
+    without_stray_paving(shown, layout, row_metres)
+    kerb = painted_kerbs(shown, layout, lateral, half, row_metres)
+    inked = stamped_panels(shown, lateral, walls, row_metres, fonts)
+    return shown, binary_dilation(kerb | inked, iterations=PAINT_SHARP_REACH)
+
+
+def write_masks(sample, lateral, half, walls, row_metres, directory, source, fonts):
     rgb = sample[..., :3]
     found = classes(rgb)
     fill_to_edge(found, lateral, half)
-    beds = gravel_beds(sample, found, lateral, half, walls, row_metres)
-    sealed = np.zeros(beds.shape, bool)
+    paved = panel_cells(found["red"].shape, lateral, walls, row_metres)
+    beds = gravel_beds(sample, found, lateral, half, walls, row_metres) & ~paved
+    sealed = paved.copy()
     for name in ("red", "teal", "blue", "white", "asphalt", "concrete"):
         sealed |= shape_field(found[name], row_metres) > 0.5
     sealed &= (np.abs(lateral)[None, :] > half[:, None]) & ~beds
     luminance = stretch(rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32))
-    field = lambda name: shape_field(found[name], row_metres)
-    first = np.stack([field(name) for name in ("red", "teal", "blue", "white")], -1)
-    second = np.stack([field("concrete"), field("asphalt"), gaussian_filter1d(luminance, 1.0, axis=0, mode="wrap"), shape_field(beds, row_metres)], -1)
+    shown, sharp = repainted(found, lateral, half, painted_layout(source, len(half), lateral), walls, row_metres, fonts)
+    for name in PAINT_PANEL_NAMES:
+        shown[name] &= ~beds
+    shown["red"] |= shown["burgundy"]
+    shown["teal"] |= shown["navy"]
+    shown["blue"] |= shown["burgundy"] | shown["sky"] | shown["navy"]
+    shown["white"] |= shown["sky"]
+    first = np.stack([shape_field(shown[name], row_metres, sharp) for name in ("red", "teal", "blue", "white")], -1)
+    second = np.stack([shape_field(shown["concrete"], row_metres), shape_field(shown["asphalt"], row_metres), gaussian_filter1d(luminance, 1.0, axis=0, mode="wrap"), shape_field(beds, row_metres)], -1)
     for name, data in (("apron_a.png", first), ("apron_b.png", second)):
         Image.fromarray(np.round(data * 255).astype(np.uint8), "RGBA").save(directory / name)
     return gravel_spans(beds, lateral, row_metres), gravel_spans(sealed, lateral, row_metres)
@@ -279,7 +470,7 @@ def bake(source, points, normal, half, walls, step, blocked, textures, build):
     fine_walls = np.stack([np.interp(position, np.arange(len(points) + 1), np.append(w, w[0])) for w in walls.T], 1)
     fine_lateral, fine_sample = road_space(air, fine_points, fine_normal)
     row_metres = step * len(points) / MASK_ROWS
-    gravel, sealed = write_masks(fine_sample, fine_lateral, fine_half, fine_walls, row_metres, textures)
+    gravel, sealed = write_masks(fine_sample, fine_lateral, fine_half, fine_walls, row_metres, textures, source, build / "fonts")
     write_terrain(air, textures)
     (build / "aerial.json").write_text(json.dumps({**fit_affine(air), "reach": LATERAL_REACH}))
     return spans, gravel, sealed

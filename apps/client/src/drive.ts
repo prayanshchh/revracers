@@ -346,7 +346,12 @@ function trackMap(engine: Engine): TrackMap {
 }
 
 function drawer(renderer: THREE.WebGPURenderer, scene: Scene): () => void {
-  const atmosphere = new Atmosphere(renderer, scene.scene, scene.camera);
+  const atmosphere = new Atmosphere(
+    renderer,
+    scene.scene,
+    scene.camera,
+    scene.rearView,
+  );
   return () => {
     scene.commitMoves();
     scene.hideUnseenCrew();
@@ -1559,6 +1564,7 @@ async function main(): Promise<void> {
       damageClock = now;
       scene.setDamage(engine.carsDamage(), engine.carsTyres(), frame);
     }
+    scene.rearMirror = Number(!hudRoot.hidden) * hudFade;
     scene.update(frame);
     const hudShown = Math.round((1 - Math.min(1, scene.shock * 1.6)) * 20) / 20;
     if (hudShown !== hudFade) {

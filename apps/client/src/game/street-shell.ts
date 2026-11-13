@@ -162,6 +162,7 @@ export function addWalls(
   low: number,
   high: number,
   trim: number | null,
+  lift = 0,
 ): void {
   const { ring, outward, seed, row, total, bay } = shell;
   let along = 0;
@@ -183,10 +184,10 @@ export function addWalls(
       [n.x, 0, n.y],
       trim === null
         ? [
-            [start, 0],
-            [end, 0],
-            [end, high - low],
-            [start, high - low],
+            [start, lift],
+            [end, lift],
+            [end, lift + high - low],
+            [start, lift + high - low],
           ]
         : [
             [trim, 0],
@@ -263,4 +264,65 @@ export function addLedge(
   addBand(mesh, shell, lip, y - depth, -1, ledgeUnder);
   addWalls(mesh, { ...shell, ring: lip }, y - depth, y, ledgeFace);
   addBand(mesh, shell, lip, y, 1, ledgeTop);
+}
+
+export function addPiers(
+  mesh: Mesh,
+  shell: Shell,
+  low: number,
+  high: number,
+  lift: number,
+  width: number,
+  depth: number,
+): void {
+  const { ring, outward, seed, row, total, bay } = shell;
+  let along = 0;
+  ring.forEach((a, i) => {
+    const b = cornerOf(ring, i + 1);
+    const span = a.distanceTo(b);
+    if (span < 0.05) return;
+    const start = Math.round(along / bay);
+    const bays = Math.round(span / bay);
+    along += span;
+    if (bays < 1) return;
+    const n = edgeNormal(a, b, outward);
+    const e = b.clone().sub(a).divideScalar(span);
+    const half = Math.min(width, span / (bays + 1)) / 2;
+    for (let k = 0; k <= bays; k++) {
+      const centre = THREE.MathUtils.clamp(
+        (k / bays) * span,
+        half,
+        span - half,
+      );
+      const u = (start + k) * bay;
+      const left = a.clone().addScaledVector(e, centre - half);
+      const right = a.clone().addScaledVector(e, centre + half);
+      const leftOut = left.clone().addScaledVector(n, depth);
+      const rightOut = right.clone().addScaledVector(n, depth);
+      const faces: [THREE.Vector2, THREE.Vector2, number[], number, number][] =
+        [
+          [leftOut, rightOut, [n.x, 0, n.y], u - half, u + half],
+          [left, leftOut, [-e.x, 0, -e.y], u - half, u - half],
+          [rightOut, right, [e.x, 0, e.y], u + half, u + half],
+        ];
+      for (const [p, q, normal, from, to] of faces)
+        mesh.quad(
+          [
+            [p.x, low, p.y],
+            [q.x, low, q.y],
+            [q.x, high, q.y],
+            [p.x, high, p.y],
+          ],
+          normal,
+          [
+            [from, lift],
+            [to, lift],
+            [to, lift + high - low],
+            [from, lift + high - low],
+          ],
+          [seed, wallPart],
+          [total, row],
+        );
+    }
+  });
 }

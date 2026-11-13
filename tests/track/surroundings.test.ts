@@ -136,25 +136,31 @@ function standsInside(position: Accessor | null): boolean {
   return false;
 }
 
+const spriteCells = 64;
+const standingFrom = 32;
+
 describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
-  test("spectators stay behind the barriers or on the pit building balconies, and use real sprite cells", () => {
+  test("spectators stay behind the barriers or on the pit building balconies, sit in the stands and stand on the balconies", () => {
     const values = floats(crowdFile);
     expect(values.length % stride).toBe(0);
-    const offenders: number[] = [];
-    let guests = 0;
-    for (let i = 0; i < values.length; i += stride) {
-      const [x = 0, north = 0, up = 0] = values.subarray(i, i + 3);
-      if (!insideBarriers(x, north)) continue;
-      if (onBalcony(x, north, up)) guests += 1;
-      else offenders.push(i / stride);
-    }
-    expect(offenders).toEqual([]);
-    expect(guests).toBeGreaterThan(1000);
-    for (let i = 0; i < values.length; i += stride * 11) {
-      const cell = values[i + 4] ?? -1;
-      expect(cell).toBeGreaterThanOrEqual(0);
-      expect(cell).toBeLessThan(32);
-    }
+    const people = Array.from({ length: values.length / stride }, (_, i) => {
+      const [x = 0, north = 0, up = 0, , cell = -1] = values.subarray(
+        i * stride,
+        (i + 1) * stride,
+      );
+      return { x, north, up, cell };
+    });
+    const inside = people.filter((one) => insideBarriers(one.x, one.north));
+    const guests = inside.filter((one) => onBalcony(one.x, one.north, one.up));
+    expect(inside.length - guests.length).toBe(0);
+    expect(guests.length).toBeGreaterThan(1000);
+    expect(guests.filter((one) => one.cell < standingFrom)).toEqual([]);
+    expect(
+      people.filter((one) => one.cell < 0 || one.cell >= spriteCells),
+    ).toEqual([]);
+    expect(
+      people.filter((one) => one.cell < standingFrom).length,
+    ).toBeGreaterThan(40000);
   });
 
   test("no tent, crane, mast or screen stands inside the barriers", async () => {

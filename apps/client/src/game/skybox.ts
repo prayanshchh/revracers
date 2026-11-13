@@ -50,7 +50,7 @@ const skySaturation = 0.78;
 const skyGain = 1.25;
 const sunShare = 3.5;
 const lowSunSine = 0.49;
-const targetMidtone = 1.4;
+const targetMidtone = 1.24;
 const maxExposure = 6;
 const skyNames = [
   "circuit",
@@ -96,9 +96,11 @@ const maskFrom = 0.08;
 const maskTo = 0.55;
 const photoHorizonFrom = 0.01;
 const photoHorizonTo = 0.06;
-const clearTint = new THREE.Vector3(0.48, 1.25, 1.38);
-const clearHaze = new THREE.Vector3(0.9, 2.4, 0.1);
-const hazeTint = vec3(0.78, 0.95, 1.12);
+const clearTint = new THREE.Vector3(0.41, 1.08, 1.28);
+const clearHaze = new THREE.Vector3(0.95, 1.42, 0.7);
+const hazeTint = vec3(0.82, 1.2, 1.72);
+const hazeAloft = vec3(0.29, 0.85, 1.75);
+const hazeRise = 0.35;
 const nightZenith = new THREE.Vector3(0.0012, 0.0036, 0.0115);
 const nightHorizon = new THREE.Vector3(0.011, 0.017, 0.028);
 const nightGlow = new THREE.Vector3(0.022, 0.024, 0.026);
@@ -460,6 +462,10 @@ export class SkyBox {
     this.environment.needsPMREMUpdate = true;
   }
 
+  renewEnvironment(): void {
+    this.environment.needsPMREMUpdate = true;
+  }
+
   private nightAmbient(upward: boolean): THREE.Color {
     const sky = upward ? this.nightHorizon : nightGround;
     const share = this.nightShare * Math.PI * (upward ? 1 : 0.5);
@@ -540,13 +546,11 @@ export class SkyBox {
     const clear = texture(this.clearSky, at).rgb.toVar();
     const tinted = clear.mul(this.tint);
     const hazed = exp(up.max(0).div(this.haze.z).negate()).mul(this.haze.x);
-    const blue = mix(
-      tinted,
-      vec3(tinted.dot(vec3(0.2126, 0.7152, 0.0722)))
-        .mul(this.haze.y)
-        .mul(hazeTint),
-      hazed,
-    ).toVar();
+    const [hr = 1, hg = 1, hb = 1] = this.meta.horizon;
+    const veil = mix(hazeTint, hazeAloft, up.div(hazeRise).clamp(0, 1)).mul(
+      this.haze.y.mul(0.2126 * hr + 0.7152 * hg + 0.0722 * hb),
+    );
+    const blue = mix(tinted, veil, hazed).toVar();
     if (!detailed) return blue;
     const sunU = this.meta.azimuth / (2 * Math.PI) + 0.5;
     const near = smoothstep(photoHorizonFrom, photoHorizonTo, up);

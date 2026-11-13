@@ -17,21 +17,25 @@ EVENT_ROWS = (
     ("REVRACERS", "#f4f4f6", "#101014", "anton", None),
     ("NEON BOULEVARD GRAND PRIX", "#2a0f6e", "#ff3db8", "oswald", 700),
     ("REVRACERS 26", "#e10600", "#ffffff", "anton", None),
+    ("#HILLCOUNTRYGP", "#0a0a0c", "#ffffff", "montserrat", 800),
+    ("HILL COUNTRY GRAND PRIX", "#12296b", "#ffffff", "oswald", 700),
 )
 BACKDROPS = {
-    "NORTHWIND": "#1b2f86",
-    "VOLTARA": "#3a1f8f",
-    "AURENNE": "#0f8f93",
-    "KESTREL": "#c8101c",
-    "MARLOWE": "#1d7a44",
+    "NORTHWIND": "#141f5c",
+    "VOLTARA": "#ffd21f",
+    "AURENNE": "#161d47",
+    "KESTREL": "#d0141e",
+    "MARLOWE": "#6a1638",
     "TORQUA": "#1673c9",
-    "CORDAVE": "#6b1fa0",
-    "VERDALE": "#2f9a45",
+    "CORDAVE": "#5a1e96",
+    "VERDALE": ("#1fb4dc", "#3fbf58"),
     "ALBAREN": "#13a9e6",
     "NIMBARA": "#f2f4f8",
     "MAISON": "#101012",
     "HALDEN": "#e8600f",
 }
+INKS = {"VOLTARA": "#d2101a", "AURENNE": "#ffffff", "MARLOWE": "#f3e9d2", "VERDALE": "#ffffff"}
+DISTANCES = (200, 150, 100, 50)
 PANEL_GAP = 6
 SEED = 11
 FROND = (512, 128)
@@ -44,10 +48,28 @@ SCREEN_CAPTIONS = ("LIGHTS OUT", "TURN 1", "THE BOULEVARD", "PIT STRAIGHT", "ONB
 PORTRAIT_CROP = (60, 20, 540, 470)
 
 
-def mark_tile(art, background, fonts):
+def backdrop(background):
+    if isinstance(background, str):
+        return Image.new("RGB", WRAP, background)
     width, height = WRAP
-    tile = Image.new("RGB", WRAP, background)
-    mark = lockup(art, fonts)
+    first, last = (rgb(colour) for colour in background)
+    ramp = (np.arange(width) % (width // 2)) / (width // 2 - 1)
+    row = first[None, :] + (last - first)[None, :] * ramp[:, None]
+    return Image.fromarray(np.uint8(np.repeat(row[None], height, 0) * 255), "RGB")
+
+
+def inked(mark, ink):
+    if ink is None:
+        return mark
+    flat = Image.new("RGBA", mark.size, ink)
+    flat.putalpha(mark.getchannel("A"))
+    return flat
+
+
+def mark_tile(art, background, ink, fonts):
+    width, height = WRAP
+    tile = backdrop(background)
+    mark = inked(lockup(art, fonts), ink)
     scale = min(height * MARK_HEIGHT / mark.height, width * MARK_WIDTH / mark.width)
     mark = mark.resize((max(1, int(mark.width * scale)), max(1, int(mark.height * scale))), Image.LANCZOS)
     for centre in (width // 4, 3 * width // 4):
@@ -69,6 +91,18 @@ def word_tile(text, background, ink, face, weight, fonts):
     return tile
 
 
+def number_tile(fonts):
+    width, height = WRAP
+    tile = Image.new("RGB", WRAP, "#f4f4f2")
+    draw = ImageDraw.Draw(tile)
+    typeface = font(fonts, "anton", 190)
+    cell = width // len(DISTANCES)
+    for index, value in enumerate(DISTANCES):
+        draw.rectangle([index * cell + 6, 6, (index + 1) * cell - 7, height - 7], outline="#101012", width=8)
+        text_at(draw, str(value), typeface, "#101012", (index * cell + cell // 2, height // 2 - 4))
+    return tile
+
+
 def finish(tile, rng):
     width, height = WRAP
     image = np.asarray(tile, np.float32) / 255.0
@@ -83,8 +117,9 @@ def finish(tile, rng):
 
 def wraps(fonts):
     rng = np.random.default_rng(SEED)
-    tiles = [mark_tile(art, BACKDROPS.get(name, background), fonts) for name, background, _, art in BRANDS]
+    tiles = [mark_tile(art, BACKDROPS.get(name, background), INKS.get(name), fonts) for name, background, _, art in BRANDS]
     tiles += [word_tile(text, bg, ink, face, weight, fonts) for text, bg, ink, face, weight in EVENT_ROWS]
+    tiles.append(number_tile(fonts))
     width, height = WRAP
     row = height + 2 * PANEL_GAP
     atlas = np.zeros((row * len(tiles), width, 3), np.float32)
@@ -95,69 +130,6 @@ def wraps(fonts):
         atlas[top + PANEL_GAP : top + PANEL_GAP + height] = image
         atlas[top + PANEL_GAP + height : top + row] = image[-1:]
     return Image.fromarray(np.uint8(atlas * 255), "RGB"), len(tiles), row
-
-
-def frond():
-    width, height = FROND
-    rng = np.random.default_rng(SEED)
-    image = Image.new("RGBA", FROND, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    spine = height / 2
-    draw.line([(0, spine), (width, spine)], fill=(92, 84, 52, 255), width=5)
-    for x in range(8, width - 6, 4):
-        t = x / width
-        reach = (height / 2 - 6) * np.sin(np.pi * min(1.0, t * 1.15)) ** 0.7
-        droop = 0.55 + 0.25 * rng.random()
-        for sign in (-1, 1):
-            tip = (x + reach * 0.55, spine + sign * reach * droop)
-            shade = int(115 + 50 * rng.random())
-            draw.line([(x, spine), tip], fill=(int(shade * 0.55), shade, int(shade * 0.3), 255), width=3)
-    return image.filter(ImageFilter.GaussianBlur(0.5))
-
-
-FENCE = 256
-FENCE_CELLS = 4
-FENCE_WIRE = 0.28
-
-
-def fence():
-    size = FENCE
-    y, x = np.mgrid[0:size, 0:size].astype(np.float32) + 0.5
-    cell = size / FENCE_CELLS
-    a = ((x + y) / cell) % 1.0
-    b = ((x - y) / cell) % 1.0
-    distance = np.minimum(np.minimum(a, 1 - a), np.minimum(b, 1 - b)) * cell
-    half = FENCE_WIRE * cell / 2
-    alpha = np.clip(half + 0.75 - distance, 0, 1)
-    shade = 0.75 + 0.25 * np.clip(1 - distance / max(half, 1), 0, 1)
-    rgb = np.stack([shade * 0.86, shade * 0.88, shade * 0.9], -1)
-    image = np.concatenate([rgb, alpha[..., None]], -1)
-    return Image.fromarray(np.uint8(np.clip(image, 0, 1) * 255), "RGBA")
-
-
-LEAVES = 256
-
-
-def leaves():
-    rng = np.random.default_rng(SEED + 5)
-    size = LEAVES
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    centre = size / 2
-    for _ in range(900):
-        r = centre * np.sqrt(rng.random()) * 0.92
-        a = rng.random() * np.pi * 2
-        x, y = centre + r * np.cos(a), centre + r * np.sin(a)
-        length = rng.uniform(9, 17)
-        width = length * rng.uniform(0.35, 0.5)
-        angle = rng.random() * np.pi
-        dx, dy = np.cos(angle) * length / 2, np.sin(angle) * length / 2
-        nx, ny = -np.sin(angle) * width / 2, np.cos(angle) * width / 2
-        g = rng.uniform(0.72, 1.0)
-        warm = rng.uniform(0.0, 1.0)
-        colour = (int((62 + 40 * warm) * g), int((118 + 22 * warm) * g), int((36 + 6 * warm) * g), 255)
-        draw.polygon([(x - dx, y - dy), (x + nx, y + ny), (x + dx, y + dy), (x - nx, y - ny)], fill=colour)
-    return image.filter(ImageFilter.GaussianBlur(0.4))
 
 
 def gradient(top, bottom):
@@ -308,9 +280,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     atlas, rows, row = wraps(FONTS)
     atlas.save(out / "wraps.webp", quality=88, method=6)
-    frond().save(out / "frond.webp", lossless=True)
     fence().save(out / "fence.webp", lossless=True)
-    leaves().save(out / "leaves.webp", lossless=True)
     screens(out.parent, FONTS).save(out / "screens.webp", quality=84, method=6)
     print(f"wraps {atlas.width}x{atlas.height}, {rows} rows of {row} px")
 

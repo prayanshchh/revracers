@@ -28,6 +28,11 @@ import {
 } from "./street-pit.ts";
 import { type TrackProp, trackProps } from "./street-props.ts";
 import { type Venue, venueParts } from "./street-venue.ts";
+import dressing from "../../../../content/tracks/neon-boulevard/dressing.json";
+import { gantryParts } from "./trackside-gantry.ts";
+import { boardRow, wrapAspect, wrapV } from "./trackside-plan.ts";
+import type { Zone as Plot } from "./trackside-props.ts";
+import { flagParts, terraceParts, terraceZones } from "./trackside-terrace.ts";
 
 interface StreetPit {
   entry: number;
@@ -65,24 +70,17 @@ export interface StreetPole {
   arm: number[];
 }
 
-const wrapRows = 16;
-const wrapRowPixels = 268;
-const wrapGapPixels = 6;
-const wrapPanelPixels = 256;
-const brandRows = 12;
-const eventRows = [12, 13, 14, 15];
 const barrierHeight = 1.1;
 const barrierThickness = 0.6;
-const wrapLength = barrierHeight * (2048 / wrapPanelPixels);
-const zoneShortest = 140;
-const zoneLongest = 320;
+const wrapLength = barrierHeight * wrapAspect;
+const crossingBoards = ["boulevard tag", "revracers", "boulevard prix"];
 const fenceInset = 0.22;
 const fenceKnee = 3.9;
 const fenceTop = 4.5;
 const fenceLean = 0.55;
 const fenceTile = 0.24;
 const postSpacing = 4;
-const postSize = 0.13;
+const postSize = 0.16;
 const railSize = 0.05;
 const poleSpacing = 30;
 const poleSetback = 2.2;
@@ -100,29 +98,16 @@ const runoffColumns = 4;
 const paintFrom = 3;
 const paintFull = 6;
 const paintRamp = 30;
-const bridgeClear = 6.4;
-const bridgeDepth = 3.2;
-const bridgeHeight = 1.8;
-const bridgeReach = 4;
 const laneWidth = 3.6;
 const laneDash = 3;
 const laneGap = 9;
 const laneLine = 0.11;
 const lanesFrom = 760;
 const lanesTo = 5990;
-const bannerDistances = [0.18, 0.47, 0.71, 0.9];
-const bannerClear = 6.8;
-const bannerHeight = 1.4;
-const bannerPost = 0.45;
 const pitLine = 0.2;
 const workingLane = 18;
 const boxLength = 6;
 const boxWidth = 2.6;
-
-function hash(value: number): number {
-  const x = Math.sin(value * 127.1 + 311.7) * 43758.5453;
-  return x - Math.floor(x);
-}
 
 export function wallAt(station: Station, sign: number): number {
   return sign > 0 ? station.wallLeft : station.wallRight;
@@ -257,22 +242,13 @@ interface Zone {
 }
 
 function wrapZones(length: number, side: number): Zone[] {
-  const zones: Zone[] = [];
-  let at = 0;
-  let index = side > 0 ? 3 : 0;
-  while (at < length - 1) {
-    const span =
-      zoneShortest + (zoneLongest - zoneShortest) * hash(index * 7 + side);
-    const to = Math.min(length, at + span);
-    const event = hash(index * 13 + side * 5) < 0.28;
-    const row = event
-      ? (eventRows[Math.floor(hash(index * 3 + side) * eventRows.length)] ?? 12)
-      : Math.floor(hash(index * 5 + side * 11) * brandRows);
-    zones.push({ from: at, to, row, start: at });
-    at = to;
-    index++;
-  }
-  return zones;
+  const spans = dressing.boards;
+  return spans.map((span, index) => ({
+    from: span.from,
+    to: spans[index + 1]?.from ?? length,
+    row: boardRow(side > 0 ? span.left : span.right),
+    start: span.from,
+  }));
 }
 
 function runZones(run: Run, length: number): Zone[] {
@@ -288,12 +264,6 @@ function runZones(run: Run, length: number): Zone[] {
         : [];
     }),
   );
-}
-
-function wrapV(row: number, height: number): number {
-  const top = row * wrapRowPixels + wrapGapPixels;
-  const t = 1 - height / barrierHeight;
-  return (top + t * wrapPanelPixels) / (wrapRows * wrapRowPixels);
 }
 
 function zoneRows(
@@ -328,7 +298,7 @@ function barrierFaces(
           const u = (facing > 0 ? s - zone.start : zone.to - s) / wrapLength;
           for (const height of [0, barrierHeight])
             builder.vertex(place(station, run.sign * wall, height), normal, [
-              [u, wrapV(zone.row, height)],
+              [u, wrapV(zone.row, height / barrierHeight)],
             ]);
         }
         builder.grid(rows.length, 2, first, facing < 0);
@@ -467,7 +437,7 @@ function unit(v: Vec3): Vec3 {
   return [v[0] / length, v[1] / length, v[2] / length];
 }
 
-function beam(
+export function beam(
   builder: Builder,
   from: number[],
   to: number[],
@@ -634,80 +604,21 @@ function overheads(
   list: Station[],
   track: TrainingTrack,
   bridges: number[],
-): { steel: Part; faces: Part } {
-  const steel = new Builder(1);
-  const faces = new Builder(1);
-  const spans = [
-    ...bridges.map((distance) => ({
-      distance,
-      clear: bridgeClear,
-      height: bridgeHeight,
-      depth: bridgeDepth,
-      post: 1.2,
-    })),
-    ...bannerDistances.map((share) => ({
-      distance: share * track.length,
-      clear: bannerClear,
-      height: bannerHeight,
-      depth: 0.5,
-      post: bannerPost,
-    })),
+): Part[] {
+  const crossings = bridges.map((at, index) => ({
+    at,
+    board: crossingBoards[index % crossingBoards.length] ?? "revracers",
+    kind: "bridge",
+  }));
+  const built = gantryParts(list, track.length, [
+    ...crossings,
+    ...dressing.gantries,
+  ]);
+  return [
+    built.steel.part("overhead steel", "track gantry steel"),
+    built.faces.part("banner wraps", "track wall wraps"),
+    built.deck.part("overhead deck", "track stand concrete"),
   ];
-  spans.forEach((span, index) => {
-    const station = stationAt(list, track.length, span.distance);
-    const forward = [-station.lz, 0, station.lx];
-    const left = [station.lx, 0, station.lz];
-    const axes = [left, up, forward];
-    const reachLeft = station.wallLeft + bridgeReach;
-    const reachRight = station.wallRight + bridgeReach;
-    const top = span.clear + span.height;
-    for (const lateral of [reachLeft, -reachRight])
-      box(
-        steel,
-        place(station, lateral, top / 2),
-        [span.post / 2, top / 2, span.post / 2],
-        axes,
-      );
-    const middle = (reachLeft - reachRight) / 2;
-    const half = (reachLeft + reachRight) / 2;
-    box(
-      steel,
-      place(station, middle, span.clear + span.height / 2),
-      [half, span.height / 2, span.depth / 2],
-      axes,
-    );
-    const row =
-      eventRows[index % eventRows.length] ??
-      Math.floor(hash(index) * brandRows);
-    for (const facing of [-1, 1]) {
-      const first = faces.count;
-      const shift = forward.map((v) => v * facing * (span.depth / 2 + 0.02));
-      const normal = forward.map((v) => v * facing);
-      const panel = Math.min(span.height, barrierHeight * 1.6);
-      const lift = span.clear + (span.height - panel) / 2;
-      const repeats = (2 * half) / ((panel / barrierHeight) * wrapLength);
-      for (const [l, h] of [
-        [reachLeft, 0],
-        [-reachRight, 0],
-        [-reachRight, 1],
-        [reachLeft, 1],
-      ] as const) {
-        const p = place(station, l, lift + h * panel).map(
-          (v, i) => v + (shift[i] ?? 0),
-        );
-        const u = ((reachLeft - l) / (2 * half)) * repeats;
-        faces.vertex(p, normal, [
-          [facing > 0 ? repeats - u : u, wrapV(row, h * barrierHeight)],
-        ]);
-      }
-      if (facing > 0) faces.quad(first, first + 1, first + 2, first + 3);
-      else faces.quad(first, first + 3, first + 2, first + 1);
-    }
-  });
-  return {
-    steel: steel.part("overhead steel", "track gantry steel"),
-    faces: faces.part("banner wraps", "track wall wraps"),
-  };
 }
 
 function pitMarkings(list: Station[], track: StreetTrack): Part {
@@ -754,6 +665,24 @@ function pitMarkings(list: Station[], track: StreetTrack): Part {
   return builder.part("pit markings", "track lane road paint");
 }
 
+export function terraced(list: Station[], length: number): Plot[] {
+  return terraceZones(list, length, dressing.terraces);
+}
+
+function hospitality(list: Station[], length: number): Part[] {
+  const built = terraceParts(list, length, dressing.terraces);
+  const flags = flagParts(list, length, dressing.flags);
+  return [
+    built.glass.part("terrace glazing", "track paddock hall"),
+    built.deck.part("terrace decks", "track stand concrete"),
+    built.frame.part("terrace frame", "track pole steel"),
+    built.roof.part("terrace roof", "track stand roof"),
+    built.glow.part("terrace lights", "track stand lights"),
+    flags.cloth.part("flag cloth", "track wall wraps"),
+    flags.poles.part("flag poles", "track pole steel"),
+  ];
+}
+
 export function streetParts(
   track: StreetTrack,
   line: LinePath | null,
@@ -787,12 +716,12 @@ export function streetParts(
       fencePosts(list, track, runs),
       poleSteel(poles),
       poleLamps(poles),
-      over.steel,
-      over.faces,
+      ...over,
       gantry(list, track),
       lamps(list, track),
       trackProps(list, track.length, track.props ?? []),
       ...venueParts(list, track, venue, track.pitLane),
+      ...hospitality(list, track.length),
     ],
     poles,
     crew: side ? crewSpots(list, track.length, side) : [],
