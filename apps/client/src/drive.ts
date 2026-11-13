@@ -423,15 +423,14 @@ function raceControls(
     },
     n: flipWing,
     t: cycleTyre,
-    "1": () => {
-      pickTyre(0);
-    },
-    "2": () => {
-      pickTyre(1);
-    },
-    "3": () => {
-      pickTyre(2);
-    },
+    ...Object.fromEntries(
+      Array.from({ length: pitCompounds }, (_, compound) => [
+        String(compound + 1),
+        () => {
+          pickTyre(compound);
+        },
+      ]),
+    ),
     x: () => {
       engine.armStraight();
     },
@@ -474,6 +473,7 @@ function raceControls(
 }
 
 const wearShortestRace = 28;
+const engineChoosesTyre = -1;
 const pitCompounds = 5;
 const gravelCars = 22;
 const stewardPeriod = 0.1;
@@ -504,7 +504,10 @@ function raceSystems(
             sessionSeconds(stage, settings.laps, trackOf(settings).length),
           )
         : null,
-    compound: stage === "qualifying" ? 0 : compoundIndex(settings.compound),
+    compound:
+      stage === "qualifying"
+        ? engineChoosesTyre
+        : compoundIndex(settings.compound),
     wearScale: wearScale(
       stage === "qualifying" ? "real" : settings.tyreWear,
       stage === "race" ? "race" : "practice",

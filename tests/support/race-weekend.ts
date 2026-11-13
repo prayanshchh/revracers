@@ -105,6 +105,7 @@ export interface FieldOptions {
   weather?: WeatherPlan;
   track?: string;
   difficulty?: number;
+  compound?: number;
 }
 
 export interface Rules {
@@ -132,7 +133,7 @@ export async function startField(options: FieldOptions): Promise<Weekend> {
   const plan = options.plan ?? planWeekend("corvus", 10, null);
   return startCircuit<Weekend>((m) => {
     configureRules(m, options.rules ?? {});
-    m._sdTyresConfigure(1, options.wear ?? 1);
+    m._sdTyresConfigure(options.compound ?? 1, options.wear ?? 1);
     m._sdEnergyConfigure(options.kind === sessionKind.race ? 1 : 0, 1, 1, 1);
     const add = m.cwrap("sdFieldAdd", "null", [
       "string",
@@ -330,6 +331,7 @@ export function weatherOf(m: Weekend) {
     player: v[3] ?? 0,
     clock: v[4] ?? 0,
     slickLimit: v[5] ?? 0,
+    interLimit: v[6] ?? 0,
     forecast: Array.from(v.slice(7, 13)),
   };
 }

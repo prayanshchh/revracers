@@ -414,8 +414,9 @@ void sdTyresReset(tCarElt *car)
     }
     state.baseRearDiff = SimCarTable[car->index].transmission.differential[TRANS_REAR_DIFF].type;
     state.lastLap = car->_laps;
-    int start = startCompound;
-    if (!sdWeatherWetCompound(start))
+    bool picked = car->index == 0 && startCompound >= 0;
+    int start = std::max(0, startCompound);
+    if (!picked && !sdWeatherWetCompound(start))
         start = sdWeatherIdealCompound(sdWeatherCarWater(car), start);
     fit(state, start, 0, 0);
 }
@@ -586,7 +587,7 @@ extern "C" {
 
 EMSCRIPTEN_KEEPALIVE void sdTyresConfigure(int compound, double scale)
 {
-    startCompound = std::max(0, std::min(4, compound));
+    startCompound = std::max(-1, std::min(4, compound));
     wearScale = scale;
 }
 
