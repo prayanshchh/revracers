@@ -21,7 +21,8 @@ import { ProximityArrows } from "./proximity.ts";
 import { Tower } from "./tower.ts";
 import { type Entrant, segmentNames } from "./weekend.ts";
 import type { LapResult, LapTrace, SectorState } from "./laptrace.ts";
-import { type CarStatus, Mfd } from "./mfd.ts";
+import { type CarStatus, Mfd, type StrategyView } from "./mfd.ts";
+import { traceTime } from "./field-timing.ts";
 import { weatherCall, type WeatherInfo } from "./weather.ts";
 import { MiniMap, type TrackMap } from "./minimap.ts";
 import { putData, putHidden, putText } from "./hud-dom.ts";
@@ -120,7 +121,20 @@ export interface HudOptions {
   startHint: boolean;
   rewindRetired: boolean;
   onLap: (lap: LapResult) => void;
+  onSector: (index: number, status: string | null) => void;
   stewards: StewardView;
+}
+
+export interface GapView {
+  name: string;
+  gap: number;
+  trend: number;
+}
+
+interface FieldReference {
+  trace: number[];
+  length: number;
+  label: string;
 }
 
 interface StewardView {
@@ -332,6 +346,9 @@ export class Hud {
   private neutralDelta: { label: string; value: number } | null = null;
   private lineupsSeen = 0;
   private positionShown = "";
+  private fieldReference: FieldReference | null = null;
+  private gapsKey = "";
+  private fastestCar = -1;
 
   constructor(
     private readonly root: HTMLElement,
@@ -410,7 +427,7 @@ export class Hud {
     info: SessionInfo,
     penalties: string[],
   ): void {
-    this.tower?.update(timing, penalties);
+    this.tower?.update(timing, penalties, this.fastestCar);
     const total = timing.length;
     const mine = timing[0];
     const position = this.find("position");
@@ -460,6 +477,7 @@ export class Hud {
       current,
       value(frameIndex.lastLapTime),
       !steward.lastLapInvalid,
+      !steward.lapInvalid,
     );
     putData(this.find("main"), "invalid", steward.lapInvalid ? "1" : "");
     if (result) {
@@ -579,8 +597,63 @@ export class Hud {
     this.toast = { kind: "info", title, detail, until: now + 3 };
   }
 
+  setFieldReference(reference: FieldReference | null): void {
+    this.fieldReference = reference;
+  }
+
+  setFastestCar(car: number): void {
+    this.fastestCar = car;
+  }
+
+  fastestLap(name: string, time: number, now: number): void {
+    this.toast = {
+      kind: "fastest",
+      title: "Fastest Lap",
+      detail: `${name} - ${lapTime(time)}`,
+      until: now + 5,
+    };
+  }
+
+  cleanLap(streak: number): void {
+    const badge = this.find("streak");
+    putText(this.find("streak-count"), streak > 1 ? `x${String(streak)}` : "");
+    replay(badge, "show");
+  }
+
+  showStrategy(view: StrategyView): void {
+    this.mfd.showStrategy(view);
+  }
+
+  setGaps(ahead: GapView | null, behind: GapView | null): void {
+    const key = JSON.stringify([ahead, behind]);
+    if (key === this.gapsKey) return;
+    this.gapsKey = key;
+    putHidden(this.find("gaps"), !ahead && !behind);
+    const fill = (id: string, view: GapView | null, sign: string) => {
+      const row = this.find(id);
+      putHidden(row, !view);
+      if (!view) return;
+      putText(this.find(`${id}-name`), view.name);
+      putText(this.find(`${id}-value`), `${sign}${view.gap.toFixed(3)}`);
+      putData(
+        row,
+        "trend",
+        view.trend < -0.05 ? "closing" : view.trend > 0.05 ? "growing" : "",
+      );
+    };
+    fill("gap-ahead", ahead, "+");
+    fill("gap-behind", behind, "-");
+  }
+
   rewindLaps(count: number): void {
     this.laps.length = Math.min(this.laps.length, count);
+    this.sessionBest = this.laps.reduce<number | null>(
+      (best, lap) =>
+        lap.full && lap.valid && (best === null || lap.time < best)
+          ? lap.time
+          : best,
+      null,
+    );
   }
 
   setWingChoice(replace: boolean): void {
@@ -738,8 +811,7 @@ export class Hud {
       putText(this.find("current"), shortTime(laps > 0 ? current : 0));
       putData(this.find("main"), "state", "");
     }
-    const best = value(frameIndex.bestLapTime);
-    putText(this.find("best"), lapTime(best));
+    putText(this.find("best"), lapTime(this.sessionBest));
     putText(this.find("last"), lapTime(value(frameIndex.lastLapTime)));
     this.find("extra").classList.toggle("open", now < this.extraUntil);
     this.updateSectors(laps, distance, now);
@@ -761,6 +833,7 @@ export class Hud {
     const closed = sectors.active - 1;
     const time = sectors.times[closed];
     if (time !== undefined && time !== null) {
+      this.options.onSector(closed, sectors.status[closed] ?? null);
       const cell = this.sectorCells[closed];
       if (cell) replay(cell, "fill");
       const split = sectors.times
@@ -774,17 +847,30 @@ export class Hud {
     this.lastActiveSector = sectors.active;
   }
 
-  private updateDelta(laps: number, distance: number, current: number): void {
-    const widget = this.find("delta");
+  private showNeutral(widget: HTMLElement): boolean {
     const neutral = this.neutralDelta;
     putData(widget, "mode", neutral ? "neutral" : "");
     putText(this.find("delta-label"), neutral?.label ?? "Delta");
-    if (neutral) {
-      putData(widget, "state", neutral.value >= 0 ? "ahead" : "behind");
-      putText(this.find("delta-value"), signed(neutral.value));
-      return;
-    }
-    const delta = this.trace.delta(distance, current);
+    if (!neutral) return false;
+    putData(widget, "state", neutral.value >= 0 ? "ahead" : "behind");
+    putText(this.find("delta-value"), signed(neutral.value));
+    return true;
+  }
+
+  private deltaNow(distance: number, current: number): number | null {
+    const reference = this.fieldReference;
+    putText(this.find("delta-ref"), reference?.label ?? "");
+    const timed = this.trace.onFullLap || this.options.field === null;
+    if (!timed) return null;
+    if (!reference) return this.trace.delta(distance, current);
+    if (!this.trace.recorded(distance)) return null;
+    return current - traceTime(reference.trace, reference.length, distance);
+  }
+
+  private updateDelta(laps: number, distance: number, current: number): void {
+    const widget = this.find("delta");
+    if (this.showNeutral(widget)) return;
+    const delta = this.deltaNow(distance, current);
     if (delta === null) {
       putData(widget, "state", "idle");
       putText(this.find("delta-value"), laps > 0 ? "--.---" : "");
@@ -992,21 +1078,25 @@ export class Hud {
     element.classList.add("show");
   }
 
+  private personalBest(result: LapResult, first: boolean, now: number): void {
+    const alone =
+      first && this.options.reference === null && this.options.field === null;
+    this.toast = {
+      kind: "pb",
+      title: alone ? "Fastest lap" : "Personal best",
+      detail: `Lap ${String(result.lap)} - ${lapTime(result.time)}`,
+      until: now + 5,
+    };
+  }
+
   private showLap(result: LapResult, now: number): void {
     const previous = this.sessionBest;
-    if (previous === null || result.time < previous) {
+    const counts = result.full && result.valid;
+    if (counts && (previous === null || result.time < previous)) {
       this.sessionBest = result.time;
       if (!this.tower) this.renderRows();
     }
-    if (result.best) {
-      const first = this.options.reference === null && previous === null;
-      this.toast = {
-        kind: "pb",
-        title: first ? "Fastest lap" : "Personal best",
-        detail: `Lap ${String(result.lap)} - ${lapTime(result.time)}`,
-        until: now + 5,
-      };
-    }
+    if (result.best) this.personalBest(result, previous === null, now);
     putText(this.find("current"), lapTime(result.time));
     putData(this.find("main"), "state", result.best ? "pb" : "slower");
     replay(this.find("main"), "flash");

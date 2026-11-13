@@ -63,7 +63,7 @@ function courseOf(track: string, gridStart: number): Course {
   };
 }
 
-const mfdPages = ["quick", "weather", "temps", "wear", "pressure"];
+const mfdPages = ["quick", "strategy", "weather", "temps", "wear", "pressure"];
 const nextPage = (page: string) =>
   mfdPages[(mfdPages.indexOf(page) + 1) % mfdPages.length] ?? "quick";
 

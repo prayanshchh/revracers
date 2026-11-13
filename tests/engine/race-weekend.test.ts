@@ -10,6 +10,7 @@ import {
   carStatus,
   gridOf,
   passesOf,
+  pitPhasesOf,
   qualifyingTimes,
   runUntilComplete,
   sessionKind,
@@ -22,11 +23,14 @@ import {
   trackPoint,
   watchBoxes,
   type Weekend,
+  withStints,
 } from "../support/race-weekend.ts";
+import { aiPitPhase } from "../../apps/client/src/game/frame-layout.ts";
 import { layout } from "../support/pit-drive.ts";
 import { repoRoot } from "../support/repo.ts";
 import { wasm } from "../support/speed-dreams.ts";
 import { offence, stage } from "../../apps/client/src/game/stewards.ts";
+import { fieldStrategies } from "../../apps/client/src/game/ai-strategy.ts";
 import { type Stewarded, stewardMessages } from "../support/stewards.ts";
 
 const fieldSize = 22;
@@ -166,13 +170,75 @@ describe.runIf(existsSync(wasm))("race weekend on the real engine", () => {
     expect(statsOf(m).walls).toBe(0);
   });
 
-  test("twenty laps on real strategies: stops, fresh rubber, fuel to the flag", async () => {
+  test("short races follow each car's own plan: different start tyres and a planned stop", async () => {
+    const laps = 10;
+    const soft = { compound: 0, from: 0 };
+    const stints = [
+      [],
+      [soft],
+      [{ compound: 2, from: 0 }],
+      [soft, { compound: 0, from: 0.5 }],
+      [
+        { compound: 1, from: 0 },
+        { compound: 0, from: 0.4 },
+      ],
+      [],
+    ];
+    const plan = withStints(subset(planWeekend("corvus", 0, null), 6), stints);
+    const m = await startField({ kind: sessionKind.race, laps, seed: 4, plan });
+    m._sdStep(1);
+    const start = timingOf(m, 6);
+    expect(start.slice(1).map((car) => car.compound)).toEqual([0, 2, 0, 1, 1]);
+    runUntilComplete(m, (laps + 1) * lapSeconds);
+    const pits = timingOf(m, 6).map((car) => car.pits);
+    expect(pits.slice(1)).toEqual([0, 0, 1, 1, 0]);
+    expect(timingOf(m, 6)[4]?.compound).toBe(0);
+  });
+
+  test("teammates due on the same lap stop one after the other, never together", async () => {
+    const laps = 10;
+    const twoStints = [
+      { compound: 1, from: 0 },
+      { compound: 0, from: 0.5 },
+    ];
+    const plan = withStints(subset(planWeekend("corvus", 0, null), 6), [
+      [],
+      [],
+      twoStints,
+      twoStints,
+      twoStints,
+      twoStints,
+    ]);
+    const m = await startField({ kind: sessionKind.race, laps, seed: 4, plan });
+    const teams: [number, number][] = [
+      [2, 3],
+      [4, 5],
+    ];
+    let together = 0;
+    runUntilComplete(m, (laps + 1) * lapSeconds, undefined, () => {
+      const phases = pitPhasesOf(m, 6);
+      const pitting = (car: number) => (phases[car] ?? 0) !== aiPitPhase.none;
+      for (const [a, b] of teams) if (pitting(a) && pitting(b)) together++;
+    });
+    expect(timingOf(m, 6).map((car) => car.pits)).toEqual([0, 0, 1, 1, 1, 1]);
+    expect(together).toBe(0);
+  });
+
+  test("twenty laps on generated strategies: stops, fresh rubber, fuel to the flag", async () => {
     const laps = 20;
-    const plan = subset(planWeekend("corvus", 7, null), 8);
+    const base = subset(planWeekend("corvus", 7, null), 8);
+    const plan = withStints(
+      base,
+      fieldStrategies(base.entrants, base.slots, {
+        laps,
+        wearScale: 2,
+        seed: 12,
+      }),
+    );
     const m = await startField({
       kind: sessionKind.race,
       laps,
-      seed: 4,
+      seed: 12,
       wear: 2,
       plan,
     });

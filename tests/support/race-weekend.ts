@@ -12,8 +12,8 @@ import type { WeatherPlan } from "../../apps/client/src/game/weather-plan.ts";
 import { type SpeedDreams, startCircuit } from "./speed-dreams.ts";
 
 const timingStride = 20;
-const sessionFields = 12;
-const statFields = 6;
+const sessionFields = 13;
+const statFields = 7;
 const stepsPerCall = 20;
 const secondsPerCall = stepsPerCall / 500;
 
@@ -54,6 +54,7 @@ export interface Weekend extends SpeedDreams {
     seed: number,
   ) => void;
   _sdSessionInfo: (out: number) => void;
+  _sdSessionPitCompound: (compound: number) => void;
   _sdSessionStats: (out: number) => void;
   _sdSessionAdvance: () => number;
   _sdSessionSimulate: () => void;
@@ -79,6 +80,19 @@ export interface Weekend extends SpeedDreams {
   FS: {
     readFile: (path: string, options: { encoding: "utf8" }) => string;
     writeFile: (path: string, data: string) => void;
+  };
+}
+
+export function withStints(
+  plan: WeekendPlan,
+  stints: { compound: number; from: number }[][],
+): WeekendPlan {
+  return {
+    ...plan,
+    entrants: plan.entrants.map((entrant, i) => ({
+      ...entrant,
+      stints: stints[i] ?? [],
+    })),
   };
 }
 
@@ -129,6 +143,17 @@ function planWeather(m: Weekend, plan: WeatherPlan): void {
   for (const shift of plan.shifts) m._sdWeatherShift(shift.at, shift.level);
 }
 
+function configureSession(m: Weekend, options: FieldOptions): void {
+  m._sdSessionConfigure(
+    options.kind,
+    options.laps,
+    options.difficulty ?? 1,
+    options.seed,
+  );
+  if (options.autopilot ?? true) m._sdFieldAutopilot(1);
+  if (options.weather) planWeather(m, options.weather);
+}
+
 export async function startField(options: FieldOptions): Promise<Weekend> {
   const plan = options.plan ?? planWeekend("corvus", 10, null);
   return startCircuit<Weekend>((m) => {
@@ -166,14 +191,7 @@ export async function startField(options: FieldOptions): Promise<Weekend> {
       for (const stint of entrant.stints)
         m._sdFieldStint(index, stint.compound, stint.from);
     });
-    m._sdSessionConfigure(
-      options.kind,
-      options.laps,
-      options.difficulty ?? 1,
-      options.seed,
-    );
-    if (options.autopilot ?? true) m._sdFieldAutopilot(1);
-    if (options.weather) planWeather(m, options.weather);
+    configureSession(m, options);
     if (options.rain)
       m.FS.writeFile(
         raceFile,
@@ -207,6 +225,7 @@ export function sessionOf(m: Weekend) {
     toRun: v[3] ?? 0,
     playerRun: v[10] ?? 0,
     onTrack: v[11] ?? -1,
+    changedCompound: v[12] === 1,
   };
 }
 
@@ -223,6 +242,7 @@ export function statsOf(m: Weekend) {
     walls: v[2] ?? 0,
     overtakes: v[3] ?? 0,
     pits: v[5] ?? 0,
+    pitWalls: v[6] ?? 0,
   };
 }
 
@@ -360,6 +380,16 @@ interface BoxVisit {
 const crewAhead = 6;
 const crewBehind = 4.5;
 const neighbourReach = 40;
+
+export function pitPhasesOf(m: Weekend, cars: number): number[] {
+  const pits = read(m, cars * pitStateSize, (p) => {
+    m._sdFieldPits(p);
+  });
+  return Array.from(
+    { length: cars },
+    (_, car) => pits[car * pitStateSize + aiPit.phase] ?? 0,
+  );
+}
 
 export function watchBoxes(
   m: Weekend,

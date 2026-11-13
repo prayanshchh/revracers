@@ -100,6 +100,7 @@ export interface CameraPose {
   eye: [number, number, number];
   target: [number, number, number];
   fov: number;
+  roll?: number;
 }
 
 export function poseAt(

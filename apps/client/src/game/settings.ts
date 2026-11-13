@@ -118,6 +118,11 @@ export const choices = {
     { id: "standard", label: "Standard" },
     { id: "increased", label: "Increased" },
   ],
+  engineer: [
+    { id: "full", label: "Full" },
+    { id: "reduced", label: "Key Calls Only" },
+    { id: "off", label: "Off" },
+  ],
   startType: [
     { id: "standing", label: "Standing" },
     { id: "rolling", label: "Rolling (Safety Car)" },
@@ -190,6 +195,9 @@ export interface Settings {
   session: ChoiceId<"session">;
   buildUp: boolean;
   musicVolume: number;
+  engineer: ChoiceId<"engineer">;
+  engineerVoice: boolean;
+  engineerVolume: number;
   laps: number;
   difficulty: number;
   startSlot: number;
@@ -244,6 +252,8 @@ export const hudParts = {
   fuel: "Battery & Fuel",
   tyres: "Tyres (MFD)",
   inputs: "Pedal Inputs",
+  gaps: "Gaps Ahead & Behind",
+  radio: "Team Radio Subtitles",
   help: "Button Prompts",
 } as const;
 
@@ -258,6 +268,9 @@ export const defaults: Settings = {
   session: "weekend",
   buildUp: true,
   musicVolume: 70,
+  engineer: "full",
+  engineerVoice: true,
+  engineerVolume: 80,
   laps: 10,
   difficulty: 40,
   startSlot: 10,
@@ -299,6 +312,8 @@ export const defaults: Settings = {
     fuel: true,
     tyres: true,
     inputs: true,
+    gaps: true,
+    radio: true,
     help: true,
   },
 };
@@ -335,6 +350,11 @@ export function loadSettings(params: URLSearchParams): Settings {
   if (!options.includes(settings.laps))
     settings.laps =
       options.find((laps) => laps >= settings.laps) ?? defaults.laps;
+  validChoices(settings);
+  return settings;
+}
+
+function validChoices(settings: Settings): void {
   if (!choices.tyreWear.some((c) => c.id === settings.tyreWear))
     settings.tyreWear = defaults.tyreWear;
   if (!choices.qualifying.some((c) => c.id === settings.qualifying))
@@ -345,7 +365,8 @@ export function loadSettings(params: URLSearchParams): Settings {
     settings.safetyCar = defaults.safetyCar;
   if (!choices.startType.some((c) => c.id === settings.startType))
     settings.startType = defaults.startType;
-  return settings;
+  if (!choices.engineer.some((c) => c.id === settings.engineer))
+    settings.engineer = defaults.engineer;
 }
 
 function pickTrack(settings: Settings, params: URLSearchParams): void {

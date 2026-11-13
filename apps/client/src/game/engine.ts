@@ -22,6 +22,12 @@ import {
 export { carField, carStride, carWheel, frameIndex } from "./frame-layout.ts";
 import { carStride, frameIndex, pitStateSize } from "./frame-layout.ts";
 import type { Pass } from "./highlights.ts";
+import {
+  type FieldSectors,
+  fieldSectorsSize,
+  parseFieldSectors,
+  traceSlots,
+} from "./field-timing.ts";
 
 const telemetrySize = 40;
 const barrierValues = 8;
@@ -119,6 +125,7 @@ export interface SessionInfo {
   offTracks: number;
   playerRun: number;
   onTrack: number;
+  changedCompound: boolean;
 }
 
 export interface CarTiming {
@@ -148,7 +155,7 @@ export interface CarTiming {
 }
 
 const timingStride = 20;
-const sessionFields = 12;
+const sessionFields = 13;
 const practiceGridSlot = 1;
 const messageBatch = 32;
 const passBatch = 32;
@@ -277,6 +284,7 @@ export class Engine {
   private tyreMemory = 0;
   private barrierMemory = 0;
   private passMemory = 0;
+  private sectorMemory = 0;
 
   private constructor(
     private readonly module: SpeedDreamsModule,
@@ -367,6 +375,7 @@ export class Engine {
       offTracks: at(9),
       playerRun: at(10),
       onTrack: at(11),
+      changedCompound: at(12) !== 0,
     };
   }
 
@@ -647,6 +656,28 @@ export class Engine {
       };
     });
     return { total, list };
+  }
+
+  fieldSectors(): FieldSectors {
+    const size = fieldSectorsSize(this.carCount);
+    this.sectorMemory ||= this.module._malloc(size * 8);
+    this.module._sdFieldSectors(this.sectorMemory);
+    return parseFieldSectors(
+      new Float64Array(this.module.HEAPF64.buffer, this.sectorMemory, size),
+      this.carCount,
+    );
+  }
+
+  bestTrace(): { car: number; trace: number[] } {
+    let car = -1;
+    const trace = this.doubles(traceSlots, (p) => {
+      car = this.module._sdSessionBestTrace(p);
+    });
+    return { car, trace };
+  }
+
+  startTyres(compound: number): boolean {
+    return this.module._sdSessionStartTyres(compound) !== 0;
   }
 
   heap(): Uint8Array {

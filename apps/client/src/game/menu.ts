@@ -28,7 +28,7 @@ import {
 } from "./settings.ts";
 
 export type MenuAction =
-  "start" | "resume" | "restart" | "back" | "replay" | "quit";
+  "start" | "resume" | "restart" | "back" | "replay" | "photo" | "quit";
 
 interface Option {
   id: string;
@@ -126,7 +126,7 @@ const tabIntro: Record<string, string> = {
     "Choose how the International Motor Racing Federation starts the race. A spin, crash or stop you are part of waves local yellow flags.",
   osd: "Contains settings that allow you to customise the way the on-screen display is shown.",
   audio:
-    "Music plays in the menus, the pre-race build-up and after a win. There is no music while you drive.",
+    "Music plays in the menus, the pre-race build-up and after a win. There is no music while you drive. Your race engineer talks to you over the team radio.",
   Aerodynamics:
     "Adjust the front and rear wings in order to achieve the desired level of aerodynamic performance and balance.",
   Transmission:
@@ -226,6 +226,9 @@ export class Menu {
     this.find("replay").addEventListener("click", () => {
       if (this.inSession) this.finish("replay");
     });
+    this.find("photo").addEventListener("click", () => {
+      if (this.inSession) this.finish("photo");
+    });
     this.find("quit").addEventListener("click", () => {
       if (this.inSession) this.finish("quit");
     });
@@ -260,6 +263,7 @@ export class Menu {
     this.inSession = inSession;
     this.find("resume-label").textContent = inSession ? "Resume" : "Back";
     this.find("replay").hidden = !inSession;
+    this.find("photo").hidden = !inSession;
     this.find("quit").hidden = !inSession;
     this.root.hidden = false;
     this.root.classList.toggle("paused", inSession);
@@ -312,6 +316,9 @@ export class Menu {
       },
       v: () => {
         if (this.inSession) this.finish("replay");
+      },
+      o: () => {
+        if (this.inSession) this.finish("photo");
       },
       m: () => {
         if (this.inSession) this.finish("quit");
@@ -457,7 +464,12 @@ export class Menu {
         setup: false,
         rows: () => this.audioRows(),
         reset: () => {
-          this.settings.musicVolume = defaults.musicVolume;
+          Object.assign(this.settings, {
+            musicVolume: defaults.musicVolume,
+            engineer: defaults.engineer,
+            engineerVoice: defaults.engineerVoice,
+            engineerVolume: defaults.engineerVolume,
+          });
         },
       },
     ];
@@ -1209,6 +1221,38 @@ export class Menu {
         format: (v) => (v === 0 ? "Off" : `${String(v)}%`),
         range: "Off - 100%",
       },
+      this.choice(
+        "Race Engineer",
+        "How often your race engineer talks to you: gaps to the cars around you, overtakes, strategy and pit calls, tyre wear, fuel, damage and weather. Key Calls Only keeps the box calls, strategy and warnings.",
+        choices.engineer,
+        () => s.engineer,
+        (id) => {
+          s.engineer = id as Settings["engineer"];
+        },
+      ),
+      this.toggle(
+        "Engineer Voice",
+        "Speaks the radio messages with your browser's voice. With this off you still see them as subtitles.",
+        () => s.engineerVoice,
+        (v) => {
+          s.engineerVoice = v;
+        },
+      ),
+      {
+        kind: "number",
+        label: "Engineer Volume",
+        info: "The volume of your race engineer's voice.",
+        min: 0,
+        max: 100,
+        step: 5,
+        base: defaults.engineerVolume,
+        get: () => s.engineerVolume,
+        set: (v) => {
+          s.engineerVolume = v;
+        },
+        format: (v) => (v === 0 ? "Off" : `${String(v)}%`),
+        range: "Off - 100%",
+      },
     ];
   }
 
@@ -1216,9 +1260,9 @@ export class Menu {
     const s = this.settings;
     const info: Record<HudPart, string> = {
       delta:
-        "Enable or disable the delta time on the on-screen display. It compares your current lap with your best lap.",
+        "Enable or disable the delta time on the on-screen display. In a race or qualifying it compares your lap with the fastest lap of the session; alone, with your best lap.",
       sectors:
-        "Shows the sector strip above the lap timer. Purple marks a best sector, yellow a slower one.",
+        "Shows the sector strip above the lap timer. Purple is the fastest sector of anyone in the session, green your personal best, yellow slower than your best.",
       map: "Shows the track map with sectors and your position.",
       proximity:
         "Shows a red arrow on the left or right when a car is alongside or close behind you.",
@@ -1227,6 +1271,9 @@ export class Menu {
       tyres:
         "Shows tyre compound, temperatures, wear and pressures in the multi-function display.",
       inputs: "Shows throttle and brake inputs under the gear indicator.",
+      gaps: "Shows the gap to the car ahead and the car behind under the lap timer, green when the gap is moving your way.",
+      radio:
+        "Shows what your race engineer says as subtitles above the dashboard.",
       help: "Shows the button prompts in the corner of the screen.",
     };
     return (Object.keys(hudParts) as HudPart[]).map((id) =>
