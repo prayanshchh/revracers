@@ -423,15 +423,14 @@ function raceControls(
     },
     n: flipWing,
     t: cycleTyre,
-    "1": () => {
-      pickTyre(0);
-    },
-    "2": () => {
-      pickTyre(1);
-    },
-    "3": () => {
-      pickTyre(2);
-    },
+    ...Object.fromEntries(
+      Array.from({ length: pitCompounds }, (_, compound) => [
+        String(compound + 1),
+        () => {
+          pickTyre(compound);
+        },
+      ]),
+    ),
     x: () => {
       engine.armStraight();
     },

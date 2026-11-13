@@ -185,7 +185,7 @@ test.describe("race event screens", () => {
   });
 
   if (lfsCheckedOut)
-    test("the session runs on the circuit, in the weather and on the tyre picked on the event screens", async ({
+    test("the session runs on the circuit, in the weather and on the tyre picked on the event screens, and keys 1 to 5 pick any tyre for the next stop", async ({
       page,
       context,
     }) => {
@@ -224,6 +224,19 @@ test.describe("race event screens", () => {
       expect(session.rain).toBe(2);
       expect(session.timeOfDay).toBe(22 * 3600);
       expect(session.compound).toBe(4);
+
+      await page.getByRole("button", { name: /Start$/ }).click();
+      const nextStop = page.locator('[data-hud="pit-tyre-options"] .active');
+      for (const [key, tyre] of [
+        ["4", "Intermediate"],
+        ["5", "Wet"],
+        ["1", "Soft"],
+        ["2", "Medium"],
+        ["3", "Hard"],
+      ] as const) {
+        await page.keyboard.press(key);
+        await expect(nextStop).toHaveText(new RegExp(`${tyre}$`));
+      }
     });
 
   if (lfsCheckedOut)
