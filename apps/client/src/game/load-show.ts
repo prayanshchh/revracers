@@ -8,7 +8,8 @@ const megabyte = 1_000_000;
 
 const loadSlides = Array.from(
   { length: slideCount },
-  (_, index) => `/loading/${String(index + 1).padStart(2, "0")}.jpg`,
+  (_, index) =>
+    `${import.meta.env.BASE_URL}loading/${String(index + 1).padStart(2, "0")}.jpg`,
 );
 
 export interface Soundtrack {

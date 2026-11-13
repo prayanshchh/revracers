@@ -9,6 +9,7 @@ export default tseslint.config(
     ignores: [
       ".context/**",
       "**/dist/**",
+      "build/**",
       "apps/client/wasm/**",
       "apps/worker/worker-configuration.d.ts",
       ".wrangler/**",
