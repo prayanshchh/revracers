@@ -60,6 +60,7 @@ export class LapTrace {
   private readonly fastestSectors: number[];
   private sessionSectors: (number | null)[];
   private rivals: (number | null)[] | null = null;
+  private lapValid = true;
 
   constructor(
     length: number,
@@ -143,8 +144,10 @@ export class LapTrace {
     time: number,
     lastLapTime: number,
     valid = true,
+    lapValid = true,
   ): LapResult | null {
     let result: LapResult | null = null;
+    this.lapValid = lapValid;
     if (lap !== this.lap) {
       if (this.lap >= 1 && lap === this.lap + 1 && lastLapTime > 0)
         result = this.finish(this.lap, lastLapTime, valid);
@@ -228,7 +231,11 @@ export class LapTrace {
     this.boundaries.forEach((boundary, index) => {
       if (index === 0 && !this.fromLine) return;
       if (from >= 0 && from < boundary && to >= boundary)
-        this.closeSector(index, this.current[Math.floor(boundary)] ?? 0);
+        this.closeSector(
+          index,
+          this.current[Math.floor(boundary)] ?? 0,
+          this.lapValid,
+        );
     });
   }
 
@@ -245,7 +252,7 @@ export class LapTrace {
     return { personal, overall, delta: field ? overall : (own ?? null) };
   }
 
-  private closeSector(index: number, at: number): void {
+  private closeSector(index: number, at: number, valid: boolean): void {
     const start = index === 0 ? 0 : this.splitAt(index - 1);
     const time = at - start;
     this.sectorTimes[index] = time;
@@ -256,6 +263,7 @@ export class LapTrace {
       : below(time, personal)
         ? "faster"
         : "slower";
+    if (!valid) return;
     if (below(time, this.sessionSectors[index]))
       this.sessionSectors[index] = time;
     const fastest = this.fastestSectors[index];
@@ -270,7 +278,7 @@ export class LapTrace {
 
   private finish(lap: number, lapTime: number, valid: boolean): LapResult {
     const last = this.boundaries.length;
-    this.closeSector(last, lapTime);
+    this.closeSector(last, lapTime, valid);
     const sectors = this.sectorTimes.map((t) => t ?? 0);
     const previous = this.bestLapTime();
     const best =

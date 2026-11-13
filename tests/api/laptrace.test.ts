@@ -9,15 +9,16 @@ function drive(
   lap: number,
   sectors: [number, number, number],
   closeLap = true,
+  valid = true,
 ) {
   const [a, b, c] = sectors;
   let clock = 0;
   for (let distance = 0; distance < length; distance += 10) {
     const pace = distance < 100 ? a / 100 : distance < 200 ? b / 100 : c / 100;
-    trace.sample(lap, distance, clock, 0);
+    trace.sample(lap, distance, clock, 0, true, valid);
     clock += pace * 10;
   }
-  return closeLap ? trace.sample(lap + 1, 0, 0, a + b + c) : null;
+  return closeLap ? trace.sample(lap + 1, 0, 0, a + b + c, valid) : null;
 }
 
 const referenceTrace = Array.from({ length: length + 1 }, (_, m) => m * 0.1);
@@ -70,6 +71,13 @@ describe("sector deltas against the stored personal best", () => {
     const again = new LapTrace(length, boundaries, reference);
     drive(again, 1, [9.6, 10.5, 12]);
     expect(atEndOfLap(again, 2, [9.5, 10.5, 12]).status[0]).toBe("faster");
+  });
+
+  test("a sector driven on an invalidated lap never becomes the time to beat", () => {
+    const trace = new LapTrace(length, boundaries, reference);
+    drive(trace, 1, [9.6, 10.5, 12]);
+    drive(trace, 2, [8.5, 10.5, 12], true, false);
+    expect(atEndOfLap(trace, 3, [8.8, 10.5, 12]).status[0]).toBe("pb");
   });
 
   test("a first lap that starts up the road from the line never becomes the best", () => {

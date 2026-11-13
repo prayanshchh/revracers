@@ -477,6 +477,7 @@ export class Hud {
       current,
       value(frameIndex.lastLapTime),
       !steward.lastLapInvalid,
+      !steward.lapInvalid,
     );
     putData(this.find("main"), "invalid", steward.lapInvalid ? "1" : "");
     if (result) {
