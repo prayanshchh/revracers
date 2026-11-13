@@ -38,7 +38,9 @@ INKS = {"VOLTARA": "#d2101a", "AURENNE": "#ffffff", "MARLOWE": "#f3e9d2", "VERDA
 DISTANCES = (200, 150, 100, 50)
 PANEL_GAP = 6
 SEED = 11
-FROND = (512, 128)
+FENCE = 256
+FENCE_CELLS = 4
+FENCE_WIRE = 0.28
 SCREEN_TILE = (448, 252)
 SCREEN_GRID = (4, 4)
 SCREEN_GUTTER = 8
@@ -132,6 +134,21 @@ def wraps(fonts):
     return Image.fromarray(np.uint8(atlas * 255), "RGB"), len(tiles), row
 
 
+def fence():
+    size = FENCE
+    y, x = np.mgrid[0:size, 0:size].astype(np.float32) + 0.5
+    cell = size / FENCE_CELLS
+    a = ((x + y) / cell) % 1.0
+    b = ((x - y) / cell) % 1.0
+    distance = np.minimum(np.minimum(a, 1 - a), np.minimum(b, 1 - b)) * cell
+    half = FENCE_WIRE * cell / 2
+    alpha = np.clip(half + 0.75 - distance, 0, 1)
+    shade = 0.75 + 0.25 * np.clip(1 - distance / max(half, 1), 0, 1)
+    rgb = np.stack([shade * 0.86, shade * 0.88, shade * 0.9], -1)
+    image = np.concatenate([rgb, alpha[..., None]], -1)
+    return Image.fromarray(np.uint8(np.clip(image, 0, 1) * 255), "RGBA")
+
+
 def gradient(top, bottom):
     width, height = SCREEN_TILE
     ramp = np.linspace(0, 1, height, dtype=np.float32)[:, None, None]
@@ -188,7 +205,7 @@ def brand_card(name, fonts):
     width, height = SCREEN_TILE
     art = next(art for brand, _, _, art in BRANDS if brand == name)
     tile = Image.new("RGB", SCREEN_TILE, BACKDROPS.get(name, "#101014"))
-    mark = lockup(art, fonts)
+    mark = inked(lockup(art, fonts), INKS.get(name))
     scale = min(height * 0.5 / mark.height, width * 0.72 / mark.width)
     mark = mark.resize((int(mark.width * scale), int(mark.height * scale)), Image.LANCZOS)
     tile.paste(mark, ((width - mark.width) // 2, (height - mark.height) // 2), mark)
