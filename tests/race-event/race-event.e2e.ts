@@ -5,6 +5,8 @@ interface DebugEngine {
   trackLength(): number;
   trackLocal(): { rain: number; timeOfDay: number };
   tyreInfo(): { compound: number };
+  timing(): { compound: number }[];
+  weather(): { lineWater: number; slickLimit: number };
 }
 
 function practiceAtHillCountry(): void {
@@ -24,7 +26,28 @@ function practiceAtHillCountry(): void {
   );
 }
 
+function dynamicWeekendAtHillCountry(): void {
+  if (sessionStorage.getItem("seeded")) return;
+  sessionStorage.setItem("seeded", "1");
+  localStorage.setItem(
+    "revracers.settings",
+    JSON.stringify({
+      track: "hill-country",
+      session: "weekend",
+      qualifying: "skip",
+      laps: 5,
+      difficulty: 110,
+      buildUp: false,
+      compound: "medium",
+      timeOfDay: "random",
+      clouds: "many clouds",
+      rain: "dynamic",
+    }),
+  );
+}
+
 const lfsCheckedOut = process.platform !== "linux";
+const forecastRolls = 30;
 
 async function openEvent(page: Page, query = ""): Promise<void> {
   await page.goto(`/?intro=off${query}`);
@@ -201,5 +224,59 @@ test.describe("race event screens", () => {
       expect(session.rain).toBe(2);
       expect(session.timeOfDay).toBe(22 * 3600);
       expect(session.compound).toBe(4);
+    });
+
+  if (lfsCheckedOut)
+    test("a race weekend that starts in the rain puts the player on the slick they picked, not on intermediates", async ({
+      page,
+      context,
+    }) => {
+      test.setTimeout(420_000);
+      await seedPlayer(context);
+      await pastSchool(context);
+      await page.addInitScript(dynamicWeekendAtHillCountry);
+      await openEvent(page, "&debug");
+
+      const forecast = page.locator(".ev-forecast");
+      let wetStart = false;
+      for (let roll = 0; roll < forecastRolls && !wetStart; roll++) {
+        if (roll > 0) {
+          await page.keyboard.press("Escape");
+          await page.keyboard.press("Escape");
+          await page.getByRole("button", { name: /^Race/ }).click();
+        }
+        await page.locator("[data-event=next]").click();
+        await expect(forecast).toHaveText(/^Forecast: /);
+        wetStart = /Rain at the start/.test(await forecast.innerText());
+      }
+      expect(wetStart).toBe(true);
+      await page.locator("[data-event=next]").click();
+      await expect(page.locator(".ev-row.tyre")).toContainText("Medium");
+      await page.locator("[data-event=start]").click();
+
+      await page.waitForFunction(
+        () => document.body.dataset["driveStatus"] === "running",
+        null,
+        { timeout: 360_000 },
+      );
+      const grid = await page.evaluate(() => {
+        const engine = (
+          window as unknown as { f1Debug: { engine: DebugEngine } }
+        ).f1Debug.engine;
+        const weather = engine.weather();
+        return {
+          wet: weather.lineWater >= weather.slickLimit,
+          fitted: engine.tyreInfo().compound,
+          tower: engine.timing().map((car) => car.compound),
+        };
+      });
+      expect(grid.wet).toBe(true);
+      expect(grid.fitted).toBe(1);
+      expect(grid.tower[0]).toBe(1);
+      expect(grid.tower.slice(1).every((compound) => compound >= 3)).toBe(true);
+      await page.getByRole("button", { name: /Start$/ }).click();
+      await expect(page.locator('[data-me="1"] .row-tyre')).toHaveText("M", {
+        timeout: 30_000,
+      });
     });
 });
