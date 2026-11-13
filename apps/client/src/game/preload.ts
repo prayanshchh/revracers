@@ -350,11 +350,13 @@ export async function uploadEverything(
   scene: THREE.Scene,
   draw: () => void,
   deferLater: boolean,
+  pipelinesReady: () => void,
 ): Promise<void> {
   const pass = deferLater ? "now" : "all";
   await startPipelines(renderer, () => {
     drawEverything(scene, draw, pass);
   });
+  pipelinesReady();
   drawEverything(scene, draw, pass);
   await loaded();
   drawEverything(scene, draw, pass);

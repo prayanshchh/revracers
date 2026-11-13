@@ -8,16 +8,25 @@ import numpy as np
 import OpenImageIO as oiio
 from mathutils import Matrix, Vector
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import grown
+
 COLUMNS = 6
 ROWS = 4
 AZIMUTHS = 12
 RINGS = (math.radians(5.0), math.radians(40.0))
 MARGIN = 1.04
-SAMPLES = 48
+SAMPLES = 64
 SKY_STRENGTH = 1.0
 OCCLUSION_FLOOR = 0.3
 OCCLUSION_GAIN = 1.35
 COVERAGE_GAMMA = 0.8
+SUN_ELEVATION = math.radians(50.0)
+SUN_TURNS = (0.0, math.radians(120.0), math.radians(-120.0))
+SUN_SPREAD = math.radians(2.0)
+LIGHT_SCALE = 0.7
+TRANSLUCENCY = 0.3
 
 
 def reset():
@@ -39,19 +48,25 @@ def reset():
     scene.view_settings.look = "None"
     layer = scene.view_layers[0]
     layer.use_pass_diffuse_color = True
-    layer.use_pass_normal = True
-    layer.use_pass_z = True
     world = bpy.data.worlds.new("sky")
     world.use_nodes = True
     background = world.node_tree.nodes["Background"]
     background.inputs[0].default_value = (1, 1, 1, 1)
     background.inputs[1].default_value = SKY_STRENGTH
     scene.world = world
-    return scene
+    lamp = bpy.data.lights.new("sun", "SUN")
+    lamp.energy = 0
+    lamp.angle = SUN_SPREAD
+    sun = bpy.data.objects.new("sun", lamp)
+    scene.collection.objects.link(sun)
+    return scene, background, sun
 
 
 def load_tree(path, only):
-    bpy.ops.import_scene.gltf(filepath=str(path))
+    if path.suffix == ".npz":
+        grown.load(path)
+    else:
+        bpy.ops.import_scene.gltf(filepath=str(path))
     meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
     for mesh in [m for m in meshes if only and only not in m.name]:
         bpy.data.objects.remove(mesh)
@@ -118,11 +133,28 @@ def read_layers(path):
         layers[name] = np.array(source.read_image(part, 0, 0, spec.nchannels, oiio.FLOAT))
         part += 1
     source.close()
-    return layers["Combined"], layers["Diffuse Color"], layers["Normal"], layers["Depth"][..., 0]
+    return layers["Combined"], layers["Diffuse Color"]
+
+
+def grey(colour):
+    return colour @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+
+
+def translucency(amount):
+    for material in bpy.data.materials:
+        node = material.node_tree.nodes.get("translucency") if material.use_nodes else None
+        if node:
+            node.outputs[0].default_value = amount
+
+
+def shoot(scratch):
+    bpy.context.scene.render.filepath = str(scratch)
+    bpy.ops.render.render(write_still=True)
+    return read_layers(scratch)
 
 
 def bake(model, out, pixels, only):
-    scene = reset()
+    scene, background, sun = reset()
     meshes, base, height, radius = load_tree(model, only)
     sizes = frame_sizes(height, radius)
     scene.render.resolution_x = pixels
@@ -131,7 +163,7 @@ def bake(model, out, pixels, only):
     scene.render.image_settings.file_format = "OPEN_EXR_MULTILAYER"
     scene.render.image_settings.color_depth = "32"
     colour = np.zeros((ROWS * pixels, COLUMNS * pixels, 4), np.float32)
-    shape = np.zeros((ROWS * pixels, COLUMNS * pixels, 4), np.float32)
+    light = np.zeros((ROWS * pixels, COLUMNS * pixels, 3), np.float32)
     drops = []
     scratch = out.parent / f"{out.name}-frame.exr"
     for ring, elevation in enumerate(RINGS):
@@ -139,32 +171,37 @@ def bake(model, out, pixels, only):
         for step in range(AZIMUTHS):
             azimuth = step * 2 * math.pi / AZIMUTHS
             camera, right, up, toward, drop = camera_for(scene, base, size, azimuth, elevation, radius)
-            scene.render.filepath = str(scratch)
-            bpy.ops.render.render(write_still=True)
-            combined, albedo, normal, depth = read_layers(scratch)
-            bpy.data.objects.remove(camera)
+            background.inputs[1].default_value = SKY_STRENGTH
+            sun.data.energy = 0
+            translucency(0)
+            combined, albedo = shoot(scratch)
             alpha = np.clip(combined[..., 3], 0, 1)
-            lit = combined[..., :3] / np.maximum(alpha[..., None], 1e-4)
-            grey = lambda c: c @ np.array([0.2126, 0.7152, 0.0722], np.float32)
-            occlusion = np.clip(grey(lit) / np.maximum(grey(albedo), 1e-4), 0, 1)
+            covered = alpha > 0.05
+            occlusion = np.clip(grey(combined[..., :3]) / np.maximum(grey(albedo), 1e-4), 0, 1)
             shade = np.clip(OCCLUSION_FLOOR + (1 - OCCLUSION_FLOOR) * occlusion * OCCLUSION_GAIN, 0, 1)
             frame = np.concatenate([np.clip(albedo * shade[..., None], 0, 1), (alpha**COVERAGE_GAMMA)[..., None]], -1)
-            local = np.stack([normal @ right, normal @ up, normal @ toward], -1)
-            local[..., 2] = np.abs(local[..., 2])
-            near = (200 - depth) / size
-            covered = alpha > 0.05
-            thickness = np.where(covered, np.clip(near + 0.5, 0, 1), 0.5)
-            form = np.concatenate([local * 0.5 + 0.5, thickness[..., None]], -1)
-            form[~covered, :3] = (0.5, 0.5, 1.0)
+            background.inputs[1].default_value = 0
+            sun.data.energy = math.pi
+            translucency(TRANSLUCENCY)
+            sunlit = []
+            for turn in SUN_TURNS:
+                around = azimuth + turn
+                toward_sun = Vector((math.cos(around) * math.cos(SUN_ELEVATION), math.sin(around) * math.cos(SUN_ELEVATION), math.sin(SUN_ELEVATION)))
+                sun.rotation_euler = toward_sun.to_track_quat("Z", "Y").to_euler()
+                direct, _ = shoot(scratch)
+                received = grey(direct[..., :3]) / np.maximum(grey(albedo), 1e-4)
+                sunlit.append(np.where(covered, np.clip(received * LIGHT_SCALE, 0, 1), 0))
+            bpy.data.objects.remove(camera)
             index = ring * AZIMUTHS + step
             row, column = divmod(index, COLUMNS)
-            colour[row * pixels : (row + 1) * pixels, column * pixels : (column + 1) * pixels] = frame
-            shape[row * pixels : (row + 1) * pixels, column * pixels : (column + 1) * pixels] = form
+            window = (slice(row * pixels, (row + 1) * pixels), slice(column * pixels, (column + 1) * pixels))
+            colour[window] = frame
+            light[window] = np.stack(sunlit, -1)
             drops.append(drop)
-            print(f"{out.name} ring {ring} azimuth {step} cover {covered.mean():.3f}", flush=True)
+            print(f"{out.name} ring {ring} azimuth {step} cover {covered.mean():.3f} light {np.stack(sunlit, -1)[covered].mean(0).round(3).tolist()}", flush=True)
     scratch.unlink(missing_ok=True)
     np.save(out.parent / f"{out.name}-colour.npy", colour)
-    np.save(out.parent / f"{out.name}-shape.npy", shape)
+    np.save(out.parent / f"{out.name}-light.npy", light)
     meta = {
         "columns": COLUMNS,
         "rows": ROWS,
@@ -173,6 +210,9 @@ def bake(model, out, pixels, only):
         "sizes": [round(size / height, 4) for size in sizes],
         "spread": round(radius / height, 4),
         "drops": [round(drops[0], 4), round(drops[AZIMUTHS], 4)],
+        "sunElevation": round(math.degrees(SUN_ELEVATION), 2),
+        "sunTurns": [round(math.degrees(turn), 2) for turn in SUN_TURNS],
+        "lightScale": LIGHT_SCALE,
     }
     (out.parent / f"{out.name}.json").write_text(json.dumps(meta) + "\n")
     print("meta", meta, "height", height, "radius", radius)

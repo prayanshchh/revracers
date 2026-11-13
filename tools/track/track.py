@@ -72,6 +72,9 @@ TERRAIN_ROAD_SINK = 0.5
 PIT_CLEARANCE = 9.0
 PIT_BUILDING_HEIGHT = 14.0
 BUILDING_DEFAULT_HEIGHT = 5.0
+SUITE_REACH = 95.0
+SUITE_AREA = (320.0, 2600.0)
+SUITE_SLIM = 9.0
 TOWER_MIN_HEIGHT = 40.0
 AMPHITHEATRE_REACH = 160.0
 UTM = Transformer.from_crs(4326, 32614, always_xy=True)
@@ -90,6 +93,7 @@ BALCONY_OCCUPANCY = 0.85
 BALCONY_GROUP_SCALE = 1 / 9.0
 BALCONY_GROUP = 0.3
 CROWD_OCCUPANCY = 0.9
+CROWD_SPRITES = 32
 CROWD_ROW_STEP = 2.0
 CROWD_BANKS = ((540.0, 760.0), (1180.0, 1460.0), (1640.0, 1860.0), (2360.0, 2640.0), (3660.0, 4360.0), (4680.0, 4900.0), (5120.0, 5330.0))
 CROWD_BANK_NEAR = 0.6
@@ -511,12 +515,51 @@ def crowd(stands, ground_height, points, normal, offsets, origin_height, path, b
     positions = np.concatenate([seated, standing])
     shirts = np.array(CROWD_SHIRTS, float)[rng.integers(0, len(CROWD_SHIRTS), len(positions))]
     shirts *= rng.uniform(0.7, 1.15, (len(positions), 1))
-    data = np.column_stack([positions, rng.random(len(positions)), rng.integers(0, 32, len(positions)), shirts])
+    chance = rng.random(len(positions))
+    sprite = rng.integers(0, CROWD_SPRITES, len(positions)) + np.where(np.arange(len(positions)) < len(seated), 0, CROWD_SPRITES)
+    data = np.column_stack([positions, chance, sprite, shirts])
     guests = np.random.default_rng(CROWD_SEED + 2)
     tops = np.array(CROWD_SHIRTS, float)[guests.integers(0, len(CROWD_SHIRTS), len(balconies))] * guests.uniform(0.7, 1.15, (len(balconies), 1))
-    hosted = np.column_stack([balconies, guests.random(len(balconies)), guests.integers(0, 32, len(balconies)), tops])
+    hosted = np.column_stack([balconies, guests.random(len(balconies)), guests.integers(0, CROWD_SPRITES, len(balconies)) + CROWD_SPRITES, tops])
     path.write_bytes(np.concatenate([data, hosted]).astype(np.float32).tobytes())
     return len(seated), len(standing), len(hosted)
+
+
+def suite_of(item, near, points):
+    polygon = Polygon(item["outline"])
+    if not SUITE_AREA[0] <= polygon.area <= SUITE_AREA[1]:
+        return None
+    gap, row = near.query(np.array(polygon.centroid.coords[0]))
+    if gap > SUITE_REACH:
+        return None
+    corners = np.array(polygon.minimum_rotated_rectangle.exterior.coords)[:4]
+    sides = np.linalg.norm(np.roll(corners, -1, axis=0) - corners, axis=1)
+    if sides.min() < SUITE_SLIM:
+        return None
+    if sides[0] < sides[1]:
+        corners = np.roll(corners, -1, axis=0)
+    front, rear = corners[:2].mean(axis=0), corners[2:].mean(axis=0)
+    if np.linalg.norm(rear - points[row]) < np.linalg.norm(front - points[row]):
+        corners = np.roll(corners, -2, axis=0)
+    return {"corners": corners.round(3).tolist(), "base": round(item["base"], 3), "height": round(item["height"], 3)}
+
+
+def stand_line(data):
+    shape = standshape.layout(data)
+    ends = [shape["facing"] * shape["front"] + shape["across"] * shape[side] for side in ("left", "right")]
+    return {
+        "front": np.round(ends, 3).tolist(),
+        "back": np.round(-shape["facing"], 4).tolist(),
+        "depth": round(float(shape["front"] - shape["back"]), 3),
+        "base": round(float(shape["base"]), 3),
+        "roof": bool(data["roof"]),
+    }
+
+
+def structures(layout_data, points):
+    near = cKDTree(points)
+    suites = [suite for suite in (suite_of(item, near, points) for item in layout_data["buildings"]) if suite]
+    return {"suites": suites, "stands": [stand_line(data) for data in layout_data["stands"]]}
 
 
 def venue(osm, ground_height, points, origin_height):
@@ -697,6 +740,7 @@ def main():
     write_horizon(root, build, osm, origin_height, xs, ys)
     layout_data = venue(osm, ground_height, points, origin_height)
     (build / "venue.json").write_text(json.dumps(layout_data))
+    (root / "structures.json").write_text(json.dumps(structures(layout_data, points), separators=(",", ":")) + "\n")
     balconies = balcony_crowd(track["pitLane"], points, n, centre, camber, origin_height, length)
     print("crowd", crowd(layout_data["stands"], ground_height, points, n, offsets, origin_height, root / "crowd.bin", balconies))
     heading = np.degrees(np.arctan2(tangents[:, 1], tangents[:, 0]))

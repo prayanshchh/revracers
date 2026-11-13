@@ -53,7 +53,7 @@ const mottleStrength = 0.07;
 const coarseScale = 0.27;
 const coarseContrast = 0.35;
 const kerbBlock = 0.5;
-const kerbRed = vec3(0.5, 0.042, 0.03);
+const kerbRed = vec3(0.52, 0.07, 0.068);
 const kerbWhite = vec3(0.74, 0.74, 0.71);
 const kerbGrain = 0.3;
 const kerbRubber = 0.62;
@@ -93,8 +93,15 @@ const dryTint = vec3(1.28, 1.12, 0.8);
 const photoShare = 0.6;
 const photoMean = 0.085;
 const mowWidth = 4.5;
-const mowStrength = 0.09;
-const terrainMowAngle = 0.62;
+const mowStrength = 0.03;
+const meadowGrade = vec3(0.92, 1.1, 0.7);
+const meadowDetail = 0.8;
+const meadowCoarseTile = 13.7;
+const meadowCoarseAngle = 0.47;
+const meadowCoarse = 0.45;
+const meadowPatchScale = 0.011;
+const meadowPatch = 0.22;
+const meadowDry = 0.5;
 const gravelTile = 4;
 const gravelMacroTile = 17.3;
 const gravelMacroAngle = 0.83;
@@ -465,9 +472,37 @@ export function mownAlong(lateral: FloatNode): FloatNode {
   return stripes(lateral);
 }
 
-export function mownWorld(): FloatNode {
-  const across = positionWorld.x
-    .mul(Math.cos(terrainMowAngle))
-    .add(positionWorld.y.mul(Math.sin(terrainMowAngle)));
-  return stripes(across);
+export function meadow(map: THREE.Texture, photo: ColourNode): Turf {
+  const world = positionWorld.xy;
+  const lift = texture(map, world.div(turfTile))
+    .rgb.dot(vec3(1 / 3))
+    .div(turfMean);
+  const c = Math.cos(meadowCoarseAngle);
+  const s = Math.sin(meadowCoarseAngle);
+  const coarse = texture(
+    map,
+    vec2(
+      world.x.mul(c).sub(world.y.mul(s)),
+      world.x.mul(s).add(world.y.mul(c)),
+    ).div(meadowCoarseTile),
+  )
+    .rgb.dot(vec3(1 / 3))
+    .div(turfMean);
+  const patch = vertexStage(
+    mx_noise_float(world.mul(meadowPatchScale).add(13.1)),
+  );
+  const dry = vertexStage(
+    smoothstep(0.3, 0.85, mx_noise_float(world.mul(dryScale).add(7.7))),
+  )
+    .mul(turfDryness)
+    .mul(meadowDry);
+  const detail = mix(float(1), lift, meadowDetail)
+    .mul(mix(float(1), coarse, meadowCoarse))
+    .mul(patch.mul(meadowPatch).add(1));
+  const colour = photo
+    .mul(meadowGrade)
+    .mul(turfTint)
+    .mul(mix(vec3(1), dryTint, dry))
+    .mul(detail);
+  return { colour, relief: lift.mul(turfRelief) };
 }

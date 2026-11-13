@@ -42,7 +42,7 @@ const credits: Credit[] = [
   },
   {
     name: "Poly Haven",
-    role: "Surface textures, skies and tree models",
+    role: "Surface textures and skies",
     licence: "CC0 1.0",
     url: "https://polyhaven.com/",
   },
@@ -54,7 +54,7 @@ const credits: Credit[] = [
   },
   {
     name: "Microsoft Rocketbox Avatar Library",
-    role: "Pit crew body",
+    role: "Pit crew body and spectators",
     licence: "MIT",
     url: "https://github.com/microsoft/Microsoft-Rocketbox",
   },

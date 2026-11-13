@@ -10,19 +10,10 @@ import {
   waterMesh,
 } from "./street-roads.ts";
 import { type Sign, signMesh } from "./street-screens.ts";
+import { speciesIndex } from "./scenery-trees.ts";
 import { hash } from "./street-shell.ts";
 import type { Venue } from "./street-venue.ts";
-import {
-  float,
-  mix,
-  mx_noise_float,
-  positionLocal,
-  smoothstep,
-  texture,
-  uniform,
-  uv,
-  vec3,
-} from "three/tsl";
+import { float, uniform, vec3 } from "three/tsl";
 
 export interface CityData {
   ground: Ground;
@@ -50,17 +41,9 @@ const columnHalf = 0.7;
 const capDepth = 1.3;
 const capHalf = 0.85;
 const columnStride = 6;
-const palmHeightLow = 9;
-const palmHeightHigh = 15;
-const palmFronds = 20;
-const frondLength = 4.8;
-const frondWidth = 1.7;
-const frondFold = 0.35;
-const trunkSegments = 7;
-const foliageSaturation = 0.55;
-const foliageShade = 0.42;
-const foliageFill = 0.06;
-const barkFill = 0.1;
+const palmHeights = [11, 17] as const;
+const leafyHeights = [7.5, 11.5] as const;
+const treeStride = 8;
 
 function groundMesh(ground: Ground): THREE.Mesh {
   const geometry = new THREE.BufferGeometry();
@@ -252,260 +235,48 @@ function monorailMesh(lines: number[][], columns: number[]): THREE.Mesh {
   return mesh;
 }
 
-function palmGeometry(): {
-  trunk: THREE.BufferGeometry;
-  crown: THREE.BufferGeometry;
-} {
-  const trunk = new THREE.CylinderGeometry(
-    0.17,
-    0.26,
-    1,
-    trunkSegments,
-    1,
-    true,
-  );
-  trunk.translate(0, 0.5, 0);
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const uvs: number[] = [];
-  const index: number[] = [];
-  for (let f = 0; f < palmFronds; f++) {
-    const angle = (f / palmFronds) * Math.PI * 2 + hash(f) * 0.4;
-    const dx = Math.cos(angle);
-    const dz = Math.sin(angle);
-    const droop = (f % 2 === 0 ? 0.15 : 0.6) + hash(f + 7) * 0.4;
-    const segments = 4;
-    const at = positions.length / 3;
-    for (let k = 0; k <= segments; k++) {
-      const t = k / segments;
-      const reach = t * frondLength;
-      const y = Math.sin(t * Math.PI * 0.6) * 0.8 - t * t * droop * 3.2;
-      for (const side of [-1, 1]) {
-        const w =
-          frondWidth * 0.5 * Math.sin(Math.PI * Math.min(1, t * 1.1 + 0.05));
-        positions.push(
-          dx * reach - dz * w * side,
-          y - w * frondFold,
-          dz * reach + dx * w * side,
-        );
-        normals.push(0, 1, 0);
-        uvs.push(t, side < 0 ? 0 : 1);
-      }
-    }
-    for (let k = 0; k < segments; k++) {
-      const a = at + k * 2;
-      index.push(a, a + 2, a + 3, a, a + 3, a + 1);
-    }
-  }
-  const crown = new THREE.BufferGeometry();
-  crown.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(positions, 3),
-  );
-  crown.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
-  crown.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  crown.setIndex(index);
-  return { trunk, crown };
+export type Clear = (values: number[], stride: number) => number[];
+
+function planted(list: number[], stride: number, palm: number): number[][] {
+  const leafy = speciesIndex("elm");
+  const rows: number[][] = [];
+  for (let i = 0; i + stride <= list.length; i += stride)
+    rows.push([
+      Number(list[i]),
+      Number(list[i + 1]),
+      Number(list[i + 2]),
+      stride < 4 || Number(list[i + 3]) < 0.5 ? palm : leafy,
+    ]);
+  return rows;
 }
 
-function foliageColour(leaf: THREE.Node<"vec3">): THREE.Node<"vec3"> {
-  const grey = leaf.dot(vec3(0.3, 0.55, 0.15));
-  return mix(vec3(grey), leaf, foliageSaturation).mul(foliageShade);
-}
-
-function barkMaterial(
-  colour: THREE.Node<"vec3">,
-): THREE.MeshStandardNodeMaterial {
-  const bark = new THREE.MeshStandardNodeMaterial();
-  bark.colorNode = colour;
-  bark.roughnessNode = float(0.9);
-  bark.emissiveNode = colour.mul(cityGlow.mul(barkFill));
-  return bark;
-}
-
-function palms(trees: number[], frond: THREE.Texture): THREE.Object3D {
-  const count = Math.floor(trees.length / 3);
-  const group = new THREE.Group();
-  group.name = "city_palms";
-  if (count === 0) return group;
-  const { trunk, crown } = palmGeometry();
-  const bark = barkMaterial(vec3(0.2, 0.17, 0.13));
-  const leaves = new THREE.MeshStandardNodeMaterial({
-    map: frond,
-    side: THREE.DoubleSide,
-    alphaTest: 0.4,
+export function cityTrees(city: CityData, cleared: Clear): Float32Array {
+  const palm = speciesIndex("palm");
+  const rows = [
+    ...planted(city.trees, 3, palm),
+    ...planted(cleared(city.streetTrees, 4), 4, palm),
+  ];
+  const values = new Float32Array(rows.length * treeStride);
+  rows.forEach(([x = 0, y = 0, z = 0, kind = 0], i) => {
+    const [low, high] = kind === palm ? palmHeights : leafyHeights;
+    const height = low + (high - low) * hash(i * 1.7);
+    values.set([x, -z, y, height, kind, hash(i * 3.1 + 0.4)], i * treeStride);
   });
-  const blade = foliageColour(texture(frond, uv()).rgb);
-  leaves.colorNode = blade;
-  leaves.opacityNode = texture(frond, uv()).a;
-  leaves.roughnessNode = float(0.7);
-  leaves.emissiveNode = blade.mul(cityGlow.mul(foliageFill));
-  const trunks = new THREE.InstancedMesh(trunk, bark, count);
-  const crowns = new THREE.InstancedMesh(crown, leaves, count);
-  const matrix = new THREE.Matrix4();
-  const lean = new THREE.Matrix4();
-  for (let i = 0; i < count; i++) {
-    const x = trees[i * 3] ?? 0;
-    const y = trees[i * 3 + 1] ?? 0;
-    const z = trees[i * 3 + 2] ?? 0;
-    const height =
-      palmHeightLow + (palmHeightHigh - palmHeightLow) * hash(i * 1.7);
-    const tilt = (hash(i * 3.1) - 0.5) * 0.12;
-    lean.makeRotationZ(tilt);
-    matrix.makeScale(1, height, 1).premultiply(lean).setPosition(x, y, z);
-    trunks.setMatrixAt(i, matrix);
-    const scale = 0.85 + hash(i * 5.3) * 0.35;
-    matrix
-      .makeRotationY(hash(i * 2.9) * Math.PI * 2)
-      .scale(new THREE.Vector3(scale, scale, scale))
-      .setPosition(x - Math.sin(tilt) * height, y + height * Math.cos(tilt), z);
-    crowns.setMatrixAt(i, matrix);
-  }
-  for (const mesh of [trunks, crowns]) {
-    mesh.computeBoundingSphere();
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-  }
-  group.add(trunks, crowns);
-  return group;
-}
-
-const leafCards = 56;
-const leafBend = 0.85;
-const cardCorners: [number, number][] = [
-  [-1, -1],
-  [1, -1],
-  [1, 1],
-  [-1, 1],
-];
-
-function leafyGeometry(): THREE.BufferGeometry {
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const uvs: number[] = [];
-  const index: number[] = [];
-  for (let k = 0; k < leafCards; k++) {
-    const r = Math.cbrt(hash(k * 3.1 + 0.2)) * 0.82;
-    const theta = hash(k * 5.7 + 0.4) * Math.PI * 2;
-    const phi = Math.acos(hash(k * 7.9 + 0.6) * 2 - 1);
-    const centre = new THREE.Vector3(
-      r * Math.sin(phi) * Math.cos(theta),
-      r * Math.cos(phi) * 0.75,
-      r * Math.sin(phi) * Math.sin(theta),
-    );
-    const yaw = hash(k * 2.3 + 0.8) * Math.PI;
-    const tilt = (hash(k * 4.4 + 0.1) - 0.5) * 1.6;
-    const ax = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
-    const ay = new THREE.Vector3(
-      -Math.sin(yaw) * Math.sin(tilt),
-      Math.cos(tilt),
-      Math.cos(yaw) * Math.sin(tilt),
-    );
-    const outward = centre.clone().setY(centre.y + 0.3);
-    const facing = ax.clone().cross(ay);
-    if (facing.dot(outward) < 0) facing.negate();
-    const bent = facing
-      .multiplyScalar(1 - leafBend)
-      .addScaledVector(outward, leafBend);
-    const size = 0.42 + hash(k * 9.1) * 0.22;
-    const at = positions.length / 3;
-    for (const [a, b] of cardCorners) {
-      const p = centre
-        .clone()
-        .addScaledVector(ax, a * size)
-        .addScaledVector(ay, b * size);
-      positions.push(p.x, p.y, p.z);
-      normals.push(bent.x, bent.y, bent.z);
-      uvs.push((a + 1) / 2, (b + 1) / 2);
-    }
-    index.push(at, at + 1, at + 2, at, at + 2, at + 3);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(positions, 3),
-  );
-  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(index);
-  geometry.normalizeNormals();
-  return geometry;
-}
-
-function leafy(trees: number[], foliage: THREE.Texture): THREE.Object3D {
-  const group = new THREE.Group();
-  group.name = "city_trees";
-  const count = trees.length / 3;
-  if (count === 0) return group;
-  const trunk = new THREE.CylinderGeometry(0.16, 0.26, 1, 6, 1, true);
-  trunk.translate(0, 0.5, 0);
-  const bark = barkMaterial(vec3(0.15, 0.12, 0.09));
-  const leaves = new THREE.MeshStandardNodeMaterial({
-    map: foliage,
-    side: THREE.DoubleSide,
-    alphaTest: 0.45,
-    alphaToCoverage: true,
-  });
-  const tone = mx_noise_float(positionLocal.mul(0.9)).mul(0.2).add(1);
-  const leaf = foliageColour(texture(foliage, uv()).rgb).mul(tone);
-  leaves.colorNode = leaf;
-  leaves.opacityNode = texture(foliage, uv()).a;
-  leaves.roughnessNode = float(0.85);
-  const underlit = smoothstep(0.9, -0.6, positionLocal.y).mul(2).add(1);
-  leaves.emissiveNode = leaf.mul(cityGlow.mul(foliageFill)).mul(underlit);
-  const trunks = new THREE.InstancedMesh(trunk, bark, count);
-  const crowns = new THREE.InstancedMesh(leafyGeometry(), leaves, count);
-  const matrix = new THREE.Matrix4();
-  for (let i = 0; i < count; i++) {
-    const x = trees[i * 3] ?? 0;
-    const y = trees[i * 3 + 1] ?? 0;
-    const z = trees[i * 3 + 2] ?? 0;
-    const height = 4.5 + hash(i * 2.3) * 3;
-    const radius = 3.0 + hash(i * 4.1) * 2.0;
-    matrix.makeScale(1, height, 1).setPosition(x, y, z);
-    trunks.setMatrixAt(i, matrix);
-    matrix
-      .makeRotationY(hash(i * 1.3) * 6.28)
-      .scale(new THREE.Vector3(radius, radius * 0.9, radius))
-      .setPosition(x, y + height + radius * 0.35, z);
-    crowns.setMatrixAt(i, matrix);
-  }
-  for (const mesh of [trunks, crowns]) {
-    mesh.computeBoundingSphere();
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-  }
-  group.add(trunks, crowns);
-  return group;
-}
-
-function splitTrees(trees: number[]): { palms: number[]; leafy: number[] } {
-  const palm: number[] = [];
-  const leaf: number[] = [];
-  for (let i = 0; i + 3 < trees.length + 1; i += 4) {
-    const target = (trees[i + 3] ?? 0) < 0.5 ? palm : leaf;
-    target.push(trees[i] ?? 0, trees[i + 1] ?? 0, trees[i + 2] ?? 0);
-  }
-  return { palms: palm, leafy: leaf };
+  return values;
 }
 
 export function buildCity(
   city: CityData,
-  frond: THREE.Texture,
-  foliage: THREE.Texture,
   screens: THREE.Texture,
 ): THREE.Object3D {
   const root = new THREE.Group();
   root.name = "city";
-  const planted = splitTrees(city.streetTrees);
   root.add(
     groundMesh(city.ground),
     streetMesh(city.roads, city.ground, cityGlow),
     waterMesh(city.water, city.ground, cityGlow),
     buildingMesh(city.buildings, cityGlow),
     monorailMesh(city.monorail, city.monorailColumns),
-    palms([...city.trees, ...planted.palms], frond),
-    leafy(planted.leafy, foliage),
     signMesh(city.signs, screens, cityGlow),
     marqueeMesh(city.marquees, cityGlow),
   );

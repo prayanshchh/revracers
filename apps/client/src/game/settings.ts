@@ -271,7 +271,7 @@ export const defaults: Settings = {
   ersAssist: false,
   straightAssist: true,
   timeOfDay: "from track",
-  clouds: "scarce clouds",
+  clouds: "no cloud",
   rain: "none",
   weatherSeed: 1,
   season: "now",

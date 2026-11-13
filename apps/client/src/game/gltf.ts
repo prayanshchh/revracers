@@ -1,7 +1,8 @@
 import * as THREE from "three/webgpu";
 import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { float, smoothstep, uv, vec3 } from "three/tsl";
-import { carMaterials, carTextures, mirrorLayout } from "./carpaint.ts";
+import { carMaterials, carTextures } from "./carpaint.ts";
+import { DriverArms } from "./driver-arms.ts";
 import { carLamps, fitLamps, PastLamps, setLamps } from "./lamps.ts";
 import {
   damageable,
@@ -28,7 +29,6 @@ import type {
   CarMaterials,
   CarTextures,
   DashReadout,
-  MirrorName,
 } from "./carpaint.ts";
 import { frameIndex } from "./frame-layout.ts";
 import { gltfLoader } from "./gltf-loader.ts";
@@ -90,13 +90,12 @@ const wheelNames = ["wheel-fr", "wheel-fl", "wheel-rr", "wheel-rl"] as const;
 const lostWheelRadius = 0.36;
 const lostWheelWidth = 0.42;
 const lostWheelShadowDrop = 100;
-const mirrorDistance = 1200;
 const mirrorInterval = 2;
-const mirrorPixels = [1024, 320] as const;
-const mirrorFov = 15;
-const mirrorForward = 0.62;
-const mirrorOutward = 0.12;
-const mirrorNames: MirrorName[] = ["mirror-l", "mirror-r"];
+const rearPixels = [800, 200] as const;
+const rearFov = 17.8;
+const rearSeat = [-3.3, 0.8] as const;
+const rearDistance = 700;
+const hudOnlyInterval = 2;
 
 export interface MirrorView {
   intersectsSphere(sphere: THREE.Sphere): boolean;
@@ -281,6 +280,7 @@ export class GltfCar {
   private readonly model = new THREE.Group();
   private readonly wheels: Wheel[] = [];
   private steeringWheel: THREE.Object3D | null = null;
+  private arms: DriverArms | null = null;
   private driverHead: THREE.Object3D | null = null;
   private visualAxleMid = 0;
   private visualWheelHeight = 0;
@@ -308,17 +308,11 @@ export class GltfCar {
   private textures: CarTextures | null = null;
   private auxFrame = 0;
   private mirrorsShown = false;
+  private rearShown = false;
   private onboard = true;
   private readonly glass: THREE.Object3D[] = [];
   private readonly cockpitParts: THREE.Object3D[] = [];
-  private readonly mirrors = new Map<
-    MirrorName,
-    {
-      target: THREE.RenderTarget;
-      camera: THREE.PerspectiveCamera;
-      view: THREE.Frustum;
-    }
-  >();
+  private readonly rear = this.addRearView();
   private readonly viewMatrix = new THREE.Matrix4();
   focusMirror: (view: MirrorView | null) => void = () => undefined;
   private dash: Pick<DashReadout, "fuel" | "tyres"> = {
@@ -326,29 +320,34 @@ export class GltfCar {
     tyres: [0, 0, 0, 0],
   };
 
-  private addMirror(name: MirrorName): THREE.Texture {
-    const layout = mirrorLayout[name];
-    const target = new THREE.RenderTarget(mirrorPixels[0], mirrorPixels[1], {
+  private addRearView(): {
+    target: THREE.RenderTarget;
+    camera: THREE.PerspectiveCamera;
+    view: THREE.Frustum;
+  } {
+    const target = new THREE.RenderTarget(rearPixels[0], rearPixels[1], {
       type: THREE.HalfFloatType,
     });
     const camera = new THREE.PerspectiveCamera(
-      mirrorFov,
-      mirrorPixels[0] / mirrorPixels[1],
-      0.08,
-      mirrorDistance,
+      rearFov,
+      rearPixels[0] / rearPixels[1],
+      0.3,
+      rearDistance,
     );
-    camera.position.set(mirrorForward, layout.across, layout.up);
-    const outward = Math.sign(layout.across) * mirrorOutward;
+    camera.position.set(rearSeat[0], 0, rearSeat[1]);
     camera.quaternion.setFromRotationMatrix(
       new THREE.Matrix4().makeBasis(
-        new THREE.Vector3(outward, 1, 0).normalize(),
+        new THREE.Vector3(0, 1, 0),
         new THREE.Vector3(0, 0, 1),
-        new THREE.Vector3(1, -outward, 0).normalize(),
+        new THREE.Vector3(1, 0, 0),
       ),
     );
     this.model.add(camera);
-    this.mirrors.set(name, { target, camera, view: new THREE.Frustum() });
-    return target.texture;
+    return { target, camera, view: new THREE.Frustum() };
+  }
+
+  get rearView(): THREE.Texture {
+    return this.rear.target.texture;
   }
   private readonly flatDown = new THREE.Vector2();
   private posedAt = 0;
@@ -363,14 +362,12 @@ export class GltfCar {
     const anisotropy = renderer.getMaxAnisotropy();
     const [gltf, lod] = await carModels(team, lite);
     car.textures = carTextures(team, anisotropy, lite);
-    const materials = carMaterials(car.textures, env, {
-      "mirror-l": car.addMirror("mirror-l"),
-      "mirror-r": car.addMirror("mirror-r"),
-    });
+    const materials = carMaterials(car.textures, env, car.rearView);
     car.materials = materials;
     const tyres = tyreMaterial(env, anisotropy, lite);
     car.sharedTyres = tyres;
     car.dress(gltf.scene, materials, tyres);
+    car.fitArms(gltf.scene.getObjectByName("steering-wheel"));
     car.zoned = makeDamageable(gltf.scene, car.damage, withinChassis);
     gltf.scene.traverse((part) => car.loadedParts.add(part));
     fitLamps(gltf.scene, car.lamps);
@@ -405,6 +402,14 @@ export class GltfCar {
       axis: new THREE.Vector3(),
     }));
     return car;
+  }
+
+  private fitArms(wheel: THREE.Object3D | undefined): THREE.Object3D | null {
+    const arms = wheel ? DriverArms.take(wheel) : null;
+    if (!arms) return null;
+    wheel?.parent?.add(arms.root);
+    this.arms = arms;
+    return arms.root;
   }
 
   private dress(
@@ -458,8 +463,13 @@ export class GltfCar {
     const holder = carScene.getObjectByName("car") ?? carScene;
     if (wheel) {
       this.dress(wheel, materials, sharedTyres);
+      const arms = this.fitArms(wheel);
       makeDamageable(wheel, this.damage, withinChassis, this.zoned);
       holder.add(wheel);
+      if (arms) {
+        makeDamageable(arms, this.damage, withinChassis, this.zoned);
+        holder.add(arms);
+      }
       this.steeringWheel = wheel;
     }
     this.axes.add(shadowCaster(lod.scene, this.damage));
@@ -474,7 +484,7 @@ export class GltfCar {
     });
     for (const map of Object.values(this.textures ?? {}))
       (map as THREE.Texture).dispose();
-    for (const mirror of this.mirrors.values()) mirror.target.dispose();
+    this.rear.target.dispose();
   }
 
   private fitWheels(model: THREE.Object3D, tyres: THREE.Material): void {
@@ -530,9 +540,15 @@ export class GltfCar {
     return this.radii;
   }
 
-  setDraw(current: boolean, driver: boolean, onboard: boolean): void {
+  setDraw(
+    current: boolean,
+    driver: boolean,
+    onboard: boolean,
+    rear = false,
+  ): void {
     this.root.visible = current;
     this.mirrorsShown = current && onboard;
+    this.rearShown = current && rear;
     if (onboard !== this.onboard)
       for (const part of this.cockpitParts) part.visible = onboard;
     this.onboard = onboard;
@@ -608,18 +624,6 @@ export class GltfCar {
     this.dash = dash;
   }
 
-  private renderMirror(
-    renderer: THREE.WebGPURenderer,
-    scene: THREE.Scene,
-  ): void {
-    const name =
-      mirrorNames[
-        Math.floor(this.auxFrame / mirrorInterval) % mirrorNames.length
-      ];
-    const mirror = name ? this.mirrors.get(name) : undefined;
-    if (mirror) this.drawMirror(renderer, scene, mirror, this.viewOf(mirror));
-  }
-
   private drawMirror(
     renderer: THREE.WebGPURenderer,
     scene: THREE.Scene,
@@ -637,8 +641,7 @@ export class GltfCar {
   warmMirrors(renderer: THREE.WebGPURenderer, scene: THREE.Scene): void {
     this.root.updateWorldMatrix(true, true);
     const previous = renderer.getRenderTarget();
-    for (const mirror of this.mirrors.values())
-      this.drawMirror(renderer, scene, mirror, everywhere);
+    this.drawMirror(renderer, scene, this.rear, everywhere);
     renderer.setRenderTarget(previous);
   }
 
@@ -655,15 +658,12 @@ export class GltfCar {
       object.frustumCulled = false;
     });
     for (const glass of this.glass) glass.visible = false;
-    const pending: Promise<void>[] = [];
-    for (const mirror of this.mirrors.values()) {
-      renderer.setRenderTarget(mirror.target);
-      pending.push(renderer.compileAsync(scene, mirror.camera));
-    }
+    renderer.setRenderTarget(this.rear.target);
+    const pending = renderer.compileAsync(scene, this.rear.camera);
     renderer.setRenderTarget(previous);
     for (const glass of this.glass) glass.visible = true;
     for (const object of culled) object.frustumCulled = true;
-    return Promise.all(pending).then(() => undefined);
+    return pending.then(() => undefined);
   }
 
   private viewOf(mirror: {
@@ -682,18 +682,22 @@ export class GltfCar {
     );
   }
 
+  get rearViewShown(): boolean {
+    return this.rearShown;
+  }
+
   mirrorViews(): THREE.Frustum[] {
-    if (!this.mirrorsShown) return [];
-    return Array.from(this.mirrors.values(), (mirror) => this.viewOf(mirror));
+    return this.mirrorsShown || this.rearShown ? [this.viewOf(this.rear)] : [];
   }
 
   renderAuxiliary(renderer: THREE.WebGPURenderer, scene: THREE.Scene): void {
-    if (!this.mirrorsShown) return;
+    if (!this.mirrorsShown && !this.rearShown) return;
     this.auxFrame++;
-    if (this.auxFrame % mirrorInterval !== 0) return;
+    const every = mirrorInterval * (this.mirrorsShown ? 1 : hudOnlyInterval);
+    if (this.auxFrame % every !== 0) return;
     this.root.updateWorldMatrix(true, true);
     const previous = renderer.getRenderTarget();
-    this.renderMirror(renderer, scene);
+    this.drawMirror(renderer, scene, this.rear, this.viewOf(this.rear));
     renderer.setRenderTarget(previous);
   }
 
@@ -751,8 +755,13 @@ export class GltfCar {
     this.pastLamps.restore(this.lamps);
   }
 
-  get drawn(): [boolean, boolean, boolean] {
-    return [this.root.visible, this.driverHead?.visible ?? true, this.onboard];
+  get drawn(): [boolean, boolean, boolean, boolean] {
+    return [
+      this.root.visible,
+      this.driverHead?.visible ?? true,
+      this.onboard,
+      this.rearShown,
+    ];
   }
 
   pose(frame: Float64Array): void {
@@ -808,11 +817,9 @@ export class GltfCar {
     });
     this.updateTyreShadows();
     this.orientTyres();
-    this.steeringWheel?.rotation.set(
-      0,
-      0,
-      -(frame[frameIndex.steer] ?? 0) * steeringWheelRotation,
-    );
+    const turned = -(frame[frameIndex.steer] ?? 0) * steeringWheelRotation;
+    this.steeringWheel?.rotation.set(0, 0, turned);
+    this.arms?.pose(turned);
   }
 
   private updateDash(frame: Float64Array): void {

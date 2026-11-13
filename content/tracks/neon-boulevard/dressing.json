@@ -1,0 +1,180 @@
+{
+  "boards": [
+    {
+      "from": 0,
+      "left": "nimbara",
+      "right": "nimbara"
+    },
+    {
+      "from": 400,
+      "left": "maison",
+      "right": "maison"
+    },
+    {
+      "from": 700,
+      "left": "nimbara",
+      "right": "boulevard tag"
+    },
+    {
+      "from": 880,
+      "left": "boulevard tag",
+      "right": "boulevard tag"
+    },
+    {
+      "from": 1080,
+      "left": "voltara",
+      "right": "voltara"
+    },
+    {
+      "from": 1450,
+      "left": "maison",
+      "right": "maison"
+    },
+    {
+      "from": 1680,
+      "left": "torqua",
+      "right": "torqua"
+    },
+    {
+      "from": 1900,
+      "left": "verdale",
+      "right": "verdale"
+    },
+    {
+      "from": 2200,
+      "left": "kestrel",
+      "right": "kestrel"
+    },
+    {
+      "from": 2450,
+      "left": "torqua",
+      "right": "torqua"
+    },
+    {
+      "from": 2750,
+      "left": "albaren",
+      "right": "albaren"
+    },
+    {
+      "from": 3200,
+      "left": "aurenne",
+      "right": "aurenne"
+    },
+    {
+      "from": 3750,
+      "left": "revracers",
+      "right": "revracers"
+    },
+    {
+      "from": 4300,
+      "left": "albaren",
+      "right": "albaren"
+    },
+    {
+      "from": 4950,
+      "left": "aurenne",
+      "right": "aurenne"
+    },
+    {
+      "from": 5300,
+      "left": "marlowe",
+      "right": "northwind"
+    },
+    {
+      "from": 5750,
+      "left": "nimbara",
+      "right": "nimbara"
+    }
+  ],
+  "gantries": [
+    {
+      "at": 955,
+      "board": "voltara",
+      "kind": "truss",
+      "margin": 7.5,
+      "height": 4.2
+    },
+    {
+      "at": 1750,
+      "board": "torqua",
+      "kind": "truss",
+      "margin": 7.5,
+      "height": 4.2
+    }
+  ],
+  "terraces": [
+    {
+      "from": 540,
+      "to": 704,
+      "side": 1,
+      "back": 3,
+      "floors": 4
+    },
+    {
+      "from": 846,
+      "to": 930,
+      "side": 1,
+      "back": 3,
+      "floors": 3
+    },
+    {
+      "from": 1290,
+      "to": 1452,
+      "side": 1,
+      "back": 3,
+      "floors": 3
+    },
+    {
+      "from": 1200,
+      "to": 1300,
+      "side": -1,
+      "back": 4,
+      "floors": 2
+    },
+    {
+      "from": 2604,
+      "to": 2700,
+      "side": 1,
+      "back": 3,
+      "floors": 2
+    }
+  ],
+  "flags": [
+    {
+      "from": 500,
+      "to": 1700,
+      "side": 1,
+      "every": 30
+    },
+    {
+      "from": 760,
+      "to": 1700,
+      "side": -1,
+      "every": 30
+    },
+    {
+      "from": 2050,
+      "to": 2380,
+      "side": 1,
+      "every": 30
+    },
+    {
+      "from": 2580,
+      "to": 3000,
+      "side": 1,
+      "every": 30
+    },
+    {
+      "from": 2700,
+      "to": 3600,
+      "side": -1,
+      "every": 36
+    },
+    {
+      "from": 4600,
+      "to": 5080,
+      "side": -1,
+      "every": 30
+    }
+  ]
+}

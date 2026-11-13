@@ -20,9 +20,11 @@ import {
   normalize,
   pass,
   pow,
+  renderOutput,
   select,
   smoothstep,
   step,
+  texture,
   uniform,
   uv,
   vec2,
@@ -89,6 +91,22 @@ const detailScaleMax = 1.5;
 const detailPixels = 3.6e6;
 const detailSharpen = 0.7;
 const grade = new THREE.Vector3(1.0, 1.0, 1.0);
+const shoulderKnee = 0.72;
+const shoulderEase = 0.45;
+const filmLift = 0.086;
+const liftPivot = 1.6;
+const rearCentre = [0.5154, 0.0782] as const;
+const rearHigh = 0.0329;
+const rearTop = 0.1042;
+const rearWide = 0.1148;
+const rearBase = 0.101;
+const rearShoulder = -0.32;
+const rearBand = 0.64;
+const rearCorner = 0.005;
+const rearFrame = 0.0019;
+const rearSoft = 0.0012;
+const rearShade = 0.18;
+const rearRim = [0.035, 0.06, 0.09] as const;
 const shockGrey = 0.68;
 const shockBright = 1.25;
 
@@ -110,6 +128,9 @@ export interface AtmosphereState {
   shock: number;
   layer: number;
   layerBase: number;
+  rearView: number;
+  film: number;
+  lift: number;
 }
 
 type FloatNode = THREE.Node<"float">;
@@ -216,6 +237,9 @@ export class Atmosphere {
   private readonly layered = uniform(0);
   private readonly layerHeight = uniform(1);
   private readonly layerBase = uniform(0);
+  private readonly rearView = uniform(0);
+  private readonly film = uniform(0);
+  private readonly lift = uniform(0);
   private readonly scenePass: ReturnType<typeof pass>;
   private detail = false;
 
@@ -223,6 +247,7 @@ export class Atmosphere {
     private readonly renderer: THREE.WebGPURenderer,
     scene: THREE.Scene,
     private readonly camera: THREE.PerspectiveCamera,
+    rear: THREE.Texture | null = null,
   ) {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -481,7 +506,71 @@ export class Atmosphere {
       grey.mul(shockBright),
       this.shock.mul(shockGrey),
     );
-    this.pipeline = new THREE.RenderPipeline(renderer, vec4(shaken, 1));
+    const framed = rear ? this.withRearView(shaken, rear) : shaken;
+    this.pipeline = new THREE.RenderPipeline(
+      renderer,
+      vec4(this.developed(renderOutput(vec4(framed, 1)).rgb), 1),
+    );
+    this.pipeline.outputColorTransform = false;
+  }
+
+  private developed(shown: THREE.Node<"vec3">): THREE.Node<"vec3"> {
+    const lifted = shown
+      .mul(this.lift.mul(filmLift * liftPivot).oneMinus())
+      .add(this.lift.mul(filmLift));
+    const over = lifted.sub(shoulderKnee).max(0);
+    return lifted.sub(
+      over
+        .mul(over)
+        .mul(this.film)
+        .mul(shoulderEase / (1 - shoulderKnee)),
+    );
+  }
+
+  private withRearView(
+    picture: THREE.Node<"vec3">,
+    rear: THREE.Texture,
+  ): THREE.Node<"vec3"> {
+    return Fn(() => {
+      const result = picture.toVar();
+      If(this.rearView.greaterThan(0), () => {
+        const offset = uv()
+          .sub(vec2(rearCentre[0], rearCentre[1]))
+          .mul(vec2(this.aspect, 1))
+          .toVar();
+        const level = offset.y.div(rearHigh);
+        const widening = level
+          .add(1)
+          .div(rearShoulder + 1)
+          .clamp(0, 1)
+          .mul(rearWide - rearTop);
+        const narrowing = level
+          .sub(rearShoulder)
+          .div(1 - rearShoulder)
+          .clamp(0, 1)
+          .mul(rearWide - rearBase);
+        const reach = this.aspect.mul(widening.sub(narrowing).add(rearTop));
+        const outside = max(
+          offset.y.abs().sub(rearHigh - rearCorner),
+          offset.x.abs().sub(reach.sub(rearCorner)),
+        ).sub(rearCorner);
+        If(outside.lessThan(rearSoft), () => {
+          const at = vec2(
+            float(0.5).sub(offset.x.div(this.aspect.mul(rearWide)).mul(0.5)),
+            level.mul(rearBand / 2).add(0.5),
+          );
+          const seen = texture(rear, at).rgb;
+          const edge = smoothstep(-rearFrame, -rearFrame * 0.6, outside);
+          const shade = smoothstep(-rearFrame * 4, -rearFrame, outside)
+            .mul(rearShade)
+            .oneMinus();
+          const glass = mix(seen.mul(shade), vec3(...rearRim), edge);
+          const cover = smoothstep(rearSoft, 0, outside).mul(this.rearView);
+          result.assign(mix(result, glass, cover));
+        });
+      });
+      return result;
+    })();
   }
 
   update(state: AtmosphereState): void {
@@ -495,6 +584,9 @@ export class Atmosphere {
     this.layered.value = state.layer > 0 ? 1 : 0;
     this.layerHeight.value = Math.max(1, state.layer);
     this.layerBase.value = state.layerBase;
+    this.rearView.value = state.rearView;
+    this.film.value = state.film;
+    this.lift.value = state.lift;
     this.lensWater.value = state.lensWater;
     if (this.glow) this.glow.strength.value = bloomStrength * state.glare;
     this.reflections.value = state.reflections;
