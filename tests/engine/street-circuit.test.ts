@@ -61,7 +61,7 @@ describe.runIf(existsSync(wasm))("street circuit weekend", () => {
       if (!plan.entrants[index]?.player)
         expect(car.pits).toBeGreaterThanOrEqual(1);
     });
-    expect(statsOf(m).walls).toBeLessThanOrEqual(1);
+    expect(statsOf(m).pitWalls).toBe(0);
   });
 
   test("the player turns into the box, is serviced and rejoins the pit exit", async () => {

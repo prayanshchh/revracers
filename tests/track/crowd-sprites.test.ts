@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { spriteBounds } from "../../apps/client/src/game/sprite-bounds.ts";
 
 const columns = 8;
-const rows = 4;
+const rows = 8;
 const cutoff = 0.5;
 
 function atlas(width: number, height: number, seed: number): Float32Array {

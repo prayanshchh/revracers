@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getRequestListener } from "@hono/node-server";
 import type { Connect, Plugin } from "vite";
+import { crossSite } from "../api/src/cross-site.ts";
 import { createApi, type Db, openDatabase } from "../api/src/index.ts";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -26,7 +27,10 @@ function database(): Promise<Db> {
 
 async function apiMiddleware(): Promise<Connect.NextHandleFunction> {
   const db = await database();
-  const listener = getRequestListener(createApi(db).fetch);
+  const app = createApi(db);
+  const listener = getRequestListener((request, env) =>
+    crossSite(request, async () => app.fetch(request, env)),
+  );
   return (request, response, next) => {
     if (request.url?.startsWith("/api/")) void listener(request, response);
     else next();

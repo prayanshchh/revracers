@@ -194,6 +194,7 @@ struct Stats
     int contactEvents = 0;
     int playerContacts = 0;
     int wallHits = 0;
+    int pitWallHits = 0;
     int overtakes = 0;
     int pits = 0;
 };
@@ -997,7 +998,11 @@ void trackContacts(tSituation *s)
         if (wallHit)
         {
             if (now - t.lastWall > contactWindow)
+            {
                 stats.wallHits++;
+                if (sdAiInPitLane(i) || sdAiInPitLaneAt(mine->_distFromStartLine, mine->_trkPos.toMiddle))
+                    stats.pitWallHits++;
+            }
             t.lastWall = now;
         }
     }
@@ -1405,6 +1410,7 @@ EMSCRIPTEN_KEEPALIVE void sdSessionStats(double *out)
         offTracks += sdStewardsOffTracks(i);
     out[4] = offTracks;
     out[5] = stats.pits;
+    out[6] = stats.pitWallHits;
 }
 
 EMSCRIPTEN_KEEPALIVE int sdSessionPlayerRun()

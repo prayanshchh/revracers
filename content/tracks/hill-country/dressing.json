@@ -1,0 +1,486 @@
+{
+  "boards": [
+    {
+      "from": 0,
+      "left": "aurenne",
+      "right": "aurenne"
+    },
+    {
+      "from": 700,
+      "left": "voltara",
+      "right": "voltara"
+    },
+    {
+      "from": 1000,
+      "left": "voltara",
+      "right": "kestrel"
+    },
+    {
+      "from": 1250,
+      "left": "voltara",
+      "right": "voltara"
+    },
+    {
+      "from": 1500,
+      "left": "northwind",
+      "right": "northwind"
+    },
+    {
+      "from": 1900,
+      "left": "marlowe",
+      "right": "marlowe"
+    },
+    {
+      "from": 2480,
+      "left": "verdale",
+      "right": "verdale"
+    },
+    {
+      "from": 2850,
+      "left": "northwind",
+      "right": "northwind"
+    },
+    {
+      "from": 3350,
+      "left": "maison",
+      "right": "maison"
+    },
+    {
+      "from": 3900,
+      "left": "torqua",
+      "right": "torqua"
+    },
+    {
+      "from": 4150,
+      "left": "torqua",
+      "right": "kestrel"
+    },
+    {
+      "from": 4260,
+      "left": "torqua",
+      "right": "torqua"
+    },
+    {
+      "from": 4560,
+      "left": "albaren",
+      "right": "hill tag"
+    },
+    {
+      "from": 4800,
+      "left": "voltara",
+      "right": "hill tag"
+    },
+    {
+      "from": 5000,
+      "left": "albaren",
+      "right": "albaren"
+    },
+    {
+      "from": 5150,
+      "left": "marlowe",
+      "right": "marlowe"
+    },
+    {
+      "from": 5330,
+      "left": "aurenne",
+      "right": "aurenne"
+    }
+  ],
+  "gantries": [
+    {
+      "at": 293,
+      "board": "aurenne",
+      "kind": "sign",
+      "left": 9.5,
+      "height": 2.8
+    },
+    {
+      "at": 1115,
+      "board": "voltara",
+      "kind": "bridge",
+      "height": 5.2
+    },
+    {
+      "at": 1640,
+      "board": "northwind",
+      "kind": "truss",
+      "reach": 9,
+      "height": 2.6
+    },
+    {
+      "at": 2112,
+      "board": "marlowe",
+      "kind": "sign",
+      "reach": 5,
+      "height": 2.6
+    },
+    {
+      "at": 2470,
+      "board": "verdale",
+      "kind": "bridge",
+      "height": 3.4
+    },
+    {
+      "at": 4425,
+      "board": "torqua",
+      "kind": "bridge",
+      "height": 5.2
+    }
+  ],
+  "stands": [
+    {
+      "from": 1255,
+      "to": 1450,
+      "side": -1,
+      "rows": 26,
+      "gap": 12,
+      "board": "voltara"
+    },
+    {
+      "from": 1995,
+      "to": 2130,
+      "side": -1,
+      "rows": 18,
+      "gap": 14,
+      "board": "marlowe"
+    }
+  ],
+  "clear": [
+    {
+      "from": 4790,
+      "to": 5170,
+      "side": -1,
+      "near": 60,
+      "far": 175,
+      "trees": false
+    },
+    {
+      "from": 1195,
+      "to": 1490,
+      "side": -1,
+      "near": 25,
+      "far": 105,
+      "trees": true
+    },
+    {
+      "from": 1955,
+      "to": 2170,
+      "side": -1,
+      "near": 25,
+      "far": 100,
+      "trees": true
+    }
+  ],
+  "cranes": [
+    {
+      "at": 450,
+      "side": -1,
+      "back": 7
+    },
+    {
+      "at": 625,
+      "side": -1,
+      "back": 9
+    },
+    {
+      "at": 950,
+      "side": 1,
+      "back": 30
+    },
+    {
+      "at": 1850,
+      "side": 1,
+      "back": 12
+    },
+    {
+      "at": 1930,
+      "side": 1,
+      "back": 8
+    },
+    {
+      "at": 2330,
+      "side": -1,
+      "back": 8
+    },
+    {
+      "at": 3110,
+      "side": -1,
+      "back": 6
+    },
+    {
+      "at": 3450,
+      "side": 1,
+      "back": 10
+    },
+    {
+      "at": 3860,
+      "side": -1,
+      "back": 12
+    },
+    {
+      "at": 5400,
+      "side": -1,
+      "back": 10
+    }
+  ],
+  "banks": [
+    {
+      "from": 1700,
+      "to": 1900,
+      "side": -1,
+      "near": 5,
+      "far": 28,
+      "share": 0.3
+    },
+    {
+      "from": 2260,
+      "to": 2470,
+      "side": 1,
+      "near": 4,
+      "far": 20,
+      "share": 0.38
+    },
+    {
+      "from": 2260,
+      "to": 2460,
+      "side": -1,
+      "near": 4,
+      "far": 24,
+      "share": 0.38
+    },
+    {
+      "from": 2480,
+      "to": 2800,
+      "side": -1,
+      "near": 4,
+      "far": 20,
+      "share": 0.4
+    }
+  ],
+  "wheel": {
+    "from": [1490, 118],
+    "to": [960.3, -393.8],
+    "reach": 31,
+    "scale": 0.6,
+    "turn": 1.33
+  },
+  "fenceless": [
+    {
+      "from": 1500,
+      "to": 2450,
+      "side": 0
+    },
+    {
+      "from": 2540,
+      "to": 2640,
+      "side": 0
+    },
+    {
+      "from": 4950,
+      "to": 5150,
+      "side": 0
+    }
+  ],
+  "lots": [
+    {
+      "from": 4990,
+      "to": 5110,
+      "side": -1,
+      "lateral": 72,
+      "rows": 4
+    }
+  ],
+  "tents": [
+    {
+      "from": 3950,
+      "to": 4030,
+      "side": 1,
+      "lateral": 50,
+      "deep": 12
+    },
+    {
+      "from": 4650,
+      "to": 4750,
+      "side": 1,
+      "lateral": 80,
+      "deep": 14
+    },
+    {
+      "from": 4820,
+      "to": 4900,
+      "side": 1,
+      "lateral": 84,
+      "deep": 12
+    }
+  ],
+  "screens": [
+    {
+      "at": 2135,
+      "side": 1,
+      "lateral": 27,
+      "wide": 8,
+      "tall": 6.5,
+      "lift": 6.5,
+      "seed": 0.05
+    },
+    {
+      "at": 2704,
+      "side": -1,
+      "lateral": 46,
+      "wide": 9,
+      "tall": 5,
+      "lift": 5,
+      "seed": 0.12
+    },
+    {
+      "at": 4440,
+      "side": 1,
+      "lateral": 28,
+      "wide": 8,
+      "tall": 4.5,
+      "lift": 2.5,
+      "seed": 0.2
+    }
+  ],
+  "markers": [
+    {
+      "at": 2408,
+      "side": -1,
+      "metres": 150
+    },
+    {
+      "at": 2458,
+      "side": -1,
+      "metres": 100
+    },
+    {
+      "at": 2508,
+      "side": -1,
+      "metres": 50
+    },
+    {
+      "at": 3586,
+      "side": -1,
+      "metres": 150
+    },
+    {
+      "at": 3636,
+      "side": -1,
+      "metres": 100
+    },
+    {
+      "at": 3686,
+      "side": -1,
+      "metres": 50
+    }
+  ],
+  "pylons": [
+    {
+      "x": 235.84,
+      "z": 174.16,
+      "tall": 20,
+      "wide": 2.6,
+      "turn": 0.665
+    },
+    {
+      "x": 564,
+      "z": -341,
+      "tall": 18,
+      "wide": 2
+    }
+  ],
+  "posts": [
+    {
+      "at": 180,
+      "side": -1
+    },
+    {
+      "at": 470,
+      "side": -1
+    },
+    {
+      "at": 700,
+      "side": 1
+    },
+    {
+      "at": 930,
+      "side": -1
+    },
+    {
+      "at": 1180,
+      "side": 1
+    },
+    {
+      "at": 1480,
+      "side": -1
+    },
+    {
+      "at": 1760,
+      "side": 1
+    },
+    {
+      "at": 1960,
+      "side": -1
+    },
+    {
+      "at": 2150,
+      "side": -1
+    },
+    {
+      "at": 2330,
+      "side": 1
+    },
+    {
+      "at": 2528,
+      "side": -1
+    },
+    {
+      "at": 2662,
+      "side": -1
+    },
+    {
+      "at": 2960,
+      "side": -1
+    },
+    {
+      "at": 3260,
+      "side": -1
+    },
+    {
+      "at": 3560,
+      "side": -1
+    },
+    {
+      "at": 3700,
+      "side": -1
+    },
+    {
+      "at": 3930,
+      "side": 1
+    },
+    {
+      "at": 4130,
+      "side": -1
+    },
+    {
+      "at": 4330,
+      "side": 1
+    },
+    {
+      "at": 4600,
+      "side": -1
+    },
+    {
+      "at": 4880,
+      "side": 1
+    },
+    {
+      "at": 5130,
+      "side": -1
+    },
+    {
+      "at": 5330,
+      "side": 1
+    }
+  ]
+}

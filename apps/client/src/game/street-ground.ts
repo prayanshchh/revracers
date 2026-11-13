@@ -5,6 +5,7 @@ import {
   float,
   floor,
   fract,
+  fwidth,
   mix,
   mx_fractal_noise_float,
   mx_noise_float,
@@ -19,8 +20,6 @@ import {
   vec3,
 } from "three/tsl";
 import wrapsUrl from "../../../../content/tracks/neon-boulevard/textures/wraps.webp?url";
-import leavesUrl from "../../../../content/tracks/neon-boulevard/textures/leaves.webp?url";
-import frondUrl from "../../../../content/tracks/neon-boulevard/textures/frond.webp?url";
 import fenceUrl from "../../../../content/tracks/neon-boulevard/textures/fence.webp?url";
 import screensUrl from "../../../../content/tracks/neon-boulevard/textures/screens.webp?url";
 import { releaseOnceUploaded } from "./preload.ts";
@@ -42,7 +41,6 @@ import { buildCity, type CityData, cityGlow } from "./street-city.ts";
 import { entranceMesh } from "./street-entrances.ts";
 import { buildLandmarks } from "./street-landmarks.ts";
 import {
-  crowdMaterial,
   garageInteriorMaterial,
   garageMaterial,
   hallMaterial,
@@ -52,27 +50,23 @@ import {
 } from "./street-materials.ts";
 import type { CrewSpot, GarageCar } from "./street-pit.ts";
 
-export const streetFiles = [
-  wrapsUrl,
-  frondUrl,
-  leavesUrl,
-  fenceUrl,
-  screensUrl,
-];
+export const streetFiles = [wrapsUrl, fenceUrl, screensUrl];
 
 const lampColour = new THREE.Color(0.93, 0.96, 1);
 const lampPeak = 55;
 const fenceColour = new THREE.Color(0.8, 0.82, 0.85);
 const fenceDensity = 0.86;
-const fenceSpill = 0.1;
-const steelSpill = 0.12;
-const wrapGlow = 0.3;
+const fenceSpill = 0.24;
+const steelSpill = 0.22;
+const wrapGlow = 0.95;
 const shaftRadius = 4.6;
-const shaftStrength = 0.07;
+const shaftStrength = 0.12;
 const shaftTop = 0.2;
 const shaftFade = 0.6;
 const shaftSegments = 10;
-const roofGlow = 0.12;
+const roofGlow = 0.2;
+const roofSheet = 0.45;
+const roofLap = 13;
 const roadTile = 2;
 const grimeAcross = 2;
 const grimeAlong = 0.04;
@@ -99,6 +93,7 @@ const patchAcross = 0.165;
 const patchAlong = 0.055;
 const patchShade = 0.86;
 const laneWear = new THREE.Color(0.36, 0.36, 0.35);
+const roadTone = new THREE.Color(0.84, 0.86, 0.9);
 
 function image(url: string, colour: boolean, anisotropy: number) {
   const map = releaseOnceUploaded(new THREE.TextureLoader().load(url));
@@ -143,13 +138,21 @@ function streetSources(
       metalness: 0.2,
     }),
     "track fence steel": make("track fence steel", {
-      color: new THREE.Color(0.5, 0.51, 0.52),
+      color: new THREE.Color(0.84, 0.85, 0.86),
       roughness: 0.5,
-      metalness: 0.2,
+      metalness: 0.1,
     }),
     "track stand concrete": make("track stand concrete", {
       color: new THREE.Color(0.5, 0.5, 0.52),
       roughness: 0.9,
+    }),
+    "track stand aisle": make("track stand aisle", {
+      color: new THREE.Color(0.6, 0.61, 0.63),
+      roughness: 0.8,
+    }),
+    "track stand skirt": make("track stand skirt", {
+      color: new THREE.Color(0.045, 0.047, 0.055),
+      roughness: 0.92,
     }),
     "track stand roof": make("track stand roof", {
       color: new THREE.Color(0.82, 0.83, 0.85),
@@ -188,7 +191,10 @@ const decorations: Record<string, Decorate> = {
     );
   },
   "track road asphalt": (made) => {
-    if (made.colorNode) made.colorNode = made.colorNode.mul(streetGrime());
+    if (made.colorNode)
+      made.colorNode = made.colorNode
+        .mul(streetGrime())
+        .mul(vec3(roadTone.r, roadTone.g, roadTone.b));
   },
   "track runoff asphalt": (made) => {
     if (!made.colorNode) return;
@@ -199,7 +205,18 @@ const decorations: Record<string, Decorate> = {
     );
   },
   "track stand roof": (made, source) => {
-    made.emissiveNode = glowOf(source, roofGlow);
+    const sheet = uv().x.div(roofSheet);
+    const ribs = sin(sheet.mul(Math.PI * 2))
+      .mul(0.5)
+      .add(0.5);
+    const seen = float(1).sub(smoothstep(0.12, 0.5, fwidth(sheet)));
+    const lap = smoothstep(0.03, 0, fract(sheet.div(roofLap)).sub(0.5).abs());
+    const shade = mix(float(1), ribs.mul(0.34).add(0.7), seen).mul(
+      lap.mul(seen).mul(0.3).oneMinus(),
+    );
+    const tone = vec3(source.color.r, source.color.g, source.color.b);
+    made.colorNode = tone.mul(shade);
+    made.emissiveNode = glowOf(source, roofGlow).mul(shade);
   },
   "track wall wraps": (made, source) => {
     if (source.map)
@@ -353,7 +370,6 @@ export async function buildStreetCircuit(
   const lamp = lampMaterial();
   const special: Record<string, THREE.Material> = {
     "track pole lamps": lamp,
-    "track stand crowd": crowdMaterial(),
     "track stand lights": lightStripMaterial(),
     "track garage front": garageMaterial(),
     "track garage interior": garageInteriorMaterial(),
@@ -384,17 +400,11 @@ export async function buildStreetCircuit(
   for (const part of parts)
     if (part.index.length > 0)
       root.add(meshOf(part, materialOf(part.material)));
-  const frond = image(frondUrl, true, anisotropy);
-  frond.wrapS = THREE.ClampToEdgeWrapping;
-  frond.wrapT = THREE.ClampToEdgeWrapping;
-  const foliage = image(leavesUrl, true, anisotropy);
-  foliage.wrapS = THREE.ClampToEdgeWrapping;
-  foliage.wrapT = THREE.ClampToEdgeWrapping;
   const screens = image(screensUrl, true, anisotropy);
   screens.wrapS = THREE.ClampToEdgeWrapping;
   screens.wrapT = THREE.ClampToEdgeWrapping;
   root.add(
-    buildCity(city, frond, foliage, screens),
+    buildCity(city, screens),
     entranceMesh(city.entrances),
     buildLandmarks(city.landmarks, screens),
     lightShafts(poles),

@@ -21,6 +21,7 @@ import {
   uniform,
   uv,
   vec2,
+  vec3,
   vec4,
 } from "three/tsl";
 import { type CarLamps, lampMaterials } from "./lamps.ts";
@@ -32,8 +33,10 @@ import { replaceImage, swapLater, upgradeLater } from "./upgrades.ts";
 const envWidth = 512;
 const envHeight = 256;
 const studioEnvRotation = new THREE.Euler(Math.PI / 2, 0, 0);
-const envIntensity = 1;
+const envIntensity = 1.45;
 const mirrorDim = 0.86;
+const mirrorShare = 0.8;
+const mirrorAside = 0.1;
 const bumpStrength = 0.5;
 const knitPitch = 1 / 0.0012;
 const screenLift = 1.15;
@@ -57,6 +60,8 @@ const ledPitch = 0.00792;
 const ledOutput = 1.6;
 const brakeColour = new THREE.Color(1.5, 0.3, 0.02);
 const atlasMaterials = new Set(["body", "cockpit", "helmet"]);
+const helmetGain = 1.7;
+const helmetSaturation = 1.25;
 const carbonMaterials = new Set(["carbon-part", "wheel-carbon"]);
 const shadedReflection: Record<string, number> = {
   "carbon-part": 0.2,
@@ -80,11 +85,11 @@ const shadedReflection: Record<string, number> = {
 };
 const satinParts = /^(wheel-carbon|btn-)/;
 const satinRoughness = 0.68;
-export const mirrorLayout = {
+const mirrorLayout = {
   "mirror-l": { across: 0.525, up: 0.684, width: 0.25, tall: 0.078 },
   "mirror-r": { across: -0.525, up: 0.684, width: 0.25, tall: 0.078 },
 } as const;
-export type MirrorName = keyof typeof mirrorLayout;
+type MirrorName = keyof typeof mirrorLayout;
 
 export interface CarEnvironment {
   texture: THREE.Texture;
@@ -367,9 +372,17 @@ function atlasMaterial(
   const pattern = weave();
   const coat = float(1).sub(smoothstep(0.45, 0.6, orm.g));
   const water = beads();
-  const paint = texture(textures.albedo, uv()).rgb.mul(
+  const base = texture(textures.albedo, uv()).rgb.mul(
     mix(float(1), pattern.tone.mul(1.6), carbon),
   );
+  const paint =
+    name === "helmet"
+      ? mix(
+          vec3(base.dot(vec3(0.2126, 0.7152, 0.0722))),
+          base,
+          helmetSaturation,
+        ).mul(helmetGain)
+      : base;
   const finish = orm.g.mul(mix(float(1), pattern.gloss, carbon));
   const height = texture(textures.bump, uv()).r;
   const worn =
@@ -573,7 +586,8 @@ function mirrorMaterial(view: THREE.Texture, name: MirrorName): THREE.Material {
   const material = new THREE.MeshBasicNodeMaterial();
   const across = positionGeometry.x.sub(layout.across).div(layout.width);
   const up = positionGeometry.y.sub(layout.up).div(layout.tall);
-  const sample = vec2(across.add(0.5), float(0.5).sub(up));
+  const centre = 0.5 + Math.sign(layout.across) * mirrorAside;
+  const sample = vec2(across.mul(mirrorShare).add(centre), float(0.5).sub(up));
   material.colorNode = texture(view, sample).rgb.mul(mirrorDim);
   return material;
 }
@@ -670,7 +684,7 @@ function partMaterial(
 export function carMaterials(
   textures: CarTextures,
   env: CarEnvironment,
-  views: Record<MirrorName, THREE.Texture>,
+  rearView: THREE.Texture,
 ): CarMaterials {
   const made = new Map<string, THREE.Material>();
   const screen = new WheelScreen();
@@ -683,8 +697,8 @@ export function carMaterials(
       flatMaterial((material) => {
         material.colorNode = texture(screen.texture, uv()).rgb.mul(screenLift);
       }),
-    "mirror-l": () => mirrorMaterial(views["mirror-l"], "mirror-l"),
-    "mirror-r": () => mirrorMaterial(views["mirror-r"], "mirror-r"),
+    "mirror-l": () => mirrorMaterial(rearView, "mirror-l"),
+    "mirror-r": () => mirrorMaterial(rearView, "mirror-r"),
   };
   const create = (source: THREE.MeshStandardMaterial): THREE.Material => {
     if (atlasMaterials.has(source.name))

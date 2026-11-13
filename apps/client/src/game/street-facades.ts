@@ -1,7 +1,9 @@
 import * as THREE from "three/webgpu";
 import {
   clamp,
-  cos,
+  cross,
+  dFdx,
+  dFdy,
   exp,
   float,
   floor,
@@ -9,9 +11,13 @@ import {
   fwidth,
   length,
   max,
+  min,
   mix,
   mx_noise_float,
+  normalize,
   positionLocal,
+  positionView,
+  select,
   sin,
   smoothstep,
   step,
@@ -33,6 +39,7 @@ import {
 import {
   addCap,
   addLedge,
+  addPiers,
   addWalls,
   centroid,
   hash,
@@ -84,6 +91,12 @@ interface FacadeStyle {
   roof: number;
 }
 
+const plinthTone = 0.86;
+const plinthStoreys = 2;
+const plinthLedge = 0.55;
+const plinthBand = 0.7;
+const pierWidth = 0.8;
+const pierDepth = 0.42;
 const warm: Rgb = [1, 0.8, 0.54];
 const soft: Rgb = [1, 0.9, 0.74];
 const cool: Rgb = [0.78, 0.87, 1];
@@ -396,6 +409,37 @@ const styles: Record<string, FacadeStyle> = {
   },
 };
 
+const classical = [
+  "cream",
+  "ivory",
+  "sand",
+  "terracotta",
+  "rose",
+  "white",
+  "violet",
+  "pier",
+  "stucco",
+];
+const plinthSuffix = ":plinth";
+
+for (const name of classical) {
+  const style = styles[name];
+  if (style)
+    styles[name + plinthSuffix] = {
+      ...style,
+      wall: scaled(style.wall, plinthTone),
+      lit: 0.1,
+      bay: style.bay * 2,
+      storey: style.storey * plinthStoreys,
+      wide: 0.56,
+      tall: 0.7,
+      arch: 1,
+      shop: 0.8,
+      level: 0.8,
+      tier: 0,
+    };
+}
+
 const styleNames = Object.keys(styles);
 const styleColumns = 7;
 const corniceDrop = 1.1;
@@ -409,13 +453,13 @@ const penthouseShare = 0.5;
 const penthouseLow = 3.5;
 const penthouseHigh = 8;
 const penthouseArea = 500;
-const fill = 0.04;
+const fill = 0.055;
 const washStoreys = 2.2;
 const crownFade = 1.7;
 const floodReach = 9;
 const floodFade = 34;
-const floodHigh = 0.22;
-const glassRough = 0.14;
+const floodHigh = 0.32;
+const glassRough = 0.035;
 const wallRough = 0.88;
 const untiered = 1e5;
 const weathering = 0.22;
@@ -428,9 +472,88 @@ const shopSill = 0.16;
 const spireArea = 450;
 const roofCourses = 2.6;
 const roofGlow = 0.12;
+const recessStone = 0.42;
+const recessGlass = 0.1;
+const roomDepth = 1.1;
+const grazing = 0.22;
+const slideLimit = 3;
+const transomAt = 0.7;
+const frameWidth = 0.045;
+const frameShade = 0.35;
+const frameTone: Rgb = [0.05, 0.045, 0.04];
+const revealSide = 0.62;
+const revealSill = 0.25;
+const revealSoffit = 1.45;
+const blockHeight = 0.62;
+const blockLength = 1.3;
+const jointWidth = 0.012;
+const jointShade = 0.2;
+const curtainShare = 0.55;
+const curtainLight = 0.3;
+const roomDim = 0.16;
+const lampReach = 0.55;
+const lampGain = 1.6;
+const shopModule = 2.2;
+const shopBack = 0.34;
+const shopStock = 0.5;
+const shopSpots = 2.4;
+const shelfColumns = 1.4;
+const farWindows = 0.22;
+const blindShare = 0.4;
+const blindTone: Rgb = [0.2, 0.19, 0.17];
+const slatRows = 9;
+const glassSheen: Rgb = [0.006, 0.008, 0.012];
+const coneSpread = 0.5;
+const coneNeck = 0.07;
+const coneGain = 0.3;
+const coneBright = 4.2;
+const coneFloor = 0.12;
+const nookFrom = 0.4;
+const nookTo = 1.1;
+const nookShade = 0.38;
 const slate: Rgb = [0.045, 0.06, 0.075];
 const tiles: Rgb = [0.2, 0.085, 0.05];
 const copper: Rgb = [0.07, 0.16, 0.13];
+
+function behindWall(
+  u: THREE.Node<"float">,
+  h: THREE.Node<"float">,
+): THREE.Node<"vec2"> {
+  const acrossX = dFdx(positionView);
+  const acrossY = dFdy(positionView);
+  const du = vec2(dFdx(u), dFdy(u));
+  const dh = vec2(dFdx(h), dFdy(h));
+  const turn = du.x.mul(dh.y).sub(du.y.mul(dh.x));
+  const safe = select(turn.abs().lessThan(1e-9), float(1), turn);
+  const along = acrossX.mul(dh.y).sub(acrossY.mul(dh.x)).div(safe);
+  const up = acrossY.mul(du.x).sub(acrossX.mul(du.y)).div(safe);
+  const view = normalize(positionView);
+  const facing = view.dot(normalize(cross(along, up))).abs();
+  return vec2(view.dot(along), view.dot(up))
+    .div(facing.max(grazing))
+    .clamp(-slideLimit, slideLimit);
+}
+
+function ashlar(
+  u: THREE.Node<"float">,
+  h: THREE.Node<"float">,
+  seed: THREE.Node<"float">,
+): THREE.Node<"float"> {
+  const course = h.div(blockHeight);
+  const row = floor(course);
+  const shift = fract(row.mul(0.5)).mul(blockLength).add(seed.mul(7.1));
+  const bed = fract(course).sub(0.5).abs().mul(blockHeight);
+  const head = fract(u.add(shift).div(blockLength))
+    .sub(0.5)
+    .abs()
+    .mul(blockLength);
+  const wide = fwidth(h).add(jointWidth);
+  const joint = float(1).sub(
+    smoothstep(wide.mul(0.5), wide, min(bed, head).sub(0).abs()),
+  );
+  const fade = float(1).sub(smoothstep(0.02, 0.12, fwidth(h)));
+  return joint.mul(fade);
+}
 
 function hashNode(p: THREE.Node<"vec2">): THREE.Node<"float"> {
   return fract(sin(p.dot(vec2(127.1, 311.7))).mul(43758.5453));
@@ -472,6 +595,27 @@ function addTiers(
     addLedge(mesh, shell, base + crown, ledgeReach, ledgeDepth);
 }
 
+function plinthOf(
+  shell: Shell,
+  style: FacadeStyle,
+  building: Building,
+): Shell | null {
+  const name = building.style + plinthSuffix;
+  const row = styleNames.indexOf(name);
+  if (row < 0 || building.height < style.storey * (plinthStoreys + 2))
+    return null;
+  return { ...shell, row, bay: style.bay * 2 };
+}
+
+function pierTop(shell: Shell, style: FacadeStyle, building: Building): number {
+  const crown = crownBase(shell.total, style.storey);
+  const tiered = building.kind === "tower" && style.cornice > 0;
+  return (
+    building.base +
+    (tiered && crown > style.storey ? crown - ledgeDepth : building.height)
+  );
+}
+
 function addBody(
   mesh: Mesh,
   shell: Shell,
@@ -479,7 +623,37 @@ function addBody(
   building: Building,
 ): void {
   const base = building.base;
-  addWalls(mesh, shell, base, base + building.height, null);
+  const plinth = plinthOf(shell, style, building);
+  if (plinth) {
+    const rise = style.storey * plinthStoreys;
+    addWalls(mesh, plinth, base, base + rise, null);
+    addWalls(mesh, shell, base + rise, base + building.height, null, rise);
+    addLedge(
+      mesh,
+      shell,
+      base + rise + plinthBand / 2,
+      plinthLedge,
+      plinthBand,
+    );
+    addPiers(
+      mesh,
+      plinth,
+      base,
+      base + rise - plinthBand / 2,
+      0,
+      pierWidth * 1.4,
+      pierDepth,
+    );
+    addPiers(
+      mesh,
+      shell,
+      base + rise + plinthBand / 2,
+      pierTop(shell, style, building),
+      rise + plinthBand / 2,
+      pierWidth,
+      pierDepth,
+    );
+  } else addWalls(mesh, shell, base, base + building.height, null);
   if (building.kind === "tower" && style.cornice > 0)
     addTiers(mesh, shell, style, base);
   if (building.balcony) addBalconies(mesh, shell, base, style.storey);
@@ -636,27 +810,70 @@ function facadeMaterial(
   const side = float(1).sub(wide).mul(0.5);
   const sill = float(shopSill);
   const head = sill.add(tall);
-  const across = smoothstep(side.sub(edge), side.add(edge), within.x).mul(
-    smoothstep(side.sub(edge), side.add(edge), float(1).sub(within.x)),
-  );
-  const above = smoothstep(sill.sub(edge), sill.add(edge), within.y);
-  const square = across
-    .mul(above)
-    .mul(smoothstep(head.add(edge), head.sub(edge), within.y));
   const radius = wide.mul(bay).mul(0.5);
   const spring = head.mul(storey).sub(radius);
-  const round = smoothstep(
-    radius.add(edge.mul(bay)),
-    radius.sub(edge.mul(bay)),
-    length(
-      vec2(
-        within.x.sub(0.5).mul(bay),
-        max(within.y.mul(storey).sub(spring), 0),
-      ),
-    ),
-  ).mul(above);
+  const between = (w: THREE.Node<"vec2">) =>
+    smoothstep(side.sub(edge), side.add(edge), w.x).mul(
+      smoothstep(side.sub(edge), side.add(edge), float(1).sub(w.x)),
+    );
+  const opening = (w: THREE.Node<"vec2">) => {
+    const above = smoothstep(sill.sub(edge), sill.add(edge), w.y);
+    const square = between(w)
+      .mul(above)
+      .mul(smoothstep(head.add(edge), head.sub(edge), w.y));
+    const round = smoothstep(
+      radius.add(edge.mul(bay)),
+      radius.sub(edge.mul(bay)),
+      length(vec2(w.x.sub(0.5).mul(bay), max(w.y.mul(storey).sub(spring), 0))),
+    ).mul(above);
+    return mix(square, round, arch);
+  };
+  const across = between(within);
   const far = smoothstep(0.35, 0.9, spread);
-  const pane = mix(mix(square, round, arch), wide.mul(tall), far).mul(isWall);
+  const near = float(1).sub(far);
+  const cellSize = vec2(bay, storey);
+  const slide = behindWall(u, h).toVar();
+  const inner = within
+    .add(
+      slide
+        .mul(mix(float(recessStone), float(recessGlass), glass))
+        .div(cellSize),
+    )
+    .toVar();
+  const room = within.add(slide.mul(roomDepth).div(cellSize));
+  const open = opening(within);
+  const seen = opening(inner);
+  const rim = min(
+    min(inner.x.sub(side), float(1).sub(side).sub(inner.x)).mul(bay),
+    min(inner.y.sub(sill), head.sub(inner.y)).mul(storey),
+  );
+  const bars = min(
+    inner.x.sub(0.5).abs().mul(bay),
+    inner.y
+      .sub(sill.add(tall.mul(transomAt)))
+      .abs()
+      .mul(storey),
+  );
+  const line = fwidth(inner.x).mul(bay).add(frameWidth);
+  const frame = float(1)
+    .sub(smoothstep(line, line.mul(1.5), min(rim, bars.add(frameWidth * 0.5))))
+    .mul(seen)
+    .mul(open)
+    .mul(near);
+  const recess = open.mul(float(1).sub(seen)).mul(near);
+  const revealLight = mix(
+    mix(float(revealSide), float(revealSill), step(inner.y, sill)),
+    float(revealSoffit),
+    step(head, inner.y),
+  );
+  const depthShade = mix(float(1), revealLight, recess.mul(isWall)).mul(
+    mix(float(1), float(frameShade), frame.mul(isWall)),
+  );
+  const pane = mix(
+    open.mul(seen).mul(float(1).sub(frame)),
+    wide.mul(tall),
+    far,
+  ).mul(isWall);
   const key = cell.add(vec2(seed.mul(173.3), seed.mul(41.7)));
   const chance = hashNode(key);
   const strength = hashNode(key.add(vec2(7.3, 13.1)));
@@ -673,14 +890,57 @@ function facadeMaterial(
     vec3(1, 0.74, 0.44),
     clamp(warmth.add(mood.sub(0.5).mul(0.6)), 0, 1),
   );
-  const ceiling = smoothstep(sill, head, within.y).mul(0.5).add(0.5);
-  const folds = sin(within.x.mul(Math.PI * 6).add(mood.mul(40)))
+  const ceiling = smoothstep(sill, head, room.y).mul(0.5).add(0.5);
+  const folds = sin(room.x.mul(Math.PI * 6).add(mood.mul(40)))
     .mul(0.18)
     .add(0.82);
-  const near = on.mul(strength.mul(0.75).add(0.25)).mul(ceiling).mul(folds);
+  const drawn = step(strength, curtainShare);
+  const lampAt = vec2(mood.mul(0.5).add(0.25), sill.add(tall.mul(0.45)));
+  const lampSpot = exp(
+    room.sub(lampAt).mul(vec2(bay, storey)).length().div(lampReach).negate(),
+  );
+  const roomLight = mix(
+    ceiling.mul(roomDim).add(lampSpot.mul(lampGain)),
+    folds.mul(curtainLight),
+    drawn,
+  );
+  const aisle = fract(room.x.mul(bay).div(shopModule));
+  const downlights = smoothstep(0.1, 0.02, aisle.sub(0.5).abs()).mul(
+    smoothstep(0.05, 0.0, room.y.sub(head.sub(0.06)).abs()),
+  );
+  const shelves = hashNode(
+    floor(
+      vec2(room.x.mul(bay).mul(shelfColumns), room.y.mul(storey).mul(1.6)),
+    ).add(seed.mul(31)),
+  );
+  const counter = smoothstep(
+    sill.add(tall.mul(0.5)),
+    sill.add(tall.mul(0.42)),
+    room.y,
+  );
+  const shopLight = mix(float(shopBack), shelves.mul(shopStock), counter)
+    .mul(ceiling)
+    .add(downlights.mul(shopSpots));
+  const glowing = on
+    .mul(strength.mul(0.6).add(0.4))
+    .mul(mix(roomLight, shopLight, street));
   const lamps = tone
-    .mul(mix(near, share.mul(0.5), far))
-    .mul(level.add(street.mul(0.5)))
+    .mul(mix(glowing, share.mul(farWindows), far))
+    .mul(level)
+    .mul(pane);
+  const blinds = step(hashNode(key.add(vec2(17.9, 5.3))), blindShare)
+    .mul(float(1).sub(on))
+    .mul(float(1).sub(street))
+    .mul(float(1).sub(glass));
+  const slats = smoothstep(0.35, 0.5, fract(inner.y.mul(storey).mul(slatRows)));
+  const dressed = mix(
+    vec3(0.012, 0.014, 0.018),
+    vec3(...blindTone).mul(slats.mul(0.5).add(0.5)),
+    blinds.mul(near),
+  );
+  const sheen = vec3(...glassSheen)
+    .mul(within.y.mul(0.9).add(0.35))
+    .mul(float(1).sub(blinds))
     .mul(pane);
   const top = total.sub(h);
   const reach = storey.mul(washStoreys);
@@ -691,10 +951,20 @@ function facadeMaterial(
   const fall = step(crest, h).mul(
     exp(h.sub(crest).div(storey.mul(crownFade)).negate()),
   );
+  const fromPier = fract(coord.x.add(0.5)).sub(0.5).abs();
+  const coneWide = h.mod(tier).div(reach).mul(coneSpread).add(coneNeck);
+  const cone = exp(fromPier.div(coneWide).pow(2).negate()).mul(
+    float(coneGain).div(coneWide.add(coneGain)),
+  );
   const scallop = mix(
     float(1),
-    cos(coord.x.mul(Math.PI)).pow(2).mul(1.1).add(0.3),
-    pier.mul(0.7).mul(float(1).sub(far)),
+    cone.mul(coneBright).add(coneFloor),
+    pier.mul(float(1).sub(far)),
+  );
+  const nook = mix(
+    float(1),
+    smoothstep(nookFrom, nookTo, fromPier.mul(bay)).mul(nookShade).oneMinus(),
+    pier.mul(float(1).sub(far)),
   );
   const relief = mix(
     float(1),
@@ -706,7 +976,9 @@ function facadeMaterial(
     .add(crown.mul(fall))
     .mul(scallop)
     .mul(relief)
-    .add(fill);
+    .add(fill)
+    .mul(nook)
+    .mul(depthShade);
   const trimLight = wash.add(crown).mul(0.5).mul(u).add(fill);
   const solid = float(1).sub(pane);
   const storeyLine = smoothstep(0.1, 0.03, within.y).mul(float(1).sub(far));
@@ -738,8 +1010,19 @@ function facadeMaterial(
     .mul(float(1).sub(glass))
     .mul(coursing)
     .add(1);
-  const tinted = wall.mul(grain).mul(course);
-  const colour = mix(tinted, vec3(0.012, 0.014, 0.018), pane);
+  const blocks = ashlar(u, h, seed)
+    .mul(near)
+    .mul(float(1).sub(glass))
+    .mul(float(1).sub(open));
+  const tinted = mix(
+    wall
+      .mul(grain)
+      .mul(course)
+      .mul(float(1).sub(blocks.mul(jointShade))),
+    vec3(...frameTone),
+    frame.mul(isWall),
+  );
+  const colour = mix(tinted.mul(depthShade).mul(nook), dressed, pane);
   const flood = mix(
     float(1),
     float(floodHigh),
@@ -763,7 +1046,7 @@ function facadeMaterial(
   material.metalnessNode = glass.mul(pane).mul(0.4);
   material.emissiveNode = mix(
     mix(
-      tinted.mul(light).mul(solid).add(lamps).add(neon),
+      tinted.mul(light).mul(solid).add(lamps).add(sheen).add(neon),
       wall.mul(trimLight),
       isTrim,
     ),

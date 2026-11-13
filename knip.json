@@ -20,7 +20,12 @@
       "ignoreDependencies": ["cloudflare"]
     },
     "apps/client": {
-      "entry": ["api-server.ts", "engine-build.ts", "phone-tunnel.ts"],
+      "entry": [
+        "api-server.ts",
+        "engine-build.ts",
+        "phone-tunnel.ts",
+        "src/hosted.ts"
+      ],
       "project": ["src/**/*.ts", "*.ts"],
       "ignoreDependencies": ["flag-icons"]
     },

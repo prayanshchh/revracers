@@ -1,14 +1,10 @@
 import numpy as np
 
 from palette import BRAND_ROWS
-from standshape import FRONT_WALL, ROW_RISE, layout
+from standshape import BAY_WIDTH, FIN_RISE, FRONT_WALL, ROOF_CLEARANCE, ROOF_COVER, ROW_RISE, layout
 from trackside import UNIT, beam
 
-ROOF_CLEARANCE = 4.5
-ROOF_COVER = 0.8
-BAY_WIDTH = 14.0
 FIN_THICKNESS = 0.22
-FIN_RISE = 2.4
 COLUMN_SIZE = 0.45
 RAIL_HEIGHT = 1.0
 RAIL_SIZE = 0.05

@@ -19,8 +19,8 @@ TIGHT_REACH = 30.0
 DRIFT_SIGMA = 120.0
 HEIGHT_SIGMA = 40.0
 WIDTH_SMOOTHING = 60.0
-BORDER = 1.0
-VERGE = 1.4
+BORDER = 0.5
+VERGE = 0.4
 RUNOFF_BEFORE = 50.0
 RUNOFF_AFTER = 90.0
 RUNOFF_RAMP = 30.0
@@ -38,9 +38,11 @@ ESCAPE_SPILL = 6.0
 BOLLARDS = ((12, 4.0),)
 BOLLARD_SET = 0.35
 INSIDE_SHARE = 0.45
-APEX_VERGE = 0.6
+APEX_VERGE = 0.4
 WALL_SMOOTHING = 30.0
-KERB_WIDTH = 1.4
+KERB_WIDTH = 1.2
+KERB_ROOM = 0.55
+KERB_EASE = 16.0
 KERB_SHARE = 0.5
 EXIT_SHARE = 0.25
 EXIT_KERB = 14.0
@@ -53,8 +55,8 @@ GRID_SPACING = 8.0
 GRID_LATERAL = 3.5
 GRID_BEHIND = 16.0
 ROUND = 4
-DEFAULT_WIDTH = 14.0
-PADDOCK_WIDTH = 15.0
+DEFAULT_WIDTH = 12.2
+PADDOCK_WIDTH = 13.2
 TURNS = (
     (1, 318), (2, 540), (3, 589), (4, 714), (5, 1608), (6, 1860), (7, 2069), (8, 2126), (9, 2276),
     (10, 2601), (11, 2626), (12, 3259), (13, 3700), (14, 5186), (15, 5315), (16, 5560), (17, 6048),
@@ -296,6 +298,20 @@ def kerbs(kappa, found, length):
     return sorted(out, key=lambda k: k["from"])
 
 
+def kerb_room(wall, half, surfaces, side, length):
+    count = len(wall)
+    step = length / count
+    kerbed = np.zeros(count)
+    for span in surfaces:
+        if span["side"] != side:
+            continue
+        rows = np.arange(int(span["from"] / step), int(span["from"] / step) + int(round(((span["to"] - span["from"]) % length) / step)) + 1) % count
+        kerbed[rows] = 1.0
+    need = half + KERB_WIDTH + KERB_ROOM
+    eased = np.clip(box(kerbed, KERB_EASE) * 2, 0, 1)
+    return np.maximum(wall, wall + (need - wall) * eased)
+
+
 def width_of(tags):
     name = tags.get("name", "")
     if tags.get("highway") == "raceway":
@@ -419,6 +435,9 @@ def build(root):
     s, xy, values = resample(
         path, {"width": width, "left": left, "right": right, "height": ground - origin_height}, length
     )
+    surfaces = kerbs(kappa, found, length)
+    for side in ("left", "right"):
+        values[side] = kerb_room(values[side], values["width"] / 2, surfaces, side, length)
     values["left"] = pit_walls(s, values["left"], length)
     centerline = [
         {
@@ -461,7 +480,7 @@ def build(root):
         "maxRadius": MAX_RADIUS,
         "local": {"station": "KLAS", "precipitation": 106, "timeOfDay": 22.0, "latitude": 36.1147, "longitude": -115.1728, "altitude": 620},
         "centerline": centerline,
-        "surfaces": kerbs(kappa, found, length),
+        "surfaces": surfaces,
         "pitLane": pit_lane(s, xy, values, length),
         "sectors": [round(length / 3, 3), round(2 * length / 3, 3)],
         "startLine": round(start, 3),

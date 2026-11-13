@@ -66,8 +66,9 @@ export interface Landmarks {
 type Node = THREE.Node<"float">;
 type Node3 = THREE.Node<"vec3">;
 
-const sceneTime = 11;
-const sceneCount = 4;
+const sceneTime = 9;
+const faceDrift = 0.06;
+const sceneCount = 5;
 const fade = 0.09;
 const broadcastPanels = 3;
 const broadcastBand = 0.42;
@@ -134,7 +135,7 @@ function sceneWeight(index: number): Node {
 }
 
 function planet(p: Node, q: Node): Node3 {
-  const drift = p.add(time.mul(0.004));
+  const drift = p.add(time.mul(0.012));
   const swirl = mx_noise_float(vec2(drift.mul(3), q.mul(7))).mul(0.55);
   const bands = sin(q.mul(19).add(swirl.mul(3)));
   const cream = vec3(0.98, 0.86, 0.66);
@@ -152,10 +153,10 @@ function planet(p: Node, q: Node): Node3 {
 
 function aurora(p: Node, q: Node): Node3 {
   const flow = mx_noise_float(
-    vec3(p.mul(2.4).add(time.mul(0.03)), q.mul(1.6), time.mul(0.05)),
+    vec3(p.mul(2.4).add(time.mul(0.09)), q.mul(1.6), time.mul(0.14)),
   );
   const veil = mx_noise_float(
-    vec3(p.mul(6).sub(time.mul(0.02)), q.mul(3.5).add(flow), time.mul(0.04)),
+    vec3(p.mul(6).sub(time.mul(0.07)), q.mul(3.5).add(flow), time.mul(0.11)),
   );
   const deep = vec3(0.02, 0.03, 0.12);
   const teal = vec3(0.05, 0.6, 0.62);
@@ -207,16 +208,47 @@ function broadcast(p: Node, q: Node, atlas: THREE.Texture): Node3 {
   return mix(backdrop, sqrt(slide(atlas, vec2(u, v), index)), framed);
 }
 
+function face(p: Node, q: Node): Node3 {
+  const turned = fract(p.sub(time.mul(faceDrift)).mul(0.5).add(0.5))
+    .sub(0.5)
+    .mul(2);
+  const gaze = vec2(
+    sin(time.mul(0.9)).mul(0.035),
+    sin(time.mul(0.57)).mul(0.05),
+  );
+  const blink = smoothstep(0.03, 0, abs(fract(time.div(3.7)).sub(0.5)));
+  const skin = mix(
+    vec3(0.95, 0.62, 0.05),
+    vec3(1, 0.86, 0.12),
+    smoothstep(-0.7, 0.5, q),
+  );
+  let colour: Node3 = skin;
+  for (const side of [-1, 1]) {
+    const eye = vec2(turned.sub(side * 0.15), q.sub(0.2));
+    const open = float(1).sub(blink.mul(0.92));
+    const white = length(eye.div(vec2(0.085, float(0.21).mul(open))));
+    const pupil = length(eye.sub(gaze).div(vec2(0.045, float(0.1).mul(open))));
+    colour = mix(colour, vec3(1), smoothstep(1, 0.92, white));
+    colour = mix(colour, vec3(0.03), smoothstep(1, 0.9, pupil));
+  }
+  const grin = length(vec2(turned, q.add(0.02).mul(1.5)));
+  const smile = smoothstep(0.035, 0.02, abs(grin.sub(0.36))).mul(
+    smoothstep(-0.12, -0.2, q),
+  );
+  return mix(colour, vec3(0.2, 0.08, 0.02), smile);
+}
+
 function globeMaterial(atlas: THREE.Texture): THREE.MeshBasicNodeMaterial {
   const material = new THREE.MeshBasicNodeMaterial();
   const dir = normalize(positionLocal);
   const p = atan(dir.z.negate(), dir.x).div(Math.PI);
   const q = asin(clamp(dir.y, -1, 1)).div(Math.PI / 2);
-  const content = planet(p, q)
+  const content = face(p, q)
     .mul(sceneWeight(0))
     .add(aurora(p, q).mul(sceneWeight(1)))
     .add(lights(p, q).mul(sceneWeight(2)))
-    .add(broadcast(p, q, atlas).mul(sceneWeight(3)));
+    .add(broadcast(p, q, atlas).mul(sceneWeight(3)))
+    .add(planet(p, q).mul(sceneWeight(4)));
   const cell = vec2(p.mul(ledColumns), q.mul(ledRows));
   const dot = smoothstep(0.5, 0.25, length(fract(cell).sub(0.5)));
   const blur = clamp(max(fwidth(cell.x), fwidth(cell.y)).mul(0.9), 0, 1);

@@ -27,10 +27,10 @@ const looks: Record<Season, SeasonLook> = {
     turned: [1.45, 1.1, 0.5],
   },
   autumn: {
-    turf: [0.9, 1.0, 0.96],
+    turf: [0.95, 1.0, 0.95],
     dryness: 0.62,
-    foliage: [1, 1, 0.94],
-    turning: 0.08,
+    foliage: [1.3, 1, 0.71],
+    turning: 0.05,
     turned: [1.7, 1.12, 0.45],
   },
   winter: {

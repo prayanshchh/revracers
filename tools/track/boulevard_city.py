@@ -91,6 +91,11 @@ FRONTAGE_TRIES = 6
 FRONTAGE_STYLES = ("casino", "arcade", "mall", "arcade", "stucco")
 STAND_ROW_DEPTH = 0.85
 STAND_CLEARANCE = 9.0
+STAND_GAP = 3.4
+STAND_STEP = 2.0
+STAND_MARGIN = 1.5
+STAND_ROWS_KEPT = 0.8
+STAND_SHORTEST = 40.0
 SEED = 23
 STYLE_SPOTS = (
     (36.1228, -115.1685, 230.0, "cream"),
@@ -711,6 +716,41 @@ def stand_depth(distance, side, length):
     return 0.0
 
 
+def stand_room(station, side, rows, frame, footprints_tree, polygons):
+    centre, left, walls = frame
+    wall = walls[station, 0 if side > 0 else 1]
+    for row in range(rows + 1):
+        point = Point(centre[station] + left[station] * side * (wall + STAND_GAP + row * STAND_ROW_DEPTH))
+        if any(polygons[k].distance(point) < STAND_MARGIN for k in footprints_tree.query(point.buffer(STAND_MARGIN))):
+            return row
+    return rows
+
+
+def fitted_stands(track, footprints_tree, polygons):
+    frame = side_frame(track)
+    length = track["length"]
+    count = len(frame[0])
+    out = []
+    for a, b, side, rows in STANDS:
+        offsets = np.arange(0, (b - a) % length + 1e-6, STAND_STEP)
+        room = np.array([stand_room(int(((a + d) % length) / length * count) % count, side, rows, frame, footprints_tree, polygons) for d in offsets])
+        fits = np.concatenate([[False], room >= round(rows * STAND_ROWS_KEPT), [False]])
+        starts = np.nonzero(fits[1:] & ~fits[:-1])[0]
+        ends = np.nonzero(~fits[1:] & fits[:-1])[0]
+        for first, last in zip(starts, ends - 1):
+            if offsets[last] - offsets[first] < STAND_SHORTEST:
+                continue
+            out.append(
+                {
+                    "from": round(float((a + offsets[first]) % length), ROUND),
+                    "to": round(float((a + offsets[last]) % length), ROUND),
+                    "side": side,
+                    "rows": int(room[first : last + 1].min()),
+                }
+            )
+    return out
+
+
 def frontages(track, footprints_tree, polygons, roads, terrain_at):
     rng = np.random.default_rng(SEED + 2)
     centre, left, walls = side_frame(track)
@@ -977,7 +1017,7 @@ def build(root):
         "entrances": entrances,
         "spectators": watchers,
         "venue": {
-            "stands": [{"from": a, "to": b, "side": side, "rows": rows} for a, b, side, rows in STANDS],
+            "stands": fitted_stands(track, footprints_tree, polygons),
             "paddock": {
                 "from": track["pitLane"]["garageStart"],
                 "to": track["pitLane"]["garageEnd"],

@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { createApi } from "../../api/src/app.ts";
+import { crossSite } from "../../api/src/cross-site.ts";
 import { padApp } from "../../api/src/pad.ts";
 import { PadRooms } from "../../api/src/pad-rooms.ts";
 import { migrate, serverDb } from "../../api/src/server-db.ts";
@@ -47,8 +48,11 @@ export default {
     const { pathname } = new URL(request.url);
     const room = padPath.exec(pathname)?.[1];
     if (room)
-      return env.PAD_ROOMS.get(env.PAD_ROOMS.idFromName(room)).fetch(request);
-    if (pathname.startsWith("/api/")) return api(request, env, ctx);
+      return crossSite(request, () =>
+        env.PAD_ROOMS.get(env.PAD_ROOMS.idFromName(room)).fetch(request),
+      );
+    if (pathname.startsWith("/api/"))
+      return crossSite(request, () => api(request, env, ctx));
     return serveFile(request, env, ctx);
   },
 } satisfies ExportedHandler<Env>;

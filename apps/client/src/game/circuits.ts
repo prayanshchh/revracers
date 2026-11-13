@@ -107,7 +107,7 @@ const circuits: Circuit[] = [
       haze: [0.13, 0.124, 0.112],
       visibility: 1000,
       flood: 5.5,
-      tint: [1, 0.98, 0.89],
+      tint: [1, 0.99, 0.95],
       dome: 0.12,
       layer: 26,
     },

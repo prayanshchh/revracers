@@ -11,10 +11,27 @@ import {
   polesOf,
   streetFiles,
 } from "./street-ground.ts";
-import { type CityData, cityGlow } from "./street-city.ts";
-import type { StreetPole, StreetTrack } from "./street-layout.ts";
+import {
+  type CityData,
+  cityGlow,
+  cityTrees,
+  type Clear,
+} from "./street-city.ts";
+import {
+  type StreetPole,
+  type StreetTrack,
+  terraced,
+} from "./street-layout.ts";
+import { outside } from "./trackside-props.ts";
 import { trainingTextures } from "./training-files.ts";
-import type { LinePath, TrainingTrack } from "./training-layout.ts";
+import {
+  type LinePath,
+  stations,
+  type TrainingTrack,
+} from "./training-layout.ts";
+import { standSeats } from "./grandstand.ts";
+import { clearedTrees, type Frames, venuePeople } from "./venue-dressing.ts";
+import { dressed } from "./street-venue.ts";
 import { FieldCars } from "./field-cars.ts";
 import { frameIndex, type Engine, type HudInfo } from "./engine.ts";
 import type { WeatherInfo } from "./weather.ts";
@@ -75,8 +92,21 @@ import {
   type TrackPoint,
 } from "./floodlights.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
-import { Crowd, crowdAtlas, crowdData, standing } from "./crowd.ts";
-import { treeDownloads, Trees } from "./scenery-trees.ts";
+import {
+  Crowd,
+  crowdAtlas,
+  crowdData,
+  crowdLamps,
+  placedCrowd,
+} from "./crowd.ts";
+import {
+  boulevard,
+  type Species,
+  treeDownloads,
+  Trees,
+  woodland,
+  treeStride,
+} from "./scenery-trees.ts";
 import { setCloudShadows } from "./scenery-look.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
 import { TyreStones } from "./tyre-stones.ts";
@@ -104,7 +134,8 @@ const kelvinOffset = 273.15;
 const cinematicNear = 0.5;
 const cinematicFar = 41000;
 const upAxis = new THREE.Vector3(0, 0, 1);
-const clearVisibility = 5000;
+const clearVisibility = 3000;
+const nightLift = 0.35;
 const rainVisibility = 150;
 const rainFogCurve = 1.5;
 const overcastSun = 0.86;
@@ -131,7 +162,7 @@ const floodIntensity = 2.4;
 const floodElevation = (66 * Math.PI) / 180;
 const floodAmbientUp = new THREE.Color(0.05, 0.05, 0.05);
 const floodAmbientDown = new THREE.Color(0.1, 0.1, 0.095);
-const nightGlare = 1.5;
+const nightGlare = 2.8;
 const nightAir = 0.06;
 const nightGlowMirror = 8;
 const roadSheen = 2.5;
@@ -307,7 +338,8 @@ function venueDownloads(
       : [roadUrl, crewUrl, crowdData];
   return [
     ...ground,
-    ...(circuit.trees ? [circuit.trees, ...treeDownloads()] : []),
+    ...(circuit.trees ? [circuit.trees] : []),
+    ...treeDownloads(treeKinds(circuit)),
     ...circuitFiles(circuit),
     carFile(team, "car.glb"),
     ...[...new Set(fleet)].map((each) => carFile(each, "lod.glb")),
@@ -373,6 +405,13 @@ function sharedLoads(
   };
 }
 
+function framesOf(loads: SharedLoads): Promise<Frames> {
+  return Promise.all([loads.track, loads.line]).then(([data, line]) => {
+    const track = data as unknown as TrainingTrack;
+    return { list: stations(track, line), length: track.length };
+  });
+}
+
 function groundOf(
   circuit: Circuit,
   renderer: THREE.WebGPURenderer,
@@ -397,7 +436,13 @@ function groundOf(
     const limit =
       (renderer.backend as { device?: GPUDevice }).device?.limits
         .maxTextureDimension2D ?? defaultTextureLimit;
-    return loadRoad(roadUrl, anisotropy, limit, loads.radiance);
+    return loadRoad(
+      roadUrl,
+      anisotropy,
+      limit,
+      loads.radiance,
+      framesOf(loads),
+    );
   }
   return Promise.all([loads.track, loads.line]).then(([data, line]) =>
     buildTrainingGround(
@@ -410,19 +455,66 @@ function groundOf(
   );
 }
 
+function clearOf(frames: Frames): Clear {
+  const zones = terraced(frames.list, frames.length);
+  return (values, stride) =>
+    outside(values, stride, zones, frames.list, frames.length);
+}
+
+function treeKinds(circuit: Circuit): Species[] {
+  if (circuit.trees) return woodland;
+  return circuit.city ? boulevard : [];
+}
+
+function plantTrees(
+  circuit: Circuit,
+  loads: SharedLoads,
+  anisotropy: number,
+): Promise<Trees> | null {
+  const kinds = treeKinds(circuit);
+  if (circuit.trees)
+    return Trees.load(
+      clearedTrees(circuit.trees, framesOf(loads), treeStride),
+      anisotropy,
+      kinds,
+    );
+  if (!loads.city) return null;
+  const rows = Promise.all([loads.city, framesOf(loads)]).then(
+    ([city, frames]) => cityTrees(city, clearOf(frames)),
+  );
+  return Trees.load(rows, anisotropy, kinds);
+}
+
+async function streetCrowd(
+  loads: SharedLoads,
+  cityLoad: Promise<CityData>,
+): Promise<Float32Array> {
+  const [city, data, line] = await Promise.all([
+    cityLoad,
+    loads.track,
+    loads.line,
+  ]);
+  const track = data as unknown as TrainingTrack;
+  const list = stations(track, line);
+  const seats = standSeats(list, track.length, city.venue.stands.map(dressed));
+  const clear = clearOf({ list, length: track.length });
+  return placedCrowd(clear(city.spectators, 3), seats);
+}
+
 async function venueExtras(
   circuit: Circuit,
   anisotropy: number,
   team: string,
   loads: SharedLoads,
   spares: number,
+  road: Promise<THREE.Object3D>,
 ): Promise<{ people: Crowd | null; crews: PitCrew[] }> {
   if (!circuit.venue) return { people: null, crews: [] };
   const [people, crews] = await Promise.all([
     loads.city
-      ? loads.city.then((city) => Crowd.load(standing(city.spectators)))
+      ? Crowd.load(streetCrowd(loads, loads.city))
       : circuit.ground === "glb"
-        ? Crowd.load()
+        ? Crowd.load(venuePeople(road))
         : null,
     PitCrew.load(crewUrl, anisotropy, team, spares),
   ]);
@@ -566,7 +658,7 @@ export class Scene {
   private mirrorViews: THREE.Frustum[] = [];
   private insetView: THREE.Frustum | null = null;
   private liveFrame: Float64Array | null = null;
-  private liveDraw: [boolean, boolean, boolean] | null = null;
+  private liveDraw: [boolean, boolean, boolean, boolean] | null = null;
   private liveShown: boolean[] = [];
   private readonly seen = {
     intersectsSphere: (sphere: THREE.Sphere): boolean =>
@@ -612,7 +704,15 @@ export class Scene {
     shock: 0,
     layer: 0,
     layerBase: 0,
+    rearView: 0,
+    film: 1,
+    lift: 1,
   };
+  rearMirror = 0;
+
+  get rearView(): THREE.Texture {
+    return this.car.rearView;
+  }
 
   private constructor(
     private readonly sky: SdSky,
@@ -669,6 +769,8 @@ export class Scene {
     this.placeFloodlights(floodlights, track, light.lamps, night);
     this.atmosphere.sun.copy(lit.colour).multiplyScalar(lit.sunGlow);
     this.atmosphere.glare = lit.glare;
+    this.atmosphere.film = night ? 0 : 1;
+    this.atmosphere.lift = night ? nightLift : 1;
     this.atmosphere.glowMirror = lit.glowMirror;
     this.atmosphere.sheen = lit.sheen;
     this.atmosphere.haze.copy(lit.haze);
@@ -697,6 +799,12 @@ export class Scene {
     this.scene.updateMatrixWorld(true);
     this.scene.matrixWorldAutoUpdate = false;
     culler.bake();
+  }
+
+  private drawCar(current: boolean, driver: boolean, onboard: boolean): void {
+    const rear = this.rearMirror > 0 && !this.cinematic;
+    this.car.setDraw(current, driver, onboard, rear);
+    this.atmosphere.rearView = this.car.rearViewShown ? this.rearMirror : 0;
   }
 
   private placeFloodlights(
@@ -748,8 +856,15 @@ export class Scene {
     ] = await Promise.all([
       loads.sky,
       frameLoad,
-      venueExtras(circuit, anisotropy, team, loads, crewSpares(rivals)),
-      circuit.trees ? Trees.load(circuit.trees, anisotropy) : null,
+      venueExtras(
+        circuit,
+        anisotropy,
+        team,
+        loads,
+        crewSpares(rivals),
+        roadLoad,
+      ),
+      plantTrees(circuit, loads, anisotropy),
       roadLoad,
       loads.line,
       carLoad,
@@ -769,6 +884,7 @@ export class Scene {
     placed.updateMatrixWorld(true);
     const culler = new WorldCuller(road, cascadeLayers);
     cityGlow.value = light.lamps;
+    crowdLamps.value = light.lamps;
     const floodlights =
       venue && light.lamps > 0
         ? circuit.ground === "street"
@@ -1445,7 +1561,7 @@ export class Scene {
           this.carPosition.setFromMatrixPosition(this.car.root.matrix),
         ) <
       onboardReach * onboardReach;
-    this.car.setDraw(shown(19), shown(20), onboard);
+    this.drawCar(shown(19), shown(20), onboard);
     this.atmosphere.shock = this.shockLevel(time);
     const lit = this.lights.lit(time - this.signalAt);
     setStartLights(this.cinematic ? 0 : lit);
@@ -1531,6 +1647,9 @@ export class Scene {
         if (mirrors) this.warmMirrors(renderer);
       },
       !mirrors,
+      () => {
+        this.skyBox.renewEnvironment();
+      },
     );
     this.warming = false;
     releaseCpuCopies(this.road, this.culler.retained());

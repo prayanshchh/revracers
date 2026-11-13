@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { mix, normalWorld, uniform } from "three/tsl";
+import { float, mix, normalWorld, uniform } from "three/tsl";
 
 const rowStep = 4;
 const columnStep = 8;
@@ -15,18 +15,31 @@ const overcastSpread = 0.78;
 const floodUp = uniform(new THREE.Color());
 const floodDown = uniform(new THREE.Color());
 const flood: { cover: THREE.Node<"float"> | null } = { cover: null };
+const canopyGain = 0.62;
+const canopyFloor = 0.0125;
+
+export function skyIrradiance(facing: THREE.Node<"float">): THREE.Node<"vec3"> {
+  const sky = mix(irradianceDown, irradianceUp, facing);
+  return flood.cover
+    ? sky.add(mix(floodDown, floodUp, facing).mul(flood.cover))
+    : sky;
+}
+
+export function floodlit(): boolean {
+  return flood.cover !== null;
+}
+
+export function canopyLight(): THREE.Node<"float"> {
+  return flood.cover ? flood.cover.mul(canopyGain).add(canopyFloor) : float(1);
+}
 
 class SkyAmbient extends THREE.LightingNode {
   override setup(builder: THREE.NodeBuilder): undefined {
     const context = builder.context as {
       iblIrradiance: THREE.Node<"vec3">;
     };
-    const facing = normalWorld.z.mul(0.5).add(0.5);
-    const sky = mix(irradianceDown, irradianceUp, facing);
     context.iblIrradiance.addAssign(
-      flood.cover
-        ? sky.add(mix(floodDown, floodUp, facing).mul(flood.cover))
-        : sky,
+      skyIrradiance(normalWorld.z.mul(0.5).add(0.5)),
     );
     return undefined;
   }

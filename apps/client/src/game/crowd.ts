@@ -1,11 +1,12 @@
 import * as THREE from "three/webgpu";
 import { alphaTestedOrder } from "./road.ts";
-import { SkyLitMaterial } from "./sky-ambient.ts";
+import { skyIrradiance, SkyLitMaterial } from "./sky-ambient.ts";
 import {
   attribute,
   cos,
   float,
   floor,
+  Fn,
   fract,
   instancedBufferAttribute,
   mix,
@@ -23,9 +24,9 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import albedoUrl from "../../../../content/tracks/hill-country/textures/baked/people_albedo.png?url";
+import albedoUrl from "../../../../content/scenery/crowd/people.webp?url";
 import crowdUrl from "../../../../content/tracks/hill-country/crowd.bin?url";
-import maskUrl from "../../../../content/tracks/hill-country/textures/baked/people_mask.png?url";
+import maskUrl from "../../../../content/scenery/crowd/people-mask.webp?url";
 import { releaseOnceUploaded } from "./preload.ts";
 
 export const crowdFiles = [albedoUrl, crowdUrl, maskUrl];
@@ -46,6 +47,11 @@ const bobHeight = 0.05;
 const bobRate = 3.2;
 const skinGain = 1.0;
 const heightJitter = 0.07;
+const standingFrom = (atlasColumns * atlasRows) / 2;
+const bounceFill = 0.5;
+const lampFill = 0.22;
+export const crowdLamps = uniform(0);
+const bounceFacing = 0.75;
 const fanColours: [string, number][] = [
   ["#f2f2f0", 14],
   ["#1b1b1d", 12],
@@ -81,6 +87,12 @@ const flagPairs = [
   ["#f2f2f0", "#c8202a"],
   ["#1b1b1d", "#f4c20d"],
 ] as const;
+
+function fillLight(): THREE.Node<"vec3"> {
+  return Fn(() => skyIrradiance(float(bounceFacing)))()
+    .mul(bounceFill / Math.PI)
+    .add(crowdLamps.mul(lampFill));
+}
 
 function pickWeighted(roll: number): THREE.Color {
   const total = fanColours.reduce((sum, [, weight]) => sum + weight, 0);
@@ -159,6 +171,7 @@ function material(
   );
   result.colorNode = vec4(painted, colour.a);
   result.normalNode = vec3(0, 0.25, 0.97);
+  result.emissiveNode = painted.mul(fillLight());
   return result;
 }
 
@@ -246,7 +259,9 @@ function flagMaterial(
     step(0.5, pattern),
   );
   const fabric = mix(first.xyz, other, band);
-  result.colorNode = mix(vec3(0.08, 0.08, 0.09), fabric, cloth);
+  const flag = mix(vec3(0.08, 0.08, 0.09), fabric, cloth);
+  result.colorNode = flag;
+  result.emissiveNode = flag.mul(fillLight());
   return result;
 }
 
@@ -298,14 +313,22 @@ function flags(values: Float32Array): THREE.InstancedMesh {
   return mesh;
 }
 
-export function standing(spots: number[]): Float32Array {
-  const count = Math.floor(spots.length / 3);
+export function placedCrowd(
+  standing: number[],
+  seated: number[],
+): Float32Array {
+  const sitting = Math.floor(seated.length / 3);
+  const count = sitting + Math.floor(standing.length / 3);
   const values = new Float32Array(count * stride);
   for (let i = 0; i < count; i++) {
-    values[i * stride] = spots[i * 3] ?? 0;
-    values[i * stride + 1] = -(spots[i * 3 + 2] ?? 0);
-    values[i * stride + 2] = spots[i * 3 + 1] ?? 0;
-    values[i * stride + 4] = Math.floor(roll(i, 5) * atlasColumns * atlasRows);
+    const sits = i < sitting;
+    const spots = sits ? seated : standing;
+    const at = (sits ? i : i - sitting) * 3;
+    values[i * stride] = spots[at] ?? 0;
+    values[i * stride + 1] = -(spots[at + 2] ?? 0);
+    values[i * stride + 2] = spots[at + 1] ?? 0;
+    values[i * stride + 4] =
+      (sits ? 0 : standingFrom) + Math.floor(roll(i, 5) * standingFrom);
   }
   return values;
 }
@@ -317,7 +340,7 @@ export class Crowd {
 
   private constructor() {}
 
-  static async load(placed?: Float32Array): Promise<Crowd> {
+  static async load(placed?: Promise<Float32Array>): Promise<Crowd> {
     const crowd = new Crowd();
     crowd.root.name = "crowd";
     const loader = new THREE.TextureLoader();
