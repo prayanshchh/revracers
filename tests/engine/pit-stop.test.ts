@@ -10,15 +10,73 @@ import {
 import {
   gradeTurnIn,
   PitStop,
+  pitReport,
+  type PitControl,
   type PitPhase,
 } from "../../apps/client/src/game/pitstop.ts";
 import teams from "../../content/cars/teams.json";
 import { planWeekend } from "../../apps/client/src/game/weekend.ts";
 import { driveStop, launchClearance, layout } from "../support/pit-drive.ts";
+import { busyPitStop, wetRush } from "../support/busy-pit.ts";
 import { repoRoot } from "../support/repo.ts";
 import { sessionKind, startField } from "../support/race-weekend.ts";
 import type { RaceSystems } from "../support/race-systems.ts";
-import { startCircuit, wasm } from "../support/speed-dreams.ts";
+import {
+  type SpeedDreams,
+  startCircuit,
+  wasm,
+} from "../support/speed-dreams.ts";
+import { steerCommand } from "../../apps/client/src/game/pitstop.ts";
+
+interface Placed extends SpeedDreams {
+  _sdCarPlace: (
+    index: number,
+    distance: number,
+    lateral: number,
+    speed: number,
+  ) => void;
+  _sdCarsDamage: (pointer: number) => number;
+}
+
+async function scrapePitWall() {
+  const m = await startCircuit<Placed>();
+  m._sdStep(1000);
+  m._sdInputSteerDirect(1);
+  const parts = m._malloc(64 * 8);
+  const damage = () => {
+    const count = m._sdCarsDamage(parts);
+    return new Float64Array(m.HEAPF64.buffer, parts, count).reduce(
+      (sum, part) => sum + part,
+      0,
+    );
+  };
+  const out = m._malloc(12);
+  const point = (d: number, l: number) => {
+    m._sdTrackLocal2Global(d, l, out);
+    return Array.from(new Float32Array(m.HEAPF32.buffer, out, 3));
+  };
+  const lane = layout.fastLane - layout.shift;
+  m._sdCarPlace(0, wrap(layout.wallStart + 80), lane, 22);
+  m._sdStep(1);
+  const before = damage();
+  let reached = 0;
+  for (let step = 0; step < 1500; step++) {
+    const f = new Float64Array(m.HEAPF64.buffer, m._sdFrame(), 88);
+    const at = (k: number) => f[k] ?? 0;
+    const car = {
+      x: at(13),
+      y: at(14),
+      heading: Math.atan2(at(2), at(1)),
+      speed: Math.abs(at(45)),
+    };
+    reached = Math.max(reached, lane - at(54));
+    const aim = point(at(53) + 12, layout.pitWall - layout.shift - 6);
+    const command = steerCommand(car, aim, 22);
+    m._sdInputAnalog(1, command.steer, command.throttle, command.brake);
+    m._sdStep(1);
+  }
+  return { added: damage() - before, moved: reached };
+}
 
 const luck = [0, 0.5, 1];
 
@@ -188,6 +246,90 @@ describe("pit lane entry", () => {
   });
 });
 
+interface Rolling {
+  distance: number;
+  lateral: number;
+  speed: number;
+}
+
+const tick = 1 / 120;
+
+function roll(car: Rolling, control: PitControl): void {
+  const wanted = control.hold
+    ? 0
+    : (control.drive?.speed ?? Math.min(control.limit || 22, 22));
+  const change = Math.max(-12 * tick, Math.min(8 * tick, wanted - car.speed));
+  car.speed = Math.max(0, car.speed + change);
+  if (control.drive)
+    car.lateral +=
+      (control.drive.lateral - car.lateral) *
+      Math.min(1, (car.speed * tick) / control.drive.lookahead);
+  car.distance = wrap(car.distance + car.speed * tick);
+}
+
+function shareBox(heldFor: number) {
+  const pit = new PitStop(layout, true, () => 0.5);
+  const car = { distance: wrap(layout.entry + 20), lateral: 14.5, speed: 20 };
+  const seen: { now: number; control: PitControl; car: Rolling }[] = [];
+  let restedAt: number | null = null;
+  for (let now = tick; now < 60; now += tick) {
+    const taken = restedAt === null || now < restedAt + heldFor;
+    const control = pit.update(
+      {
+        distance: car.distance,
+        toMiddle: car.lateral - pit.shiftAt(car.distance),
+        speed: car.speed,
+        laneClear: true,
+        boxTaken: taken,
+      },
+      now,
+      false,
+    );
+    if (restedAt === null && control.queued && car.speed < 0.05) restedAt = now;
+    seen.push({ now, control, car: { ...car } });
+    roll(car, control);
+  }
+  return { seen, restedAt: restedAt ?? Infinity };
+}
+
+describe("sharing the team box", () => {
+  test("waits behind a teammate in the box, then moves up and gets its stop", () => {
+    const heldFor = 4;
+    const { seen, restedAt } = shareBox(heldFor);
+    const toBox = (car: Rolling) => {
+      const gap = wrap(layout.boxDistance - car.distance);
+      return gap > layout.length / 2 ? gap - layout.length : gap;
+    };
+    const waiting = seen.filter(
+      (s) => s.now > restedAt && s.now < restedAt + heldFor,
+    );
+    expect(waiting.length).toBeGreaterThan(heldFor * 100);
+    for (const { control, car } of waiting) {
+      expect(control.phase).toBe("boxing");
+      expect(control.queued).toBe(true);
+      expect(control.hold).toBe(true);
+      expect(pitReport(control)[0]).toBe(3);
+      expect(car.speed).toBeLessThan(0.05);
+      expect(toBox(car)).toBeGreaterThan(7.5);
+      expect(toBox(car)).toBeLessThan(10.5);
+    }
+    expect(
+      seen.some(
+        (s) => s.now < restedAt + heldFor && s.control.phase === "service",
+      ),
+    ).toBe(false);
+    const service = seen.find((s) => s.control.phase === "service");
+    expect(service).toBeDefined();
+    if (!service) return;
+    expect(Math.abs(toBox(service.car))).toBeLessThan(1.6);
+    expect(service.control.queued).toBe(false);
+    const [phase, left] = pitReport(service.control);
+    expect(phase).toBe(4);
+    expect(left).toBeCloseTo(service.control.plan?.duration ?? -1, 1);
+    expect(seen.some((s) => s.control.phase === "release")).toBe(true);
+  });
+});
+
 describe.skipIf(!existsSync(wasm))("pit stop in the engine", () => {
   test("parks in the box, services the car and rejoins the fast lane", async () => {
     const lap = driveStop(await startCircuit<RaceSystems>());
@@ -215,6 +357,31 @@ describe.skipIf(!existsSync(wasm))("pit stop in the engine", () => {
     expect(clear.pastCar).toBeGreaterThan(2.3);
   }, 120_000);
 
+  test("in a rain rush the player leaves the box the moment the stop ends, the field waits, and teammates share one box", async () => {
+    const stop = await busyPitStop(3);
+    expect(stop.aiInLane).toBeGreaterThanOrEqual(12);
+    expect(stop.serviced).toBe(true);
+    expect(stop.rejoined).toBe(true);
+    expect(stop.held).toBeLessThan(0.5);
+    expect(stop.playerContacts).toBe(0);
+    expect(stop.playerTouches).toBe(0);
+    expect(stop.passedRelease).toBe(0);
+    expect(stop.aiTouches).toBe(0);
+    expect(stop.stacked).toBeGreaterThanOrEqual(1);
+  }, 240_000);
+
+  test("when the whole field dives in on slicks the moment it pours, no stop takes more than two minutes", async () => {
+    const rush = await wetRush(2);
+    expect(rush.stops).toBeGreaterThanOrEqual(20);
+    expect(rush.longest).toBeLessThan(120);
+  }, 300_000);
+
+  test("hitting the pit wall inside the pit lane does no damage", async () => {
+    const { added, moved } = await scrapePitWall();
+    expect(moved).toBeGreaterThan(1.4);
+    expect(added).toBe(0);
+  }, 120_000);
+
   test("asking for a new front wing makes the stop longer and fits it", async () => {
     const plain = driveStop(await startCircuit<RaceSystems>());
     const withWing = driveStop(await startCircuit<RaceSystems>(), {
@@ -226,7 +393,7 @@ describe.skipIf(!existsSync(wasm))("pit stop in the engine", () => {
     expect(withWing.floorAfter).toBeGreaterThan(0.4);
   }, 240_000);
 
-  test("every team's car stops in front of that team's own garage", async () => {
+  test("both cars of a team stop in that team's one box, in the middle of its own garage", async () => {
     const m = await startField({ kind: sessionKind.race, laps: 1, seed: 3 });
     const pit = (
       JSON.parse(
@@ -244,12 +411,14 @@ describe.skipIf(!existsSync(wasm))("pit stop in the engine", () => {
     for (const [garage, team] of teams.entries()) {
       const player = planWeekend(team.id, 10, null).entrants[0];
       expect(player?.garage).toBe(garage);
-      m._sdFieldPlayer(player?.garage ?? -1, player?.seat ?? 0, 0);
-      const bay = first + garage * 2 + (player?.seat ?? 0);
-      const centre = pit.garageStart + ((bay + 0.5) * span) / count;
-      const box = m._sdFieldPlayerBox();
-      const gap = Math.abs(((box - centre) % layout.length) % layout.length);
-      expect(Math.min(gap, layout.length - gap)).toBeLessThan(0.5);
+      const centre =
+        pit.garageStart + ((first + garage * 2 + 1) * span) / count;
+      for (const seat of [0, 1]) {
+        m._sdFieldPlayer(garage, seat, 0);
+        const box = m._sdFieldPlayerBox();
+        const gap = Math.abs(((box - centre) % layout.length) % layout.length);
+        expect(Math.min(gap, layout.length - gap)).toBeLessThan(0.5);
+      }
     }
   }, 120_000);
 });

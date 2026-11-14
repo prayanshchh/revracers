@@ -4,23 +4,29 @@ import {
   Engineer,
   type RaceState,
   type RadioCall,
-  type Rival,
 } from "../../apps/client/src/game/engineer.ts";
 import { nextCall } from "../../apps/client/src/game/radio.ts";
-import type { Plan } from "../../apps/client/src/game/strategy.ts";
+import type { WeatherPlan } from "../../apps/client/src/game/weather-plan.ts";
 
-const oneStop: Plan = {
-  stints: [
-    { compound: 1, laps: 6 },
-    { compound: 2, laps: 6 },
+const lapTime = 100;
+
+const rainComing: WeatherPlan = {
+  story: "rain",
+  start: 0,
+  shifts: [
+    { at: 420, level: 1 },
+    { at: 730, level: 2 },
   ],
-  stops: [6],
-  time: 0,
 };
 
-function rival(car: number, name: string, gap: number): Rival {
-  return { car, name, gap, compound: 2, tyreAge: 12, inPit: false };
-}
+const drying: WeatherPlan = {
+  story: "drying",
+  start: 2,
+  shifts: [
+    { at: 250, level: 1 },
+    { at: 520, level: 0 },
+  ],
+};
 
 function state(over: Partial<RaceState> = {}): RaceState {
   return {
@@ -30,224 +36,214 @@ function state(over: Partial<RaceState> = {}): RaceState {
     totalLaps: 12,
     race: true,
     started: true,
-    position: 6,
-    carCount: 22,
-    ahead: null,
-    behind: null,
-    compound: 1,
-    wear: 0.05,
-    fuelLaps: 0.5,
-    wingDamage: 0,
-    weather: { rain: 0, soon: 0, call: null, minutesToRain: null },
-    plan: oneStop,
-    inPitLane: false,
     finished: false,
-    lapTime: 98,
+    lapTime,
+    wear: 0.05,
+    worstWheel: 1,
+    tyreLapsLeft: 20,
+    weather: { clock: 10, level: 0, call: null, drying: false },
     ...over,
   };
 }
 
-function briefed(chatter: Chatter = "full"): Engineer {
-  const engineer = new Engineer(() => chatter);
-  engineer.brief(state({ started: false, time: -3 }));
+function at(clock: number, over: Partial<RaceState> = {}): RaceState {
+  const progress = clock / lapTime;
+  return state({
+    time: clock,
+    lap: Math.floor(progress) + 1,
+    lapShare: progress % 1,
+    weather: { clock, level: 0, call: null, drying: false },
+    ...over,
+  });
+}
+
+const grid = (level = 0) =>
+  state({
+    started: false,
+    time: 0,
+    lapShare: 0.98,
+    weather: { clock: 0, level, call: null, drying: false },
+  });
+
+function briefText(
+  plan: WeatherPlan | null,
+  over: Partial<RaceState> = {},
+): string {
+  const engineer = new Engineer(() => "full", plan);
+  engineer.brief({ ...grid(), ...over });
+  return engineer.drain()[0]?.text ?? "";
+}
+
+function briefed(plan: WeatherPlan | null = null, chatter: Chatter = "full") {
+  const engineer = new Engineer(() => chatter, plan);
+  engineer.brief(grid());
   engineer.drain();
   return engineer;
 }
 
-function topics(calls: RadioCall[]): string[] {
-  return calls.map((call) => call.topic);
+function said(calls: RadioCall[], topic: string): string[] {
+  return calls.filter((call) => call.topic === topic).map((call) => call.text);
 }
 
 describe("race engineer", () => {
-  test("the pre-race brief gives the strategy and the planned stop lap", () => {
-    const engineer = new Engineer(() => "full");
-    engineer.brief(state({ started: false, time: -3 }));
-    const [brief] = engineer.drain();
-    expect(brief?.text).toContain("medium - hard");
-    expect(brief?.text).toContain("lap 6");
-    expect(engineer.plannedBox).toBe(6);
-    engineer.brief(state({ started: false, time: -2 }));
-    expect(engineer.drain()).toEqual([]);
-  });
-
-  test("an overtake by the player is called a good move with the new position", () => {
-    const engineer = briefed();
-    engineer.passed(40, true, "RUIZ", 5, rival(3, "BELLAMY", 1.4));
-    const [call] = engineer.drain();
-    expect(call?.tone).toBe("good");
-    expect(call?.text).toMatch(/P5/);
-    expect(call?.text).toMatch(/good|great|nice|lovely/i);
-    expect(call?.text).toContain("Bellamy is next, 1.4");
-  });
-
-  test("being passed names the car that got by", () => {
-    const engineer = briefed();
-    engineer.passed(40, false, "RUIZ", 7, null);
-    const [call] = engineer.drain();
-    expect(call?.text).toContain("Ruiz");
-    expect(call?.text).toMatch(/P[67]/);
-  });
-
-  test("box is called once, on the planned lap, after the start of the lap and never in the pit lane", () => {
-    const engineer = briefed();
-    const calls = (over: Partial<RaceState>) =>
-      topics(engineer.update(state(over)));
-    expect(calls({ lap: 4, lapShare: 0.6, plan: oneStopFrom(4) })).toContain(
-      "window",
+  test("the grid brief gives the race's weather lap by lap, leaving out changes after the flag", () => {
+    expect(briefText(rainComing)).toBe(
+      "Weather for the race: dry start, light rain from lap 5, turning to heavy rain from lap 8.",
+    );
+    expect(briefText(drying)).toBe(
+      "Weather for the race: heavy rain at the start, easing to light rain from lap 3, rain stops on lap 6.",
+    );
+    expect(briefText(rainComing, { totalLaps: 6 })).toBe(
+      "Weather for the race: dry start, light rain from lap 5.",
     );
     expect(
-      calls({ lap: 6, lapShare: 0.2, plan: oneStopFrom(6) }),
-    ).not.toContain("box");
-    expect(
-      calls({ lap: 6, lapShare: 0.7, plan: oneStopFrom(6), inPitLane: true }),
-    ).not.toContain("box");
-    expect(calls({ lap: 6, lapShare: 0.7, plan: oneStopFrom(6) })).toContain(
-      "box",
-    );
-    expect(
-      calls({ lap: 6, lapShare: 0.8, plan: oneStopFrom(6) }),
-    ).not.toContain("box");
-  });
-
-  test("a car within a second ahead is announced once, with its tyres", () => {
-    const engineer = briefed();
-    const close = rival(4, "VANCE", 0.8);
-    const first = engineer.update(state({ time: 100, ahead: close }));
-    expect(first.find((c) => c.topic === "ahead")?.text).toContain(
-      "12-lap-old hards",
-    );
-    expect(
-      topics(engineer.update(state({ time: 110, ahead: close }))),
-    ).not.toContain("ahead");
-    expect(
-      topics(
-        engineer.update(state({ time: 112, ahead: rival(9, "ODA", 0.7) })),
-      ),
-    ).toContain("ahead");
-  });
-
-  test("rain on the forecast is warned once, then the tyre call comes as a box call", () => {
-    const engineer = briefed();
-    const coming = {
-      rain: 0,
-      soon: 0.4,
-      call: null,
-      minutesToRain: 5,
-    } as const;
-    const warn = engineer.update(state({ weather: coming }));
-    expect(warn.find((c) => c.topic === "rain")?.text).toMatch(/5 minutes/);
-    expect(topics(engineer.update(state({ weather: coming })))).not.toContain(
-      "rain",
-    );
-    const wet = { ...coming, rain: 0.5, call: "inters" } as const;
-    const box = engineer.update(state({ weather: wet }));
-    expect(box.find((c) => c.topic === "weather")).toMatchObject({
-      tone: "box",
-    });
-    expect(topics(engineer.update(state({ weather: wet })))).not.toContain(
-      "weather",
+      briefText(null, {
+        weather: { clock: 0, level: 1, call: null, drying: false },
+      }),
+    ).toBe("Weather for the race: light rain all race.");
+    expect(briefText(null)).toBe(
+      "Weather for the race: dry all race, no rain expected.",
     );
   });
 
-  test("fuel short is warned and the all-clear follows when it recovers", () => {
+  test("each weather change is warned two laps ahead with its lap, then called when it arrives with what comes next", () => {
+    const engineer = briefed(rainComing);
+    const weather = (clock: number) => {
+      const calls = engineer.update(at(clock));
+      return [...said(calls, "weather-ahead"), ...said(calls, "weather-now")];
+    };
+    expect(weather(150)).toEqual([]);
+    expect(weather(230)).toEqual([
+      "Light rain expected in 2 laps, around lap 5.",
+    ]);
+    expect(weather(240)).toEqual([]);
+    expect(weather(425)).toEqual([
+      "It's raining now, light rain. Forecast: turning to heavy rain from lap 8.",
+    ]);
+    expect(weather(430)).toEqual([]);
+    expect(weather(540)).toEqual([
+      "Rain getting heavier in 2 laps, around lap 8, heavy rain expected.",
+    ]);
+    expect(weather(735)).toEqual([
+      "Rain is getting heavier, heavy rain now. It stays wet to the flag.",
+    ]);
+  });
+
+  test("the end of the rain is called with the drying track and no more rain to come", () => {
+    const engineer = briefed(drying);
+    expect(said(engineer.update(at(330)), "weather-ahead")).toEqual([
+      "Rain stopping in 2 laps, around lap 6. The track will start drying.",
+    ]);
+    expect(said(engineer.update(at(525)), "weather-now")).toEqual([
+      "Rain has stopped. The track will start drying. No more rain forecast.",
+    ]);
+  });
+
+  test("the slick or wet call is made when the track changes, says when wets are more than needed, and does not flicker", () => {
     const engineer = briefed();
-    expect(
-      topics(engineer.update(state({ lap: 3, fuelLaps: -0.4 }))),
-    ).toContain("fuel");
-    expect(topics(engineer.update(state({ lap: 4, fuelLaps: 0.3 })))).toContain(
-      "fuel-ok",
-    );
+    const track = (
+      clock: number,
+      call: RaceState["weather"]["call"],
+      drying = false,
+    ) =>
+      said(
+        engineer.update(state({ weather: { clock, level: 1, call, drying } })),
+        "track",
+      );
+    const tooWet = "It's too wet for slicks now, intermediates are the tyre.";
+    expect(track(100, "inters")).toEqual([tooWet]);
+    expect(track(105, "inters")).toEqual([]);
+    expect(track(110, null)).toEqual([]);
+    expect(track(115, "inters")).toEqual([]);
+    expect(track(150, null)).toEqual([]);
+    expect(track(250, "inters")).toEqual([tooWet]);
+    expect(track(260, "wets")).toEqual([
+      "Standing water on the racing line, full wets are the tyre.",
+    ]);
+    expect(track(400, "inters", true)).toEqual([
+      "Not enough standing water for full wets, intermediates are the tyre.",
+    ]);
+    expect(track(500, "slicks")).toEqual([
+      "The racing line is dry enough for slicks now.",
+    ]);
   });
 
-  test("key calls only keeps box and strategy calls but drops the chatter", () => {
-    const engineer = briefed("reduced");
-    engineer.update(state({ lap: 6, lapShare: 0.7, plan: oneStopFrom(6) }));
-    engineer.lapDone(
-      {
-        lap: 3,
-        time: 98.2,
-        personalBest: true,
-        fastestOfRace: false,
-        full: true,
-      },
-      state({ lap: 4, ahead: rival(2, "ODA", 2.1) }),
-    );
-    expect(topics(engineer.drain())).toEqual([]);
-    const loud = briefed("reduced");
-    expect(
-      topics(
-        loud.update(state({ lap: 6, lapShare: 0.7, plan: oneStopFrom(6) })),
-      ),
-    ).toContain("box");
-    const silent = new Engineer(() => "off");
-    silent.brief(state({ started: false }));
-    silent.passed(1, true, "RUIZ", 1, null);
-    expect(silent.drain()).toEqual([]);
-  });
-
-  test("changing the engineer setting mid-race takes effect at once", () => {
-    let chatter: Chatter = "full";
-    const engineer = new Engineer(() => chatter);
-    engineer.brief(state({ started: false, time: -3 }));
-    engineer.drain();
-    chatter = "off";
-    engineer.passed(10, true, "RUIZ", 4, null);
-    expect(engineer.drain()).toEqual([]);
-    chatter = "full";
-    engineer.passed(40, true, "ODA", 3, null);
-    expect(topics(engineer.drain())).not.toEqual([]);
-  });
-
-  test("the chequered flag gets one message that matches the result", () => {
+  test("tyre wear is reported at each mark with the worst corner and the laps left, and starts again on fresh tyres", () => {
     const engineer = briefed();
-    const win = engineer.update(state({ finished: true, position: 1 }));
-    expect(win[0]?.text).toMatch(/won/);
-    expect(engineer.update(state({ finished: true, position: 1 }))).toEqual([]);
-    const podium = briefed();
-    expect(
-      podium.update(state({ finished: true, position: 3 }))[0]?.text,
-    ).toMatch(/podium/);
+    const wear = (over: Partial<RaceState>) =>
+      said(engineer.update(state({ lap: 3, lapShare: 0, ...over })), "wear");
+    expect(wear({ wear: 0.31, tyreLapsLeft: 9.6 })).toEqual([
+      "Tyres at 30% wear. About 9 laps left in them.",
+    ]);
+    expect(wear({ wear: 0.33, tyreLapsLeft: 9.4 })).toEqual([]);
+    expect(wear({ wear: 0.72, tyreLapsLeft: 2.5, worstWheel: 2 })).toEqual([
+      "Tyres are going off now, 70% worn, rear right worst. About 2 laps left in them.",
+    ]);
+    expect(wear({ wear: 0.02, tyreLapsLeft: 30 })).toEqual([]);
+    expect(wear({ wear: 0.51, tyreLapsLeft: 12 })).toEqual([
+      "Tyres at half life, front left is the worst. They'll make the flag.",
+    ]);
   });
 
-  test("a lap that sets the fastest lap of the race is called out", () => {
+  test("fastest laps name who set them and the time", () => {
     const engineer = briefed();
-    engineer.lapDone(
-      {
-        lap: 4,
-        time: 96.4,
-        personalBest: true,
-        fastestOfRace: true,
-        full: true,
-      },
-      state({ lap: 5 }),
-    );
+    engineer.rivalFastest("DE LA ROSA", 95.94);
+    engineer.ownFastest(95.42);
     const calls = engineer.drain();
-    expect(calls.find((c) => c.topic === "fastest")?.text).toContain("1:36.4");
-    expect(topics(calls)).not.toContain("pb");
+    expect(said(calls, "rival-fastest")).toEqual([
+      "De La Rosa has the fastest lap, 1:35.9.",
+    ]);
+    expect(said(calls, "fastest")).toEqual([
+      "That's the fastest lap of the race, 1:35.4! Purple!",
+    ]);
+  });
+
+  test("key calls only drops just the first tyre mark, off is silent, and a change mid-race applies at once", () => {
+    let chatter: Chatter = "reduced";
+    const engineer = new Engineer(() => chatter, rainComing);
+    engineer.brief(grid());
+    engineer.rivalFastest("RUIZ", 96);
+    engineer.damage({
+      title: "Floor damage",
+      detail: "Large loss of downforce",
+    });
+    const reduced = engineer.update(at(230, { wear: 0.31 }));
+    expect(reduced.map((call) => call.topic).sort()).toEqual([
+      "damage",
+      "forecast",
+      "rival-fastest",
+      "weather-ahead",
+    ]);
+    chatter = "off";
+    engineer.ownFastest(95);
+    expect(engineer.update(at(425))).toEqual([]);
+    chatter = "full";
+    engineer.ownFastest(95);
+    expect(engineer.drain().map((call) => call.topic)).toEqual(["fastest"]);
+  });
+
+  test("after the chequered flag the radio goes quiet", () => {
+    const engineer = briefed(rainComing);
+    expect(engineer.update(at(300, { finished: true }))).toEqual([]);
+    expect(engineer.update(at(425, { wear: 0.9 }))).toEqual([]);
   });
 });
 
 describe("team radio queue", () => {
   test("the most important call goes first and stale chatter is dropped", () => {
     const queue = [
-      { topic: "gaps", text: "a", priority: 1, tone: "info" as const, at: 0 },
-      { topic: "ahead", text: "b", priority: 2, tone: "info" as const, at: 9 },
-      { topic: "box", text: "c", priority: 4, tone: "box" as const, at: 1 },
+      { topic: "wear", text: "a", priority: 1, tone: "info" as const, at: 0 },
+      { topic: "damage", text: "b", priority: 3, tone: "warn" as const, at: 9 },
+      {
+        topic: "weather-now",
+        text: "c",
+        priority: 4,
+        tone: "warn" as const,
+        at: 1,
+      },
     ];
-    expect(nextCall(queue, 14)?.topic).toBe("box");
-    expect(nextCall(queue, 14)?.topic).toBe("ahead");
+    expect(nextCall(queue, 14)?.topic).toBe("weather-now");
+    expect(nextCall(queue, 14)?.topic).toBe("damage");
     expect(nextCall(queue, 14)).toBeNull();
   });
 });
-
-function oneStopFrom(lap: number): Plan {
-  const left = 6 - lap + 1;
-  return {
-    stints: [
-      { compound: 1, laps: Math.max(1, left) },
-      { compound: 2, laps: 6 },
-    ],
-    stops: [Math.max(1, left)],
-    time: 0,
-  };
-}

@@ -512,6 +512,18 @@ export class Engine {
     return this.module._sdAiPlayerLaneClear() !== 0;
   }
 
+  pitBoxTaken(): boolean {
+    return this.module._sdAiPlayerBoxTaken() !== 0;
+  }
+
+  pitSideBlocked(): boolean {
+    return this.module._sdAiPlayerSideBlocked() !== 0;
+  }
+
+  playerPit(phase: number, serviceLeft: number): void {
+    this.module._sdAiPlayerPit(phase, serviceLeft);
+  }
+
   advanceSession(): number {
     return this.module._sdSessionAdvance();
   }
@@ -606,8 +618,8 @@ export class Engine {
     this.posted = count > 0;
   }
 
-  teamBox(garage: number, seat: number): number {
-    return this.module._sdPitTeamBox(garage, seat);
+  teamBox(garage: number): number {
+    return this.module._sdPitTeamBox(garage);
   }
 
   carsDamage(): Float64Array {

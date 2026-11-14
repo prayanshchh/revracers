@@ -153,6 +153,8 @@ const homeApproach = 1.4;
 const homeLetGo = 0.45;
 const outSpread = 1.4;
 const animatedRange = 400;
+const poseBands = [30, 60, 120];
+const poseStep = 0.1;
 const cameraHide = 0.5;
 const cameraShow = 0.65;
 const cameraHeight = 2;
@@ -496,6 +498,20 @@ export async function crewKit(
   return kit;
 }
 
+const teamKits = new Map<string, Promise<THREE.Texture>>();
+
+export function teamKit(
+  team: string,
+  anisotropy: number,
+): Promise<THREE.Texture> {
+  const key = `${team} ${String(anisotropy)}`;
+  const known = teamKits.get(key);
+  if (known) return known;
+  const loading = crewKit(team, anisotropy);
+  teamKits.set(key, loading);
+  return loading;
+}
+
 function measureGait(member: Member | undefined): Gait {
   const walk = member?.actions.get("walk");
   const run = member?.actions.get("run");
@@ -561,7 +577,6 @@ export function draftGoal(
 export class PitCrew {
   readonly root = new THREE.Group();
   private readonly members: Member[] = [];
-  private readonly kits: THREE.MeshStandardNodeMaterial[] = [];
   private readonly props: PitProps;
   private readonly anchor = new THREE.Matrix4();
   private readonly anchorInverse = new THREE.Matrix4();
@@ -592,9 +607,13 @@ export class PitCrew {
   private clock = 0;
   private lastTime = 0;
   private now = 0;
-  private delta = 0;
   private garage = false;
+  private handover = false;
   private pending = false;
+  private poseWait = 0;
+  private poseEvery = 1;
+  private posedAt = -Infinity;
+  private poseDelta = 0;
   private readonly v = new THREE.Vector3();
   private readonly carMatrix = new THREE.Matrix4();
   private readonly otherMatrix = new THREE.Matrix4();
@@ -603,11 +622,12 @@ export class PitCrew {
     url: string,
     anisotropy: number,
     team: string,
-    spares = 0,
+    others: string[] = [],
   ): Promise<PitCrew[]> {
-    const [gltf, kit] = await Promise.all([
+    const [gltf, kit, otherKits] = await Promise.all([
       gltfLoader().loadAsync(url),
-      crewKit(team, anisotropy),
+      teamKit(team, anisotropy),
+      Promise.all(others.map((other) => teamKit(other, anisotropy))),
     ]);
     const kitSources = new Map<string, THREE.MeshStandardMaterial>();
     gltf.scene.traverse((object) => {
@@ -619,7 +639,7 @@ export class PitCrew {
       }
       object.material = surface(source, anisotropy);
     });
-    const ownKit = () => {
+    const ownKit = (map: THREE.Texture) => {
       const model = cloneRig(gltf.scene);
       const made = new Map<string, THREE.Material>();
       model.traverse((object) => {
@@ -627,7 +647,9 @@ export class PitCrew {
         const name = (object.material as THREE.Material).name;
         const source = kitSources.get(name);
         if (!source) return;
-        const material = made.get(name) ?? surface(source, anisotropy);
+        const copy = source.clone();
+        copy.map = map;
+        const material = made.get(name) ?? surface(copy, anisotropy);
         made.set(name, material);
         object.material = material;
       });
@@ -635,30 +657,19 @@ export class PitCrew {
     };
     return [
       new PitCrew(gltf.scene, gltf.animations, team),
-      ...Array.from(
-        { length: spares },
-        () => new PitCrew(ownKit(), gltf.animations, team),
+      ...others.map(
+        (other, i) =>
+          new PitCrew(ownKit(otherKits[i] ?? kit), gltf.animations, other),
       ),
     ];
-  }
-
-  useTeam(team: string, kit: THREE.Texture): void {
-    for (const material of this.kits) material.map = kit;
-    this.props.paint(team);
   }
 
   private constructor(
     private readonly model: THREE.Object3D,
     private readonly clips: THREE.AnimationClip[],
-    team: string,
+    readonly team: string,
   ) {
     this.root.matrixAutoUpdate = false;
-    model.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return;
-      const material = object.material as THREE.MeshStandardNodeMaterial;
-      if (kitMaterials.has(material.name) && !this.kits.includes(material))
-        this.kits.push(material);
-    });
     this.props = new PitProps(team);
     this.root.add(this.props.root);
     for (let corner = 0; corner < 4; corner++) {
@@ -979,11 +990,13 @@ export class PitCrew {
     const delta = Math.min(0.1, Math.max(0, now - this.lastTime));
     this.lastTime = now;
     this.now = now;
-    this.delta = delta;
     this.clock += delta;
     this.carMatrix.copy(carMatrix);
     this.v.setFromMatrixPosition(this.anchor);
-    const near = this.v.distanceTo(eye) <= animatedRange;
+    const far = this.v.distanceTo(eye);
+    const near = far <= animatedRange;
+    this.poseEvery = 1 + poseBands.filter((band) => far > band).length;
+    this.poseWait -= 1;
     this.locate(this.carMatrix, this.live);
     this.speed = this.pace(this.live, this.before, this.speed, delta);
     this.observe(cars, own, delta);
@@ -991,7 +1004,7 @@ export class PitCrew {
     this.fence();
     for (const member of this.members) this.move(member, delta);
     this.clearView(eye);
-    this.pending = near && this.state.out;
+    this.pending = near && this.state.out && this.poseWait <= 0;
     const lift = this.state.lift;
     const front = lift[0];
     const rear = lift[1];
@@ -1126,7 +1139,7 @@ export class PitCrew {
     return Math.max(0, gap - boxRun) / laneSpeed + braking;
   }
 
-  private standDown(): void {
+  standDown(): void {
     this.state = {
       plan: null,
       time: -Infinity,
@@ -1150,9 +1163,26 @@ export class PitCrew {
       const slack = eta - outEarly - outSettle - walk / jogSpeed;
       member.leaveAt = (member.seed * 0.37) % 1;
       const wait = spot.y < 0 ? 0 : member.leaveAt * outSpread;
-      member.startAt = now + Math.min(wait, slack);
-      if (this.garage || slack < 0) this.placeAt(member, spot);
+      member.startAt = this.handover ? now : now + Math.min(wait, slack);
+      if (this.garage || (slack < 0 && !this.handover))
+        this.placeAt(member, spot);
     }
+    this.handover = false;
+  }
+
+  rearm(): void {
+    this.handover = this.state.out;
+    this.state = {
+      plan: null,
+      time: -Infinity,
+      lift: [0, 0],
+      release: false,
+      out: false,
+    };
+    this.stopAt = null;
+    this.garage = false;
+    this.car.x = this.car.y = this.car.yaw = 0;
+    this.props.reset();
   }
 
   private clearView(eye: THREE.Vector3): void {
@@ -1480,9 +1510,17 @@ export class PitCrew {
         : Math.min(settleTime, member.dwell + delta);
   }
 
-  prepare(): void {
-    if (!this.pending) return;
+  present(): void {
+    if (this.prepare() || this.root.matrixWorldNeedsUpdate)
+      this.root.updateMatrixWorld();
+  }
+
+  private prepare(): boolean {
+    if (!this.pending) return false;
     this.pending = false;
+    this.poseWait = this.poseEvery;
+    this.poseDelta = Math.min(poseStep, Math.max(0, this.now - this.posedAt));
+    this.posedAt = this.now;
     this.root.updateWorldMatrix(true, false);
     this.props.root.updateWorldMatrix(false, false, true);
     this.rootInverse.copy(this.root.matrixWorld).invert();
@@ -1530,6 +1568,7 @@ export class PitCrew {
       });
     }
     this.props.carry(carried, this.root.matrixWorld);
+    return true;
   }
 
   private jackSpot(role: Role): Spot {
@@ -1651,7 +1690,7 @@ export class PitCrew {
   private settle(member: Member, draft: Draft): V3 | null {
     const { motion } = member;
     const fresh = !member.settled;
-    const dt = this.delta;
+    const dt = this.poseDelta;
     const look = this.sight(member, draft);
     const ease = (follow: Follow, x: number) =>
       fresh ? follow.reset(x) : follow.step(x, dt);
@@ -2367,7 +2406,7 @@ export class PitCrew {
       wingPath(wing, plan.duration, time, "old"),
       wingPath(wing, plan.duration, time, "new"),
     ];
-    const rate = Math.min(1, this.delta * 10);
+    const rate = Math.min(1, this.poseDelta * 10);
     member.grab = member.grab.map((g, k) =>
       mix(g, poses[k]?.held ? 1 : 0, rate),
     ) as [number, number];

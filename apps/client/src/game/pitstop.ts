@@ -34,6 +34,8 @@ export interface PitCarState {
   toMiddle: number;
   speed: number;
   laneClear?: boolean;
+  boxTaken?: boolean;
+  sideBlocked?: boolean;
 }
 
 export interface PitDrive {
@@ -59,12 +61,24 @@ export interface PitControl {
   wingChange: boolean;
   choosingTyres: boolean;
   distanceToBox: number | null;
+  queued: boolean;
   speedKph: number;
   penalty: PitPenalty;
   penaltyLeft: number | null;
 }
 
 const stopGoSeconds = 10;
+const stackGap = 9;
+const waiting = 1e9;
+const report = {
+  track: 0,
+  entering: 1,
+  boxing: 2,
+  queued: 3,
+  service: 4,
+  release: 5,
+  leaving: 6,
+} as const;
 const noPenalty: PitPenalty = { kind: "none", seconds: 0 };
 const turnInLead = 34;
 const countdownShown = 3.5;
@@ -118,6 +132,7 @@ export class PitStop {
   private grade: TurnInGrade | null = null;
   private turnError = 0;
   private stopping = false;
+  private queued = false;
   private plan: StopPlan | null = null;
   private turnStart = 0;
   private turnLateral = 0;
@@ -237,6 +252,18 @@ export class PitStop {
     return this.layout.boxDistance + shift;
   }
 
+  private arrived(car: PitCarState, toBox: number): boolean {
+    const crawling = toBox < creepDistance && car.speed < creepSpeed;
+    return (
+      toBox > this.layout.length / 2 || toBox < arrivalDistance || crawling
+    );
+  }
+
+  private holdTurn(car: PitCarState, look: number): void {
+    this.turnLateral = car.toMiddle + this.shiftAt(car.distance);
+    this.turnStart = car.distance + look;
+  }
+
   private beginService(now: number): void {
     this.phase = "service";
     this.stopping = false;
@@ -256,15 +283,20 @@ export class PitStop {
     look: number,
     now: number,
   ): PitDrive | null {
-    const { boxLateral, length, speedLimit } = this.layout;
-    const toBox = this.ahead(car.distance, this.stopMark);
+    const { boxLateral, speedLimit } = this.layout;
+    const taken = car.boxTaken === true;
+    if (this.queued && !taken) this.stopping = this.queued = false;
+    const toBox = this.ahead(
+      car.distance,
+      this.stopMark - (taken ? stackGap : 0),
+    );
+    if (car.sideBlocked === true && !this.stopping) this.holdTurn(car, look);
     const run = Math.max(1, this.ahead(this.turnStart, this.stopMark) - 8);
     const blend = ease(this.ahead(this.turnStart, car.distance + look) / run);
-    const crawling = toBox < creepDistance && car.speed < creepSpeed;
-    if (toBox > length / 2 || toBox < arrivalDistance || crawling)
-      this.stopping = true;
+    if (this.arrived(car, toBox)) this.stopping = true;
     if (this.stopping) {
-      if (car.speed < stoppedSpeed) this.beginService(now);
+      this.queued = taken;
+      if (!taken && car.speed < stoppedSpeed) this.beginService(now);
       return null;
     }
     return {
@@ -410,6 +442,7 @@ export class PitStop {
       choosingTyres:
         (this.phase === "lane" || this.phase === "boxing") && !this.serviced,
       distanceToBox: this.boxRemaining(car),
+      queued: this.phase === "boxing" && this.queued,
       speedKph: Math.abs(car.speed) * 3.6,
       penalty: this.phase === "track" ? this.owed : this.serving,
       penaltyLeft: this.penaltyLeft(now),
@@ -433,6 +466,7 @@ export class PitStop {
     this.grade = null;
     this.turnError = 0;
     this.stopping = false;
+    this.queued = false;
     this.plan = null;
     this.serviced = false;
     this.stopTime = null;
@@ -440,6 +474,27 @@ export class PitStop {
     this.wingChange = false;
     this.serving = noPenalty;
   }
+}
+
+export function pitReport(control: PitControl): [number, number] {
+  const { phase } = control;
+  if (phase === "service") {
+    const duration = control.plan?.duration;
+    return [
+      report.service,
+      duration === undefined
+        ? waiting
+        : Math.max(0, duration - control.serviceTime),
+    ];
+  }
+  if (phase === "boxing")
+    return [control.queued ? report.queued : report.boxing, waiting];
+  if (phase === "lane") {
+    const entering =
+      control.choosingTyres && control.penalty.kind !== "drive-through";
+    return [entering ? report.entering : report.leaving, waiting];
+  }
+  return [phase === "release" ? report.release : report.track, waiting];
 }
 
 export function steerCommand(

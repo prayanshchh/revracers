@@ -568,9 +568,16 @@ def pit_markings(track, paint, yellow):
     work_near = fast + PIT_STRIP_WIDTH + 1.0
     box = pit["boxLateral"]
     marks = []
-    for s0, spacing in pitlane.bays(track):
-        marks.append(rectangle(track, s0, s0 + BOX_LINE, work_near, front - 1.0, lift))
-        middle = s0 + spacing / 2
+    all_bays = pitlane.bays(track)
+    first = (len(all_bays) - pitlane.TEAM_COUNT * pitlane.TEAM_BAYS) // 2
+    for index, (s0, spacing) in enumerate(all_bays):
+        team = pitlane.team_of(index, len(all_bays))
+        seat = (index - first) % pitlane.TEAM_BAYS
+        if team is None or seat == 0:
+            marks.append(rectangle(track, s0, s0 + BOX_LINE, work_near, front - 1.0, lift))
+        if team is not None and seat != 0:
+            continue
+        middle = s0 + (spacing if team is not None else spacing / 2)
         for axle, ahead in zip(BOX_AXLES, (1, -1)):
             wheel = middle + axle
             for side in (-1, 1):

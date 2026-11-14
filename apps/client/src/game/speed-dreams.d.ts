@@ -69,7 +69,7 @@ declare module "*/wasm/speed-dreams.js" {
     _sdFieldAutopilot(on: number): void;
     _sdFieldPlayerBox(): number;
     _sdFieldPits(out: number): void;
-    _sdPitTeamBox(garage: number, seat: number): number;
+    _sdPitTeamBox(garage: number): number;
     _sdObstacles(circles: number, count: number): void;
     _sdPracticeGridSlot(slot: number): void;
     _sdFieldPlan(
@@ -88,6 +88,9 @@ declare module "*/wasm/speed-dreams.js" {
     _sdSessionReference(lap: number): void;
     _sdSessionInfo(out: number): void;
     _sdAiPlayerLaneClear: () => number;
+    _sdAiPlayerBoxTaken: () => number;
+    _sdAiPlayerSideBlocked: () => number;
+    _sdAiPlayerPit: (phase: number, serviceLeft: number) => void;
     _sdSessionAdvance(): number;
     _sdSessionSimulate(): void;
     _sdSessionPlayerRun(): number;

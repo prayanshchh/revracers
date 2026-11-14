@@ -134,7 +134,6 @@ const double pitRampAfter = 25.0;
 const double approachCheck = 60.0;
 const double approachSlope = 0.32;
 const double laneJoin = 40.0;
-const double pitReleaseClear = 45.0;
 const double stopRun = 34.0;
 const double turnRun = 54.0;
 const double boxStraight = 10.0;
@@ -145,7 +144,7 @@ const double tightStraight = 3.0;
 const double busyBefore = 34.0;
 const double busyFrom = 5.0;
 const double boxRowHalf = 2.5;
-const double busyAhead = 24.0;
+const double busyAhead = 34.0;
 const double releaseStraight = 8.6;
 const double releaseRun = 26.0;
 const double tightRelease = 13.0;
@@ -170,6 +169,26 @@ const double slideCatchGain = 1.2;
 const double slideCatchSpeed = 5.0;
 const double slowCornerFloor = 8.0;
 const double launchRevs = 2.0;
+const double stackGap = 9.0;
+const double turnWarning = 90.0;
+const double contestMargin = 10.0;
+const double tailGap = 6.0;
+const double pitGripFloor = 0.3;
+const double pitSkew = 1.0;
+const double pitStuckSpeed = 2.0;
+const double pitStuckTime = 1.2;
+const double pitReverseTime = 1.5;
+const double pitTailClear = 3.0;
+const double boxLeft = 6.5;
+const double yieldBehind = 7.5;
+const double clearPast = 6.0;
+const double releaseMargin = 0.5;
+const double releaseSettle = 0.25;
+const double mergedLateral = 1.8;
+const double yieldDecel = 6.0;
+const double stopReach = 12.0;
+const double humanReach = 5.0;
+const double laneBand = 1.5;
 
 struct PitLayout
 {
@@ -282,6 +301,25 @@ struct Driver
     bool passOn = false;
     double passLateral = 0;
     double passGoal = 0;
+    double box = -1;
+    bool stacked = false;
+};
+
+enum HumanPhase
+{
+    HUMAN_TRACK,
+    HUMAN_ENTERING,
+    HUMAN_BOXING,
+    HUMAN_QUEUED,
+    HUMAN_SERVICE,
+    HUMAN_RELEASE,
+    HUMAN_LEAVING
+};
+
+struct HumanPit
+{
+    int phase = HUMAN_TRACK;
+    double left = 1e9;
 };
 
 struct Forecast
@@ -298,6 +336,7 @@ std::vector<Forecast> forecasts;
 double forecastClock = -1;
 double strickenUntil = -1;
 bool playerStricken = false;
+HumanPit humanPit;
 double paceScale = 1.0;
 
 double wrap(double d)
@@ -634,6 +673,35 @@ double boxDistance(int bay)
     return wrap(model.pit.garageStart + (bay + 0.5) * model.pit.spacing);
 }
 
+double stopBox(const Driver &driver)
+{
+    return driver.box >= 0 ? driver.box : boxDistance(driver.bay);
+}
+
+double boxLateralAt(double box)
+{
+    return model.pit.boxLateral - pitShift(box);
+}
+
+double boxingPath(const Driver &driver, double at)
+{
+    double box = stopBox(driver);
+    double remaining = delta(at, box - (driver.stacked ? stackGap : 0.0));
+    double straight = driver.tightEntry ? tightStraight : boxStraight;
+    double blend = remaining < 0 ? 1.0 : ease(1.0 - (remaining - straight) / (driver.turnLead - straight));
+    double laneAt = sampled(model.pitLateral, at);
+    return laneAt + (boxLateralAt(box) - laneAt) * blend;
+}
+
+double releasePath(const Driver &driver, double at)
+{
+    double box = stopBox(driver);
+    double run = delta(box, at);
+    double blend = run < 0 ? 0.0 : driver.tightExit ? ease(run / tightRelease) : ease((run - releaseStraight) / releaseRun);
+    double laneAt = sampled(model.pitLateral, at);
+    return boxLateralAt(box) + (laneAt - boxLateralAt(box)) * blend;
+}
+
 double approachPath(double at)
 {
     const PitLayout &p = model.pit;
@@ -772,6 +840,25 @@ double pitSpeedCap(const Driver &driver, double s)
 
 void updateStricken(tSituation *s);
 
+bool turningIn(int i, tCarElt *car)
+{
+    if (!human(i))
+        return false;
+    double toBox = wrap(stopBox(drivers[i]) - car->_distFromStartLine);
+    return humanPit.phase == HUMAN_BOXING || (humanPit.phase == HUMAN_ENTERING && toBox < turnWarning);
+}
+
+void coverTurn(Forecast &f, double box)
+{
+    for (int k = 0; k <= planSteps; k++)
+    {
+        double low = std::min(f.l[k] - f.halfLat[k], box - f.halfLat[0]);
+        double high = std::max(f.l[k] + f.halfLat[k], box + f.halfLat[0]);
+        f.l[k] = 0.5 * (low + high);
+        f.halfLat[k] = 0.5 * (high - low);
+    }
+}
+
 void updateForecasts(tSituation *s)
 {
     if (forecastClock == s->currentTime)
@@ -819,6 +906,10 @@ void updateForecasts(tSituation *s)
             {
                 if (driver.pit == PIT_APPROACH)
                     f.l[k] = approachPath(f.s[k]);
+                else if (driver.pit == PIT_BOXING)
+                    f.l[k] = boxingPath(driver, f.s[k]);
+                else if (driver.pit == PIT_RELEASE)
+                    f.l[k] = releasePath(driver, f.s[k]);
                 else
                     f.l[k] = driver.pit == PIT_EXIT ? sampled(model.pitLateral, f.s[k]) : lateral;
             }
@@ -847,6 +938,8 @@ void updateForecasts(tSituation *s)
             double slipFade = exp(-t / 0.7);
             bodyExtent(pathAngle + (angle - pathAngle) * slipFade, lengthCar, widthCar, &f.halfLat[k], &f.halfLong[k]);
         }
+        if (turningIn(i, car))
+            coverTurn(f, boxLateralAt(stopBox(driver)));
     }
 }
 
@@ -1245,8 +1338,160 @@ bool boxesBusy(int index, tSituation *s, double from, double reach)
         double car = delta(from, other->_distFromStartLine);
         if (inBoxRow(other) && car > busyFrom && car < reach)
             return true;
-        double crew = delta(from, boxDistance(drivers[i].bay));
+        double crew = delta(from, stopBox(drivers[i]));
         if (crewOutFor(i, s) && crew > busyFrom && crew < reach)
+            return true;
+    }
+    return false;
+}
+
+bool sameBox(int a, int b)
+{
+    return fabs(delta(stopBox(drivers[a]), stopBox(drivers[b]))) < 1.0;
+}
+
+bool merged(tCarElt *car, double box)
+{
+    double at = car->_distFromStartLine;
+    double row = boxLateralAt(box);
+    double out = fabs(car->_trkPos.toMiddle - row);
+    return out > fabs(row - sampled(model.pitLateral, at)) - mergedLateral || delta(box, at) > releaseStraight + releaseRun + clearPast;
+}
+
+bool releasing(int j, tSituation *s, double *box, double *left)
+{
+    if (!activeCar(s, j) || ghostCar(j))
+        return false;
+    const Driver &d = drivers[j];
+    *box = stopBox(d);
+    *left = 0;
+    if (human(j))
+    {
+        if (humanPit.phase == HUMAN_SERVICE)
+            *left = humanPit.left;
+        return (humanPit.phase == HUMAN_SERVICE && humanPit.left < 1e8) || (humanPit.phase == HUMAN_RELEASE && !merged(s->cars[j], *box));
+    }
+    if (d.pit == PIT_STOPPED && d.autoRelease)
+    {
+        *left = d.serviced ? std::max(0.0, d.holdClock) : std::max(0.0, d.pitClock) + releaseSettle;
+        return true;
+    }
+    return d.pit == PIT_RELEASE && !merged(s->cars[j], *box);
+}
+
+double headingTo(int i)
+{
+    const Driver &d = drivers[i];
+    if (human(i))
+    {
+        int phase = humanPit.phase;
+        if (phase == HUMAN_ENTERING || phase == HUMAN_BOXING)
+            return stopBox(d);
+        return phase == HUMAN_RELEASE || phase == HUMAN_LEAVING ? model.pit.exit : -1.0;
+    }
+    if (d.pit == PIT_APPROACH || d.pit == PIT_LANE || d.pit == PIT_BOXING)
+        return d.driveThrough ? model.pit.exit : stopBox(d);
+    return d.pit == PIT_RELEASE || d.pit == PIT_EXIT ? model.pit.exit : -1.0;
+}
+
+bool passes(int i, tSituation *s, double box)
+{
+    double to = headingTo(i);
+    if (to < 0)
+        return false;
+    double pos = s->cars[i]->_distFromStartLine;
+    double gap = delta(pos, box);
+    return gap > -clearPast && delta(pos, to) > gap + 1.0;
+}
+
+double pitGrip(const Driver &driver)
+{
+    return std::max(pitGripFloor, std::min(1.0, driver.wetOff));
+}
+
+double pitLimit(const Driver &driver, tCarElt *car)
+{
+    double limit = model.pit.speedLimit / 3.6 - 0.4;
+    double d = car->_trkPos.toMiddle - sampled(model.line, car->_distFromStartLine);
+    return limit * wetScale(driver, limit, d);
+}
+
+double yieldCap(int index, tCarElt *car, tSituation *s)
+{
+    double cap = 1e9;
+    double pos = car->_distFromStartLine;
+    double v = std::max(4.0, (double)car->_speed_x);
+    for (int j = 0; j < s->_ncars; j++)
+    {
+        double box = 0, left = 0;
+        if (j == index || sameBox(index, j) || !releasing(j, s, &box, &left) || !passes(index, s, box))
+            continue;
+        tCarElt *other = s->cars[j];
+        double at = other->_distFromStartLine;
+        double gap = delta(pos, (delta(box, at) > 0 ? at : box) - yieldBehind);
+        if (left > 0)
+        {
+            if (gap < 0 || (delta(pos, box) + clearPast) / v < left - releaseMargin)
+                continue;
+                cap = std::min(cap, sqrt(2.0 * yieldDecel * pitGrip(drivers[index]) * gap));
+            continue;
+        }
+        if (delta(at, pos) > -0.5 * (car->_dimension_x + other->_dimension_x))
+            continue;
+        double moving = std::max(0.0, (double)other->_speed_x);
+        double follow = gap > 0 ? sqrt(2.0 * yieldDecel * pitGrip(drivers[index]) * gap) + moving : moving * std::max(0.0, 1.0 + gap / yieldBehind);
+        cap = std::min(cap, follow);
+    }
+    return cap;
+}
+
+bool releaseClear(int index, tSituation *s)
+{
+    double box = stopBox(drivers[index]);
+    for (int i = 0; i < s->_ncars; i++)
+    {
+        if (i == index || !activeCar(s, i) || ghostCar(i) || sameBox(index, i) || !passes(i, s, box))
+            continue;
+        tCarElt *other = s->cars[i];
+        double v = std::max(0.0, (double)other->_speed_x);
+        if (v < 1.0)
+            continue;
+        double stops = v * v / (2.0 * (human(i) ? humanReach : stopReach));
+        if (delta(other->_distFromStartLine, box) - stops < tailGap)
+            return false;
+    }
+    return true;
+}
+
+bool holds(int j, tSituation *s, double box, double mine)
+{
+    double left = -delta(s->cars[j]->_distFromStartLine, box);
+    if (human(j))
+        return humanPit.phase == HUMAN_SERVICE || (humanPit.phase == HUMAN_BOXING && -left < mine + contestMargin) || (humanPit.phase == HUMAN_RELEASE && left < boxLeft);
+    const Driver &d = drivers[j];
+    return d.pit == PIT_STOPPED || (d.pit == PIT_BOXING && !d.stacked) || (d.pit == PIT_RELEASE && left < boxLeft);
+}
+
+bool claims(int j, tSituation *s, double box, double mine)
+{
+    if (holds(j, s, box, mine))
+        return true;
+    double toBox = delta(s->cars[j]->_distFromStartLine, box);
+    if (human(j))
+        return humanPit.phase == HUMAN_ENTERING && toBox < mine + contestMargin;
+    const Driver &d = drivers[j];
+    return d.pit == PIT_LANE && !d.driveThrough && toBox < mine;
+}
+
+bool boxTaken(int index, tSituation *s, bool deciding)
+{
+    double box = stopBox(drivers[index]);
+    double mine = delta(s->cars[index]->_distFromStartLine, box);
+    for (int j = 0; j < s->_ncars; j++)
+    {
+        if (j == index || !activeCar(s, j) || ghostCar(j) || !sameBox(index, j))
+            continue;
+        if (deciding ? claims(j, s, box, mine) : holds(j, s, box, mine))
             return true;
     }
     return false;
@@ -1414,25 +1659,6 @@ void steerAndGo(int index, Driver &driver, tCarElt *car, tSituation *s, Path pat
     car->_gearCmd = chooseGear(car);
 }
 
-bool laneClearBehind(int index, tCarElt *car, tSituation *s)
-{
-    for (int i = 0; i < s->_ncars; i++)
-    {
-        if (i == index || !activeCar(s, i))
-            continue;
-        tCarElt *other = s->cars[i];
-        double gap = delta(other->_distFromStartLine, car->_distFromStartLine);
-        double at = other->_distFromStartLine;
-        double fast = sampled(model.pitLateral, at);
-        double boxRow = model.pit.boxLateral - pitShift(at) - boxRowHalf;
-        double lateral = other->_trkPos.toMiddle;
-        bool inLane = lateral > fast - 2.5 && lateral < std::max(fast + 2.5, boxRow);
-        if (inLane && gap > -4.0 && gap < pitReleaseClear)
-            return false;
-    }
-    return true;
-}
-
 void hold(tCarElt *car)
 {
     car->ctrl.singleWheelBrakeMode = 0;
@@ -1457,7 +1683,7 @@ bool trafficComing(int index, tCarElt *car, tSituation *s)
     return false;
 }
 
-bool carBehindTail(int index, tCarElt *car, tSituation *s)
+bool carBehindTail(int index, tCarElt *car, tSituation *s, double reach = reverseClear)
 {
     double hx = cos(car->_yaw), hy = sin(car->_yaw);
     for (int i = 0; i < s->_ncars; i++)
@@ -1466,7 +1692,7 @@ bool carBehindTail(int index, tCarElt *car, tSituation *s)
             continue;
         double dx = s->cars[i]->_pos_X - car->_pos_X;
         double dy = s->cars[i]->_pos_Y - car->_pos_Y;
-        if (hypot(dx, dy) < reverseClear && dx * hx + dy * hy < 0)
+        if (hypot(dx, dy) < reach && dx * hx + dy * hy < 0)
             return true;
     }
     return false;
@@ -1533,16 +1759,84 @@ double outLapHold(int index, tCarElt *car, tSituation *s)
     return outLapHoldSpeed + (1.0 - outLapHoldSpeed) * closest / outLapGapDistance;
 }
 
+bool pitUnwind(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
+{
+    double angle = relativeYaw(car);
+    bool skewed = fabs(angle) > pitSkew && fabs((double)car->_speed_x) < pitStuckSpeed;
+    driver.stuckClock = skewed ? driver.stuckClock + dt : 0.0;
+    if (driver.reverseClock > 0)
+    {
+        driver.reverseClock -= dt;
+        car->ctrl.singleWheelBrakeMode = 0;
+        car->_gearCmd = -1;
+        car->_accelCmd = 0.4f;
+        car->_brakeCmd = 0.0f;
+        car->_steerCmd = (tdble)std::max(-1.0, std::min(1.0, angle * 1.2));
+        return true;
+    }
+    if (driver.stuckClock < pitStuckTime || carBehindTail(index, car, s, pitTailClear))
+        return false;
+    driver.stuckClock = 0;
+    driver.reverseClock = pitReverseTime;
+    return true;
+}
+
+void boxIn(int index, Driver &driver, tCarElt *car, tSituation *s, double limit, double dt)
+{
+    double pos = car->_distFromStartLine;
+    double v = std::max(0.0, (double)car->_speed_x);
+    double box = stopBox(driver);
+    bool queued = boxTaken(index, s, false);
+    double toMark = wrap(box - (queued ? stackGap : 0.0) - pos);
+    double cap = std::min(limit, yieldCap(index, car, s));
+    const auto path = [&](double at) { return boxingPath(driver, at); };
+    double decel = stopDecel * pitGrip(driver);
+    double speed = std::min(cap, sqrt(2.0 * decel * std::max(0.0, toMark)) + 0.4);
+    steerAndGo(index, driver, car, s, path, speed, std::min(cap, sqrt(2.0 * decel * std::max(0.0, toMark - v * 0.25))), dt);
+    if (toMark < model.length / 2 && toMark >= 0.6 && (toMark >= 1.6 || v >= 1.2))
+        return;
+    hold(car);
+    if (queued)
+        return;
+    driver.pit = PIT_STOPPED;
+    driver.pitClock = driver.pitTime;
+    driver.serviced = false;
+    driver.stacked = false;
+}
+
+void serveStop(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
+{
+    hold(car);
+    driver.pitClock -= dt;
+    if (driver.pitClock <= 0 && !driver.serviced)
+    {
+        driver.serviced = true;
+        if (!driver.noService)
+            sdServiceCar(index, driver.pitCompound);
+        driver.pitDone = true;
+        driver.holdClock = releaseSettle;
+    }
+    if (!driver.serviced || !driver.autoRelease)
+        return;
+    driver.holdClock -= dt;
+    if (driver.holdClock <= 0 && releaseClear(index, s))
+    {
+        driver.tightExit = boxesBusy(index, s, stopBox(driver), busyAhead);
+        driver.pit = PIT_RELEASE;
+    }
+}
+
 void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
 {
     const PitLayout &p = model.pit;
     double pos = car->_distFromStartLine;
     double v = std::max(0.0, (double)car->_speed_x);
-    double limit = p.speedLimit / 3.6 - 0.4;
-    double box = boxDistance(driver.bay);
-    double boxLat = p.boxLateral - pitShift(box);
+    double limit = pitLimit(driver, car);
+    double box = stopBox(driver);
     double toBox = wrap(box - pos);
     const auto lanePath = [&](double at) { return sampled(model.pitLateral, at); };
+    if (driver.pit != PIT_STOPPED && pitUnwind(index, driver, car, s, dt))
+        return;
     if (driver.pit == PIT_APPROACH)
     {
         double braking = sqrt(limit * limit + 2.0 * 26.0 * std::max(0.0, wrap(p.wallStart - 40.0 - pos)));
@@ -1576,65 +1870,30 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
         if (toBox < (tight ? stopRun : turnRun))
         {
             driver.tightEntry = tight;
-            driver.turnLead = tight ? tightRun : std::min(turnRun, std::max(tightRun, delta(p.garageStart, box) + garageApproach));
+            driver.stacked = boxTaken(index, s, true);
+            double lead = tight ? tightRun : std::min(turnRun, std::max(tightRun, delta(p.garageStart, box) + garageApproach));
+            driver.turnLead = driver.stacked ? std::max(tightRun, lead - stackGap) : lead;
             driver.pit = PIT_BOXING;
         }
-        steerAndGo(index, driver, car, s, lanePath, limit, toBox < stopRun + 8.0 ? sqrt(2.0 * stopDecel * std::max(0.0, toBox)) : limit, dt);
+        double cap = std::min(limit, yieldCap(index, car, s));
+        steerAndGo(index, driver, car, s, lanePath, cap, std::min(cap, toBox < stopRun + 8.0 ? sqrt(2.0 * stopDecel * std::max(0.0, toBox)) : limit), dt);
         return;
     }
     if (driver.pit == PIT_BOXING)
     {
-        const auto path = [&](double at) {
-            double remaining = delta(at, box);
-            double lead = driver.turnLead;
-            double straight = driver.tightEntry ? tightStraight : boxStraight;
-            double blend = remaining < 0 ? 1.0 : ease(1.0 - (remaining - straight) / (lead - straight));
-            double laneAt = sampled(model.pitLateral, at);
-            return laneAt + (boxLat - laneAt) * blend;
-        };
-        double speed = std::min(limit, sqrt(2.0 * stopDecel * std::max(0.0, toBox)) + 0.4);
-        steerAndGo(index, driver, car, s, path, speed, std::min(limit, sqrt(2.0 * stopDecel * std::max(0.0, toBox - v * 0.25))), dt);
-        if (toBox > model.length / 2 || toBox < 0.6 || (toBox < 1.6 && v < 1.2))
-        {
-            driver.pit = PIT_STOPPED;
-            driver.pitClock = driver.pitTime;
-            driver.serviced = false;
-            hold(car);
-        }
+        boxIn(index, driver, car, s, limit, dt);
         return;
     }
     if (driver.pit == PIT_STOPPED)
     {
-        hold(car);
-        driver.pitClock -= dt;
-        if (driver.pitClock <= 0 && !driver.serviced)
-        {
-            driver.serviced = true;
-            if (!driver.noService)
-                sdServiceCar(index, driver.pitCompound);
-            driver.pitDone = true;
-            driver.holdClock = 0.25;
-        }
-        if (driver.serviced && driver.autoRelease)
-        {
-            driver.holdClock -= dt;
-            if (driver.holdClock <= 0 && laneClearBehind(index, car, s))
-            {
-                driver.tightExit = boxesBusy(index, s, box, busyAhead);
-                driver.pit = PIT_RELEASE;
-            }
-        }
+        serveStop(index, driver, car, s, dt);
         return;
     }
     if (driver.pit == PIT_RELEASE)
     {
-        const auto path = [&](double at) {
-            double run = delta(box, at);
-            double blend = run < 0 ? 0.0 : driver.tightExit ? ease(run / tightRelease) : ease((run - releaseStraight) / releaseRun);
-            double laneAt = sampled(model.pitLateral, at);
-            return boxLat + (laneAt - boxLat) * blend;
-        };
-        steerAndGo(index, driver, car, s, path, limit, limit, dt);
+        const auto path = [&](double at) { return releasePath(driver, at); };
+        double cap = std::min(limit, yieldCap(index, car, s));
+        steerAndGo(index, driver, car, s, path, cap, cap, dt);
         if (delta(box, pos) > (driver.tightExit ? tightRelease : releaseStraight + releaseRun))
             driver.pit = PIT_EXIT;
         return;
@@ -1642,8 +1901,9 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
     if (driver.pit == PIT_EXIT)
     {
         bool inLimit = onArc(pos, p.entry, p.wallEnd);
-        double speed = inLimit ? limit : std::min(45.0, targetSpeedAt(driver, pos, 0.0));
-        double soon = inLimit ? limit : std::min(45.0, targetSpeedAt(driver, pos + std::max(4.0, v * 0.25), 0.0));
+        double cap = inLimit ? std::min(limit, yieldCap(index, car, s)) : 1e9;
+        double speed = inLimit ? cap : std::min(45.0, targetSpeedAt(driver, pos, 0.0));
+        double soon = inLimit ? cap : std::min(45.0, targetSpeedAt(driver, pos + std::max(4.0, v * 0.25), 0.0));
         steerAndGo(index, driver, car, s, lanePath, speed, soon, dt);
         if (wrap(pos - p.exit - 10.0) < 200.0)
         {
@@ -1930,6 +2190,7 @@ void sdAiReset(int cars)
     forecastClock = -1;
     strickenUntil = -1;
     playerStricken = false;
+    humanPit = HumanPit();
 }
 
 void sdAiConfigure(int index, double pace, double racePace, double racecraft, int bay)
@@ -2170,10 +2431,77 @@ void sdAiPitState(int index, double *out)
     out[0] = driver.pit;
     out[1] = driver.pitTime;
     out[2] = driver.pit == PIT_STOPPED ? driver.pitTime - driver.pitClock : 0;
-    out[3] = boxDistance(driver.bay);
+    out[3] = stopBox(driver);
     out[4] = driver.noService ? 1 : 0;
     out[5] = driver.autoRelease ? 1 : 0;
     out[6] = driver.pitCompound;
+}
+
+void sdAiSetBox(int index, double distance)
+{
+    drivers[index].box = distance;
+}
+
+double sdAiSharedBox(int firstBay)
+{
+    return wrap(model.pit.garageStart + (firstBay + 1.0) * model.pit.spacing);
+}
+
+bool sdAiHumanPitting()
+{
+    return humanPit.phase != HUMAN_TRACK;
+}
+
+bool sideBlocked(tSituation *s)
+{
+    tCarElt *me = s->cars[0];
+    double mine = me->_trkPos.toMiddle;
+    double box = boxLateralAt(stopBox(drivers[0]));
+    for (int i = 1; i < s->_ncars; i++)
+    {
+        if (!activeCar(s, i) || ghostCar(i))
+            continue;
+        tCarElt *other = s->cars[i];
+        double gap = fabs(delta(me->_distFromStartLine, other->_distFromStartLine));
+        double side = 0.5 * (me->_dimension_y + other->_dimension_y) + passMoving;
+        double lateral = other->_trkPos.toMiddle;
+        bool between = lateral + side > std::min(mine, box) && lateral - side < std::max(mine, box) && fabs(lateral - mine) >= side;
+        if (other->_speed_x > crawlSpeed && between && gap < 0.5 * (me->_dimension_x + other->_dimension_x) + longClearance)
+            return true;
+    }
+    return false;
+}
+
+double sdAiHumanYield()
+{
+    tSituation *s = ReInfo->s;
+    bool scripted = humanPit.phase == HUMAN_BOXING || humanPit.phase == HUMAN_RELEASE;
+    if (!model.ready || (int)drivers.size() < s->_ncars || !human(0) || !scripted)
+        return 1e9;
+    tCarElt *me = s->cars[0];
+    double cap = yieldCap(0, me, s);
+    double mine = me->_trkPos.toMiddle;
+    double box = humanPit.phase == HUMAN_BOXING ? boxLateralAt(stopBox(drivers[0])) : mine;
+    double reach = 0.5 * me->_dimension_y + passMoving;
+    double length = me->_dimension_x;
+    for (int i = 1; i < s->_ncars; i++)
+    {
+        if (!activeCar(s, i) || ghostCar(i))
+            continue;
+        tCarElt *other = s->cars[i];
+        double gap = delta(me->_distFromStartLine, other->_distFromStartLine);
+        double lateral = other->_trkPos.toMiddle;
+        double side = reach + 0.5 * other->_dimension_y;
+        bool moving = other->_speed_x > crawlSpeed;
+        bool inLine = fabs(lateral - mine) < side;
+        bool inBand = moving && lateral + side > std::min(mine, box) && lateral - side < std::max(mine, box);
+        double behind = humanPit.phase == HUMAN_RELEASE ? 0.0 : -0.5 * (length + other->_dimension_x);
+        if (gap <= behind || gap > rejoinLook || !(inLine || inBand))
+            continue;
+        double room = gap - 0.5 * (length + other->_dimension_x) - longClearance;
+        cap = std::min(cap, room > 0 ? sqrt(2.0 * stopDecel * room) + std::max(0.0, (double)other->_speed_x) : 0.0);
+    }
+    return cap;
 }
 
 bool sdAiBoxOf(int bay, double *distance, double *lateral)
@@ -2332,8 +2660,24 @@ extern "C" {
 
 EMSCRIPTEN_KEEPALIVE int sdAiPlayerLaneClear()
 {
+    return releaseClear(0, ReInfo->s) ? 1 : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int sdAiPlayerBoxTaken()
+{
+    return boxTaken(0, ReInfo->s, false) ? 1 : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int sdAiPlayerSideBlocked()
+{
     tSituation *s = ReInfo->s;
-    return laneClearBehind(0, s->cars[0], s) ? 1 : 0;
+    return model.ready && (int)drivers.size() >= s->_ncars && sideBlocked(s) ? 1 : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE void sdAiPlayerPit(int phase, double serviceLeft)
+{
+    humanPit.phase = std::max((int)HUMAN_TRACK, std::min((int)HUMAN_LEAVING, phase));
+    humanPit.left = std::max(0.0, serviceLeft);
 }
 
 EMSCRIPTEN_KEEPALIVE void sdAiLine(int sample, double *out)

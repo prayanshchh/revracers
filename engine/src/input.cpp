@@ -8,6 +8,7 @@
 #include <playerpref.h>
 
 #include "game.h"
+#include "ai.h"
 #include "race-control.h"
 
 static const double axisScale = 20000.0;
@@ -216,7 +217,7 @@ static void applySpeedLimit(tCarElt *car)
     if (speedLimit <= 0)
         return;
     double speed = fabs(car->_speed_x);
-    double room = speedLimit - speed;
+    double room = std::min(speedLimit, sdAiHumanYield()) - speed;
     throttle = std::min(throttle, std::max(0.0, std::min(1.0, room * limiterGain)));
     if (room < -limiterMargin)
         brake = std::max(brake, std::min(1.0, -room * limiterBrake));

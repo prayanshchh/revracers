@@ -401,7 +401,7 @@ def pit_lane(s, xy, values, length):
         "pitLaneSign": PIT_LANE_SIGN,
         "pitBarrier": GARAGE_FRONT,
         "playerBay": PLAYER_BAY,
-        "boxDistance": round((garage_start + (PLAYER_BAY + 0.5) * spacing) % length, 3),
+        "boxDistance": round((garage_start + (PLAYER_BAY + 1) * spacing) % length, 3),
         "boxLateral": BOX_LATERAL,
         "fastLane": FAST_LANE,
         "baySpacing": round(spacing, 4),

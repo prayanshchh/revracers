@@ -5,6 +5,7 @@
 
 bool sdFieldActive();
 int sdFieldBay(int garage, int seat);
+double sdFieldStopBox(int garage, int seat);
 int sdPitCompound();
 double sdSessionStartClock();
 bool sdSessionStartPlace(int index, int slot, int bay, double *distance, double *lateral);

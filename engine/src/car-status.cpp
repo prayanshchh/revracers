@@ -6,6 +6,7 @@
 #include "sim.h"
 #include "game.h"
 #include "car-damage.h"
+#include "ai.h"
 
 namespace
 {
@@ -597,6 +598,12 @@ bool wheelsTouch(const tCar *a, const tCar *b, int &wheel, double &closing)
     return closing >= launchClosing;
 }
 
+bool sheltered(int index)
+{
+    tCarElt *elt = ReInfo->s->cars[index];
+    return sdAiInPitLaneAt(elt->_distFromStartLine, elt->_trkPos.toMiddle);
+}
+
 void checkWheelLaunch(int i, int j)
 {
     tCar *a = &SimCarTable[i];
@@ -620,7 +627,7 @@ void sdCarsTumbleStep(tSituation *s, double dt)
         for (int j = 0; j < cars; j++)
         {
             tCar *b = &SimCarTable[j];
-            if (i == j || !(b->collision & SEM_COLLISION_CAR))
+            if (i == j || !(b->collision & SEM_COLLISION_CAR) || sheltered(i) || sheltered(j))
                 continue;
             if (hypot(a->DynGCg.pos.x - b->DynGCg.pos.x, a->DynGCg.pos.y - b->DynGCg.pos.y) > pairReach)
                 continue;
@@ -844,10 +851,15 @@ void sdCarStatusStep(tCarElt *elt, double dt)
 {
     CarStatus &state = field[elt->index];
     tCar *car = &SimCarTable[elt->index];
+    bool safe = sheltered(elt->index);
+    if (safe)
+        car->dammage = state.lastDamage;
     int delta = car->dammage - state.lastDamage;
     state.lastDamage = car->dammage;
     bool player = elt->index == 0;
-    if (player)
+    if (safe)
+        detectImpact(state, elt->index, car, dt, false);
+    else if (player)
         playerDamage(state, car, delta, dt);
     else
         fieldDamage(state, elt->index, car, delta, dt);

@@ -121,7 +121,6 @@ export interface HudOptions {
   startHint: boolean;
   rewindRetired: boolean;
   onLap: (lap: LapResult) => void;
-  onSector: (index: number, status: string | null) => void;
   stewards: StewardView;
 }
 
@@ -292,6 +291,13 @@ function fuelState(
 function estimateText(estimate: PitControl["estimate"]): string {
   const [low, high] = estimate ?? [0, 0];
   return `${low.toFixed(1)}s - ${high.toFixed(1)}s`;
+}
+
+function boxText(control: PitControl): string {
+  if (control.queued) return "Teammate in your box - wait";
+  return control.distanceToBox === null
+    ? ""
+    : `Your box - ${String(Math.round(control.distanceToBox))}m`;
 }
 
 function turnInGrade(control: PitControl): PitControl["grade"] {
@@ -702,12 +708,7 @@ export class Hud {
     putData(banner, "over", String(control.speedKph > limitKph + 1));
     putText(this.find("pit-limit"), String(limitKph));
     putText(this.find("pit-speed"), String(Math.round(control.speedKph)));
-    putText(
-      this.find("pit-distance"),
-      control.distanceToBox === null
-        ? ""
-        : `Your box - ${String(Math.round(control.distanceToBox))}m`,
-    );
+    putText(this.find("pit-distance"), boxText(control));
   }
 
   private showPenaltyHold(control: PitControl, left: number): void {
@@ -833,7 +834,6 @@ export class Hud {
     const closed = sectors.active - 1;
     const time = sectors.times[closed];
     if (time !== undefined && time !== null) {
-      this.options.onSector(closed, sectors.status[closed] ?? null);
       const cell = this.sectorCells[closed];
       if (cell) replay(cell, "fill");
       const split = sectors.times

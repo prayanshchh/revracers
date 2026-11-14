@@ -593,9 +593,6 @@ export class PitProps {
   private readonly actual: Pose[] = [pose(), pose(), pose(), pose()];
   private readonly nominal: Pose[] = [pose(), pose(), pose(), pose()];
 
-  private readonly brandVertices: number[] = [];
-  private readonly teamMaterial: THREE.MeshStandardNodeMaterial;
-
   constructor(team: string) {
     this.root.matrixAutoUpdate = false;
     const brand = new THREE.Color(teamOf(team).brand);
@@ -612,16 +609,7 @@ export class PitProps {
     this.hoses.castShadow = true;
     this.hoses.frustumCulled = false;
     this.root.add(this.guns, this.hoses);
-    const colours = this.guns.geometry.getAttribute("color");
-    for (let i = 0; i < colours.count; i++)
-      if (
-        colours.getX(i) === Math.fround(brand.r) &&
-        colours.getY(i) === Math.fround(brand.g) &&
-        colours.getZ(i) === Math.fround(brand.b)
-      )
-        this.brandVertices.push(i);
     const teamMaterial = material("pit jack", brand, 0.38, 0.2);
-    this.teamMaterial = teamMaterial;
     const gripMaterial = material("pit jack grip", 0x18191d, 0.8);
     const steelMaterial = material("pit jack base", 0x2a2c31, 0.5, 0.4);
     const markerMaterial = material("pit jack marker", 0xf0b90b, 0.5);
@@ -642,15 +630,6 @@ export class PitProps {
       ),
     };
     this.lamps = this.lamp(steelMaterial);
-  }
-
-  paint(team: string): void {
-    const brand = new THREE.Color(teamOf(team).brand);
-    this.teamMaterial.color.copy(brand);
-    const colours = this.guns.geometry.getAttribute("color");
-    for (const i of this.brandVertices)
-      colours.setXYZ(i, brand.r, brand.g, brand.b);
-    colours.needsUpdate = true;
   }
 
   private jack(
