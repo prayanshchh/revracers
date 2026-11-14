@@ -31,7 +31,7 @@ interface Frame {
 const sampleStep = 5;
 const searchReach = 40;
 const tolerance = 0.35;
-const circuits = ["hill-country", "neon-boulevard"];
+const circuits = ["hill-country", "neon-boulevard", "dune-bay"];
 
 function read(file: string): unknown {
   return JSON.parse(readFileSync(path.join(repoRoot, file), "utf8"));

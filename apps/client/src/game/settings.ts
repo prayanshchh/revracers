@@ -25,6 +25,15 @@ export const tracks = [
     hour: 22,
     difficulty: "Hard",
   },
+  {
+    id: "dune-bay",
+    label: "Dune Bay Circuit",
+    detail: "Lusail · 5.43 km · Night",
+    category: "circuit",
+    length: 5428,
+    hour: 20,
+    difficulty: "Medium",
+  },
 ] as const;
 
 export const tutorialTrack = {

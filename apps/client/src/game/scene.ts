@@ -4,6 +4,8 @@ import roadUrl from "../../../../content/tracks/hill-country/road.glb?url";
 import { type Circuit, circuitFiles, type NightLook } from "./circuits.ts";
 import { carFile, liteCarFiles, teams } from "./teams.ts";
 import { buildTrainingGround } from "./training-ground.ts";
+import { buildDesertCircuit, desertFiles } from "./desert-ground.ts";
+import type { DesertVenue } from "./desert-layout.ts";
 import {
   buildStreetCircuit,
   crewOf,
@@ -89,8 +91,13 @@ import {
   Floodlights,
   inWorld,
   layoutPoles,
+  desertMasts,
+  type MastStyle,
+  parkMasts,
+  type Pole,
   type TrackPoint,
 } from "./floodlights.ts";
+import type { LampSpot } from "./desert-lamps.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
 import {
   Crowd,
@@ -193,17 +200,36 @@ interface TrackData {
   length: number;
   grid: GridSlot[];
   centerline: TrackPoint[];
-  pitLane: { entry: number; exit: number } | null;
+  pitLane: { entry: number; exit: number; side?: string } | null;
+}
+
+function venueLamps(road: THREE.Object3D): Pole[] {
+  const spots = (road.userData["lamps"] ?? []) as LampSpot[];
+  const vector = (p: number[]) => new THREE.Vector3(p[0], p[1], p[2]);
+  return spots.map((spot) => {
+    const head = vector(spot.head);
+    const aim = vector(spot.aim);
+    return {
+      base: aim.clone(),
+      head,
+      aim,
+      power: spot.gain * head.distanceToSquared(aim),
+      reach: spot.reach,
+    };
+  });
 }
 
 function buildFloodlights(
   data: TrackData,
   frame: TrackFrame,
   start: [number, number, number],
+  style: MastStyle,
+  extra: Pole[] = [],
 ): Floodlights {
   const poles = layoutPoles(
     data.centerline,
     data.pitLane ?? { entry: 0, exit: 0 },
+    style,
   );
   const holder = new THREE.Group();
   const placed = placeOnTrack(holder, frame, start);
@@ -213,7 +239,21 @@ function buildFloodlights(
   );
   const lights = new Floodlights(
     poles,
-    floodMap(track, inWorld(poles, toWorld)),
+    floodMap(
+      track,
+      inWorld([...poles, ...extra], toWorld),
+      style.brightest,
+      style.spill,
+      style.floor,
+      style.wash
+        ? {
+            level: style.wash,
+            near: style.washNear ?? 0,
+            far: style.washFar ?? 1,
+          }
+        : null,
+    ),
+    style,
   );
   holder.add(lights.root);
   lights.placed = placed;
@@ -244,6 +284,20 @@ function buildStreetLights(
     new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(toWorld),
   );
   return new Floodlights([], floodMap(track, inWorld(lamps, toWorld)));
+}
+
+function circuitLights(
+  circuit: Circuit,
+  data: TrackData,
+  road: THREE.Object3D,
+  frame: TrackFrame,
+  start: [number, number, number],
+): Floodlights {
+  if (circuit.ground === "street")
+    return buildStreetLights(data, polesOf(road), frame, start);
+  if (circuit.ground === "desert")
+    return buildFloodlights(data, frame, start, desertMasts, venueLamps(road));
+  return buildFloodlights(data, frame, start, parkMasts);
 }
 
 const dryWeather: WeatherInfo = {
@@ -280,7 +334,7 @@ function nightLighting(
     elevation: floodElevation,
     haze: look ? new THREE.Color(...look.haze) : skyBox.nightHaze,
     sunGlow: 0,
-    glare: nightGlare,
+    glare: look?.glare ?? nightGlare,
     glowMirror: nightGlowMirror,
     sheen: 0,
     air: floodColour.clone().multiplyScalar(nightAir),
@@ -335,7 +389,9 @@ function venueDownloads(
   const ground =
     circuit.ground === "street"
       ? [...trainingTextures, ...streetFiles, ...crowdAtlas, crewUrl]
-      : [roadUrl, crewUrl, crowdData];
+      : circuit.ground === "desert"
+        ? [...trainingTextures, ...desertFiles, ...crowdAtlas, crewUrl]
+        : [roadUrl, crewUrl, crowdData];
   return [
     ...ground,
     ...(circuit.trees ? [circuit.trees] : []),
@@ -368,6 +424,7 @@ interface SharedLoads {
   track: Promise<TrackData>;
   line: Promise<RacingLineData>;
   city: Promise<CityData> | null;
+  plan: Promise<DesertVenue> | null;
 }
 
 function sharedLoads(
@@ -402,6 +459,10 @@ function sharedLoads(
       circuit.ground === "street" && circuit.city
         ? fetchJson<CityData>(circuit.city)
         : null,
+    plan:
+      circuit.ground === "desert" && circuit.plan
+        ? fetchJson<DesertVenue>(circuit.plan)
+        : null,
   };
 }
 
@@ -419,6 +480,19 @@ function groundOf(
   after: Promise<unknown>,
 ): Promise<THREE.Object3D> {
   const anisotropy = renderer.getMaxAnisotropy();
+  if (loads.plan) {
+    return Promise.all([loads.track, loads.line, loads.plan]).then(
+      ([data, line, plan]) =>
+        buildDesertCircuit(
+          data as unknown as StreetTrack,
+          line as LinePath,
+          plan,
+          anisotropy,
+          loads.radiance,
+          after,
+        ),
+    );
+  }
   if (loads.city) {
     return Promise.all([loads.track, loads.line, loads.city]).then(
       ([data, line, cityData]) =>
@@ -462,7 +536,7 @@ function clearOf(frames: Frames): Clear {
 }
 
 function treeKinds(circuit: Circuit): Species[] {
-  if (circuit.trees) return woodland;
+  if (circuit.trees) return circuit.flora ?? woodland;
   return circuit.city ? boulevard : [];
 }
 
@@ -474,7 +548,9 @@ function plantTrees(
   const kinds = treeKinds(circuit);
   if (circuit.trees)
     return Trees.load(
-      clearedTrees(circuit.trees, framesOf(loads), treeStride),
+      circuit.ground === "glb"
+        ? clearedTrees(circuit.trees, framesOf(loads), treeStride)
+        : circuit.trees,
       anisotropy,
       kinds,
     );
@@ -501,6 +577,21 @@ async function streetCrowd(
   return placedCrowd(clear(city.spectators, 3), seats);
 }
 
+async function desertCrowd(
+  loads: SharedLoads,
+  planLoad: Promise<DesertVenue>,
+): Promise<Float32Array> {
+  const [plan, data, line] = await Promise.all([
+    planLoad,
+    loads.track,
+    loads.line,
+  ]);
+  const track = data as unknown as TrainingTrack;
+  const list = stations(track, line);
+  const seats = standSeats(list, track.length, plan.stands.map(dressed));
+  return placedCrowd([], seats);
+}
+
 async function venueExtras(
   circuit: Circuit,
   anisotropy: number,
@@ -511,11 +602,13 @@ async function venueExtras(
 ): Promise<{ people: Crowd | null; crews: PitCrew[] }> {
   if (!circuit.venue) return { people: null, crews: [] };
   const [people, crews] = await Promise.all([
-    loads.city
-      ? Crowd.load(streetCrowd(loads, loads.city))
-      : circuit.ground === "glb"
-        ? Crowd.load(venuePeople(road))
-        : null,
+    loads.plan
+      ? Crowd.load(desertCrowd(loads, loads.plan))
+      : loads.city
+        ? Crowd.load(streetCrowd(loads, loads.city))
+        : circuit.ground === "glb"
+          ? Crowd.load(venuePeople(road))
+          : null,
     PitCrew.load(crewUrl, anisotropy, team, others),
   ]);
   return { people, crews };
@@ -872,7 +965,7 @@ export class Scene {
       carLoad,
       loads.track,
       venue && rivals.length === 0
-        ? circuit.ground === "street"
+        ? circuit.ground === "street" || circuit.ground === "desert"
           ? garagedCars(engine, roadLoad, frameLoad, loads)
           : parkedGrid(engine, team, loads)
         : null,
@@ -889,9 +982,7 @@ export class Scene {
     crowdLamps.value = light.lamps;
     const floodlights =
       venue && light.lamps > 0
-        ? circuit.ground === "street"
-          ? buildStreetLights(gridData, polesOf(road), frame, start)
-          : buildFloodlights(gridData, frame, start)
+        ? circuitLights(circuit, gridData, road, frame, start)
         : null;
     const track = new THREE.Group();
     track.add(
@@ -1396,21 +1487,22 @@ export class Scene {
     layout: PitLayout,
     point: (distance: number, lateral: number) => [number, number, number],
   ): void {
-    const lateral = layout.boxLateral - layout.shift;
+    const side = layout.side ?? 1;
+    const lateral = side * layout.boxLateral - layout.shift;
     const [x, y, z] = point(layout.boxDistance, lateral);
     const [x2, y2] = point(layout.boxDistance + 2, lateral);
-    this.crew?.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x));
-    this.fieldCrews?.place(point, lateral);
+    this.crew?.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x), side);
+    this.fieldCrews?.place(point, lateral, side);
     if (this.crew) this.fieldCrews?.lend(this.crew, layout.boxDistance);
     this.pitLength = layout.length;
     this.pitPoint = point;
     this.pitLateral = lateral;
     this.playerBox = layout.boxDistance;
     const turn = layout.boxDistance - gateLead;
-    const gateLateral = layout.fastLane - layout.shift;
+    const gateLateral = side * layout.fastLane - layout.shift;
     const [gx, gy, gz] = point(turn, gateLateral);
     const [hx, hy] = point(turn + 2, gateLateral);
-    this.gate.place(gx, gy, gz, Math.atan2(hy - gy, hx - gx));
+    this.gate.place(gx, gy, gz, Math.atan2(hy - gy, hx - gx), side);
   }
 
   parkBoxes(boxes: { distance: number; team: string }[]): void {

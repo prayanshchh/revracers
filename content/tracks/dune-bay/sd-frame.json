@@ -1,0 +1,25 @@
+{
+  "origin": [
+    158.37736933562326,
+    0,
+    280.42846781404506
+  ],
+  "heading": 2.074209988154186,
+  "width": 12,
+  "segments": 5428,
+  "pit": {
+    "length": 5428.786852711878,
+    "entry": 4830.19,
+    "wallStart": 5285.19,
+    "wallEnd": 477,
+    "exit": 662,
+    "side": -1,
+    "pitWall": 9.9,
+    "shift": -3.9000000000000004,
+    "ramp": 30,
+    "fastLane": 15,
+    "speedLimit": 80,
+    "boxDistance": 124,
+    "boxLateral": 20.5
+  }
+}

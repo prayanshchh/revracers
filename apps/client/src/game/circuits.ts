@@ -12,6 +12,14 @@ import boulevardTrack from "../../../../content/tracks/neon-boulevard/track.json
 import boulevardXml from "../../../../content/tracks/neon-boulevard/neon-boulevard.xml?url";
 import boulevardCity from "../../../../content/tracks/neon-boulevard/city.json?url";
 import boulevardAi from "../../wasm/neon-boulevard-ai.txt?url";
+import duneFrame from "../../../../content/tracks/dune-bay/sd-frame.json?url";
+import duneMap from "../../../../content/tracks/dune-bay/circuit-map.json?url";
+import duneLine from "../../../../content/tracks/dune-bay/racing-line.json?url";
+import duneTrack from "../../../../content/tracks/dune-bay/track.json?url";
+import duneVenue from "../../../../content/tracks/dune-bay/venue.json?url";
+import duneTrees from "../../../../content/tracks/dune-bay/trees.bin?url";
+import duneXml from "../../../../content/tracks/dune-bay/dune-bay.xml?url";
+import duneAi from "../../wasm/dune-bay-ai.txt?url";
 import trainingFrame from "../../../../content/tracks/training-ground/sd-frame.json?url";
 import trainingMap from "../../../../content/tracks/training-ground/circuit-map.json?url";
 import trainingLine from "../../../../content/tracks/training-ground/racing-line.json?url";
@@ -20,6 +28,7 @@ import trainingDome from "../../../../content/tracks/training-ground/sky/noon-do
 import trainingEnv from "../../../../content/tracks/training-ground/sky/noon-env.webp?url";
 import trainingSky from "../../../../content/tracks/training-ground/sky/noon.json?url";
 import type { Season } from "./scenery-look.ts";
+import type { Species } from "./scenery-trees.ts";
 import type { CompactSky } from "./skybox.ts";
 import type { Lessons } from "./tutorial.ts";
 
@@ -28,7 +37,7 @@ interface EngineFile {
   url: string;
 }
 
-type CircuitGround = "glb" | "training" | "street";
+type CircuitGround = "glb" | "training" | "street" | "desert";
 
 type Rgb = [number, number, number];
 
@@ -42,12 +51,14 @@ export interface NightLook {
   tint: Rgb;
   dome: number;
   layer: number;
+  glare?: number;
 }
 
 export interface Circuit {
   id: string;
   ground: CircuitGround;
   city: string | null;
+  plan: string | null;
   engineFiles: EngineFile[];
   frame: string;
   map: string;
@@ -58,6 +69,8 @@ export interface Circuit {
   night: NightLook | null;
   venue: boolean;
   trees: string | null;
+  flora?: Species[];
+  mapHeading?: number;
   season: Season;
 }
 
@@ -68,6 +81,7 @@ const circuits: Circuit[] = [
     id: "hill-country",
     ground: "glb",
     city: null,
+    plan: null,
     engineFiles: [
       { path: "tracks/circuit/hill-country/hill-country.xml", url: hillXml },
       { path: "tracks/circuit/hill-country/ai.dat", url: hillAi },
@@ -87,6 +101,7 @@ const circuits: Circuit[] = [
     id: "neon-boulevard",
     ground: "street",
     city: boulevardCity,
+    plan: null,
     engineFiles: [
       {
         path: "tracks/circuit/neon-boulevard/neon-boulevard.xml",
@@ -116,9 +131,43 @@ const circuits: Circuit[] = [
     season: "autumn",
   },
   {
+    id: "dune-bay",
+    ground: "desert",
+    city: null,
+    plan: duneVenue,
+    engineFiles: [
+      { path: "tracks/circuit/dune-bay/dune-bay.xml", url: duneXml },
+      { path: "tracks/circuit/dune-bay/ai.dat", url: duneAi },
+    ],
+    frame: duneFrame,
+    map: duneMap,
+    racingLine: duneLine,
+    track: duneTrack,
+    lessons: { brake: 1, boost: 16, camera: 2 },
+    sky: null,
+    night: {
+      zenith: [0.001, 0.001, 0.001],
+      horizon: [0.002, 0.002, 0.002],
+      glow: [0.003, 0.003, 0.003],
+      haze: [0.004, 0.004, 0.004],
+      visibility: 2600,
+      flood: 1.3,
+      tint: [1, 0.98, 0.95],
+      dome: 0.01,
+      layer: 22,
+      glare: 0.9,
+    },
+    venue: true,
+    trees: duneTrees,
+    flora: ["palm", "shrub"],
+    mapHeading: 180,
+    season: "autumn",
+  },
+  {
     id: trainingGround,
     ground: "training",
     city: null,
+    plan: null,
     engineFiles: [],
     frame: trainingFrame,
     map: trainingMap,
@@ -158,6 +207,7 @@ export function circuitFiles(circuit: Circuit): string[] {
     circuit.racingLine,
     circuit.track,
     ...(circuit.city ? [circuit.city] : []),
+    ...(circuit.plan ? [circuit.plan] : []),
     ...sky,
   ];
 }

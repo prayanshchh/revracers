@@ -31,11 +31,17 @@ import { type TrackProp, trackProps } from "./street-props.ts";
 import { type Venue, venueParts } from "./street-venue.ts";
 import dressing from "../../../../content/tracks/neon-boulevard/dressing.json";
 import { gantryParts } from "./trackside-gantry.ts";
-import { boardRow, wrapAspect, wrapV } from "./trackside-plan.ts";
+import {
+  type BoardSpan,
+  boardRow,
+  wrapAspect,
+  wrapV,
+} from "./trackside-plan.ts";
 import type { Zone as Plot } from "./trackside-props.ts";
 import { flagParts, terraceParts, terraceZones } from "./trackside-terrace.ts";
 
 interface StreetPit {
+  side?: string;
   entry: number;
   wallStart: number;
   wallEnd: number;
@@ -114,31 +120,36 @@ export function wallAt(station: Station, sign: number): number {
   return sign > 0 ? station.wallLeft : station.wallRight;
 }
 
+export function pitSign(track: StreetTrack): number {
+  return track.pitLane.side === "right" ? -1 : 1;
+}
+
 function onArc(s: number, from: number, to: number, length: number): boolean {
   return wrap(s - from, length) <= wrap(to - from, length);
 }
 
-function wallRuns(track: StreetTrack): Run[] {
+export function wallRuns(track: StreetTrack): Run[] {
   const pit = track.pitLane;
+  const sign = pitSign(track);
   return [
     {
-      sign: -1,
+      sign: -sign,
       from: 0,
       to: track.length,
       closed: true,
       backed: false,
-      lateral: (station) => station.wallRight,
+      lateral: (station) => wallAt(station, -sign),
     },
     {
-      sign: 1,
+      sign,
       from: pit.garageEnd,
       to: pit.garageStart,
       closed: false,
       backed: false,
-      lateral: (station) => station.wallLeft,
+      lateral: (station) => wallAt(station, sign),
     },
     {
-      sign: 1,
+      sign,
       from: pit.wallStart,
       to: pit.wallEnd,
       closed: false,
@@ -242,8 +253,7 @@ interface Zone {
   start: number;
 }
 
-function wrapZones(length: number, side: number): Zone[] {
-  const spans = dressing.boards;
+function wrapZones(length: number, side: number, spans: BoardSpan[]): Zone[] {
   return spans.map((span, index) => ({
     from: span.from,
     to: spans[index + 1]?.from ?? length,
@@ -252,8 +262,8 @@ function wrapZones(length: number, side: number): Zone[] {
   }));
 }
 
-function runZones(run: Run, length: number): Zone[] {
-  const zones = wrapZones(length, run.sign);
+function runZones(run: Run, length: number, boards: BoardSpan[]): Zone[] {
+  const zones = wrapZones(length, run.sign, boards);
   if (run.closed) return zones;
   const to = run.from + runSpan(run, length);
   return [0, length].flatMap((offset) =>
@@ -281,16 +291,17 @@ function zoneRows(
   });
 }
 
-function barrierFaces(
+export function barrierFaces(
   list: Station[],
   track: TrainingTrack,
   runs: Run[],
+  boards: BoardSpan[],
 ): Part {
   const builder = new Builder(1);
   for (const run of runs)
     for (const back of run.backed ? [false, true] : [false]) {
       const facing = back ? -run.sign : run.sign;
-      for (const zone of runZones(run, track.length)) {
+      for (const zone of runZones(run, track.length, boards)) {
         const first = builder.count;
         const rows = zoneRows(list, track.length, zone);
         for (const { station, s } of rows) {
@@ -348,7 +359,11 @@ function runEnds(builder: Builder, rows: Station[], run: Run): void {
   }
 }
 
-function barrierBody(list: Station[], track: TrainingTrack, runs: Run[]): Part {
+export function barrierBody(
+  list: Station[],
+  track: TrainingTrack,
+  runs: Run[],
+): Part {
   const builder = new Builder(1);
   for (const run of runs) {
     const { sign } = run;
@@ -390,7 +405,11 @@ function barrierBody(list: Station[], track: TrainingTrack, runs: Run[]): Part {
   return builder.part("wall concrete", "track wall concrete");
 }
 
-function fenceMesh(list: Station[], track: TrainingTrack, runs: Run[]): Part {
+export function fenceMesh(
+  list: Station[],
+  track: TrainingTrack,
+  runs: Run[],
+): Part {
   const builder = new Builder(1);
   const slant = Math.hypot(fenceLean, fenceTop - fenceKnee);
   for (const run of runs) {
@@ -457,7 +476,11 @@ export function beam(
   box(builder, centre, [size / 2, length / 2, size / 2], [side, axis, other]);
 }
 
-function fencePosts(list: Station[], track: TrainingTrack, runs: Run[]): Part {
+export function fencePosts(
+  list: Station[],
+  track: TrainingTrack,
+  runs: Run[],
+): Part {
   const builder = new Builder(1);
   for (const run of runs) {
     const { sign } = run;
@@ -516,7 +539,10 @@ function poleLateral(
   track: StreetTrack,
 ): number {
   const pit = track.pitLane;
-  if (sign > 0 && onArc(station.s, pit.wallStart, pit.wallEnd, track.length))
+  if (
+    sign === pitSign(track) &&
+    onArc(station.s, pit.wallStart, pit.wallEnd, track.length)
+  )
     return pit.pitWall + barrierThickness / 2;
   return wallAt(station, sign) + poleSetback;
 }
@@ -622,45 +648,67 @@ function overheads(
   ];
 }
 
-function pitMarkings(list: Station[], track: StreetTrack): Part {
+export function pitMarkings(
+  list: Station[],
+  track: StreetTrack,
+  diagonals = true,
+): Part {
   const builder = new Builder(1);
   const pit = track.pitLane;
+  const sign = pitSign(track);
   const { length } = track;
   const step = length / list.length;
   const diagonal = (from: number, to: number, inward: boolean) => {
     const span = wrap(to - from, length);
     const lateral = (station: Station) => {
       const t = wrap(station.s - from, length) / span;
-      return station.half + (pit.pitWall - station.half) * (inward ? t : 1 - t);
+      return (
+        sign *
+        (station.half + (pit.pitWall - station.half) * (inward ? t : 1 - t))
+      );
     };
     strip(
       builder,
       spanRows(list, length, from, span, step),
       lateral,
-      (station) => lateral(station) + pitLine,
+      (station) => lateral(station) + sign * pitLine,
       0.004,
     );
   };
-  diagonal(pit.entry, pit.wallStart, true);
-  diagonal(pit.wallEnd, pit.exit, false);
+  if (diagonals) {
+    diagonal(pit.entry, pit.wallStart, true);
+    diagonal(pit.wallEnd, pit.exit, false);
+  }
   const garageSpan = wrap(pit.garageEnd - pit.garageStart, length);
   strip(
     builder,
     spanRows(list, length, pit.garageStart, garageSpan, step),
-    () => workingLane - pitLine / 2,
-    () => workingLane + pitLine / 2,
+    () => sign * (workingLane - pitLine / 2),
+    () => sign * (workingLane + pitLine / 2),
     0.004,
   );
   const bays = Math.round(garageSpan / pit.baySpacing);
-  const near = pit.boxLateral - boxWidth / 2;
-  const far = pit.boxLateral + boxWidth / 2;
+  const near = sign * (pit.boxLateral - boxWidth / 2);
+  const far = sign * (pit.boxLateral + boxWidth / 2);
   for (const centre of boxCentres(pit.garageStart, pit.baySpacing, bays)) {
     const back = centre - boxLength / 2;
     const front = centre + boxLength / 2;
     rectangle(builder, list, length, [back, back + pitLine], [near, far]);
     rectangle(builder, list, length, [front - pitLine, front], [near, far]);
-    rectangle(builder, list, length, [back, front], [near, near + pitLine]);
-    rectangle(builder, list, length, [back, front], [far - pitLine, far]);
+    rectangle(
+      builder,
+      list,
+      length,
+      [back, front],
+      [near, near + sign * pitLine],
+    );
+    rectangle(
+      builder,
+      list,
+      length,
+      [back, front],
+      [far - sign * pitLine, far],
+    );
   }
   return builder.part("pit markings", "track lane road paint");
 }
@@ -710,7 +758,7 @@ export function streetParts(
       pitMarkings(list, track),
       kerbs(list, track),
       runoff(list, track),
-      barrierFaces(list, track, runs),
+      barrierFaces(list, track, runs, dressing.boards),
       barrierBody(list, track, runs),
       fenceMesh(list, track, runs),
       fencePosts(list, track, runs),

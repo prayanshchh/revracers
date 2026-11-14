@@ -15,10 +15,10 @@ import {
 } from "../support/race-weekend.ts";
 import { startCircuit, wasm } from "../support/speed-dreams.ts";
 
-const track = "neon-boulevard";
-const lapSeconds = 140;
-
-describe.runIf(existsSync(wasm))("street circuit weekend", () => {
+describe.runIf(existsSync(wasm)).each([
+  { track: "neon-boulevard", lapSeconds: 140 },
+  { track: "dune-bay", lapSeconds: 120 },
+])("$track weekend", ({ track, lapSeconds }) => {
   test("every car leaves its garage and sets a clean timed lap", async () => {
     const plan = subset(planWeekend("corvus", 0, null), 6);
     const m = await startField({

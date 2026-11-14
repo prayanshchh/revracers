@@ -144,6 +144,7 @@ import { sessionSeconds, weatherPlan } from "./game/weather-plan.ts";
 import { WeekendFlow } from "./game/weekend-flow.ts";
 import { LoadBar } from "./game/load-bar.ts";
 import { type Circuit, circuitOf } from "./game/circuits.ts";
+import { headed } from "./game/map-heading.ts";
 import { seasonOf, useSeason } from "./game/scenery-look.ts";
 import { dropEarly } from "./game/early.ts";
 import {
@@ -341,14 +342,14 @@ function sessionTitle(
   return `${track} - ${session}${ended}`;
 }
 
-function trackMap(engine: Engine): TrackMap {
+function trackMap(engine: Engine, heading: number | undefined): TrackMap {
   const length = engine.trackLength();
   const count = Math.max(64, Math.min(600, Math.round(length / 10)));
   const points = Array.from({ length: count + 1 }, (_, i) => {
     const [x, y] = engine.trackPoint((i / count) * length, 0);
     return [x, y] as [number, number];
   });
-  return { points, length };
+  return { points: headed(points, heading, true), length };
 }
 
 function drawer(renderer: THREE.WebGPURenderer, scene: Scene): () => void {
@@ -655,6 +656,7 @@ function hudOptions(
   lights: StartLights,
   turns: CourseTurn[],
   onLap: HudOptions["onLap"],
+  heading: number | undefined,
 ): HudOptions {
   return {
     stewards: {
@@ -666,7 +668,7 @@ function hudOptions(
     parts: settings.hud,
     session: sessionLabel(setup.stage),
     reference: best,
-    map: trackMap(engine),
+    map: trackMap(engine, heading),
     field: setup.field?.entrants ?? null,
     qualifying: setup.stage === "qualifying",
     start: lights,
@@ -1301,6 +1303,7 @@ async function main(): Promise<void> {
           log?.lap(lap, compoundId(engine.tyreInfo().compound));
           wall?.onLap(lap, performance.now() / 1000);
         },
+        circuit.mapHeading,
       ),
       entry.tutorial,
     ),

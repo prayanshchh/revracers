@@ -42,7 +42,8 @@ const pitDeckRamp = 20;
 const pitWallHeight = 1;
 const pitWallRamp = 30;
 const pit = track.pitLane;
-const pitShift = pit ? pit.pitWall - half : 0;
+const pitSign = pit?.side === "right" ? -1 : 1;
+const pitShift = pit ? pitSign * (pit.pitWall - half) : 0;
 
 const points = track.centerline.map((p) => ({
   x: p.x,
@@ -156,7 +157,10 @@ points.forEach((p, i) => {
   p.shift = shiftAt(distance);
   p.pitZone = pitZoneAt(distance);
   p.pitThickness = pitWallThickness(distance);
-  if (p.pitZone) p.wallLeft = Math.min(p.wallLeft, pit.pitBarrier);
+  if (p.pitZone && pitSign > 0)
+    p.wallLeft = Math.min(p.wallLeft, pit.pitBarrier);
+  if (p.pitZone && pitSign < 0)
+    p.wallRight = Math.min(p.wallRight, pit.pitBarrier);
   p.x += normals[i].x * p.shift;
   p.y += normals[i].y * p.shift;
   p.z += p.camber * p.shift;
@@ -390,7 +394,8 @@ ${spanSection("Sealed Run-off", track.sealed ?? [])}`;
 }
 
 function sideOf(s, isLeft) {
-  return isLeft
+  const pitSide = isLeft === pitSign > 0;
+  const edge = isLeft
     ? {
         kerb: s.kerbLeft,
         wallStart: s.wallLeftStart,
@@ -398,8 +403,6 @@ function sideOf(s, isLeft) {
         letter: "l",
         extra: s.width / 2 - half - s.shift,
         reach: s.shift,
-        pitZone: s.pitZone,
-        pitThickness: s.pitThickness,
       }
     : {
         kerb: s.kerbRight,
@@ -408,8 +411,12 @@ function sideOf(s, isLeft) {
         letter: "r",
         extra: s.width / 2 - half + s.shift,
         reach: -s.shift,
-        pitZone: null,
       };
+  return {
+    ...edge,
+    pitZone: pitSide ? s.pitZone : null,
+    pitThickness: s.pitThickness,
+  };
 }
 
 function borderOf(edge) {
@@ -548,6 +555,7 @@ const frame = {
     wallStart: pit.wallStart,
     wallEnd: pit.wallEnd,
     exit: pit.exit,
+    side: pitSign,
     pitWall: pit.pitWall,
     shift: pitShift,
     ramp: pitWallRamp,

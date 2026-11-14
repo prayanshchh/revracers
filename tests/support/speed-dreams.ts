@@ -53,6 +53,13 @@ const trackFiles: Record<string, [string, string][]> = {
       "tracks/circuit/neon-boulevard/ai.dat",
     ],
   ],
+  "dune-bay": [
+    [
+      "content/tracks/dune-bay/dune-bay.xml",
+      "tracks/circuit/dune-bay/dune-bay.xml",
+    ],
+    ["apps/client/wasm/dune-bay-ai.txt", "tracks/circuit/dune-bay/ai.dat"],
+  ],
 };
 
 interface Files {

@@ -180,6 +180,10 @@ export function stations(
   return out;
 }
 
+export function sided(station: Station, sign: number): Station {
+  return sign > 0 ? station : { ...station, lx: -station.lx, lz: -station.lz };
+}
+
 export function place(station: Station, lateral: number, lift = 0): number[] {
   return [
     station.x + station.lx * lateral,

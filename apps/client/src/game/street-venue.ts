@@ -2,6 +2,7 @@ import {
   Builder,
   type Part,
   place,
+  sided,
   type Station,
   stationAt,
   type TrainingTrack,
@@ -10,8 +11,21 @@ import {
 import { facing, spanRows } from "./street-layout.ts";
 import { emptyStand, standParts, type StandSpec } from "./grandstand.ts";
 import { type PitEnds, pitKit, teamColour } from "./street-pit.ts";
+import {
+  backRect,
+  bandRect,
+  bandTall,
+  boardRect,
+  boardsWidth,
+  boardTile,
+  numberRect,
+  type Rect,
+  seatOfBay,
+  seats,
+} from "./garage-tiles.ts";
 
 interface Paddock {
+  sign?: number;
   from: number;
   to: number;
   front: number;
@@ -32,7 +46,25 @@ const doorHeight = 5.6;
 const garageCeiling = 6.4;
 const pillar = 1.1;
 const garageDepth = 12;
-const interiorKinds = { front: 0, back: 1, side: 2, ceiling: 3, floor: 4 };
+const interiorKinds = { back: 1, ceiling: 3, floor: 4 };
+const frontKinds = {
+  cladding: 0,
+  board: 1,
+  band: 2,
+  number: 3,
+  shutter: 4,
+  trim: 5,
+  team: 6,
+};
+const portal = 0.24;
+const proud = 0.03;
+const trimHeight = 0.12;
+const numberSize = 0.8;
+const numberLow = 4.2;
+const boardLow = 5.85;
+const shutterInset = 0.3;
+const lip = 1.4;
+const lipDepth = 0.5;
 const hallSetback = 4;
 const hallEave = 3.5;
 const deckOffset = -50;
@@ -43,8 +75,11 @@ function rowsBetween(
   length: number,
   from: number,
   to: number,
+  sign = 1,
 ): Station[] {
-  return spanRows(list, length, from, wrap(to - from, length), step);
+  return spanRows(list, length, from, wrap(to - from, length), step).map(
+    (station) => sided(station, sign),
+  );
 }
 
 function sweep(
@@ -100,6 +135,174 @@ function garagePanel(
   );
 }
 
+interface FrontFace {
+  from: number;
+  to: number;
+  lateral: number;
+  low: number;
+  high: number;
+  kind: number;
+  rect?: Rect;
+  along?: [number, number];
+  colour?: number[];
+}
+
+function readable(
+  corners: number[][],
+  normal: number[],
+  rect: Rect,
+): number[][] {
+  const [nx = 0, , nz = 0] = normal;
+  const across = corners.map(([x = 0, , z = 0]) => x * nz - z * nx);
+  const heights = corners.map(([, y = 0]) => y);
+  const [u0, v0, u1, v1] = rect;
+  const left = Math.min(...across);
+  const right = Math.max(...across);
+  const low = Math.min(...heights);
+  const high = Math.max(...heights);
+  return corners.map((_, k) => [
+    u0 + ((u1 - u0) * ((across[k] ?? 0) - left)) / (right - left || 1),
+    v0 + ((v1 - v0) * ((heights[k] ?? 0) - low)) / (high - low || 1),
+  ]);
+}
+
+function frontFace(
+  builder: Builder,
+  at: (s: number) => Station,
+  face: FrontFace,
+): void {
+  const a = at(face.from);
+  const b = at(face.to);
+  const [m0, m1] = face.along ?? [face.from, face.to];
+  const { low, high, lateral } = face;
+  const corners = [
+    place(a, lateral, low),
+    place(b, lateral, low),
+    place(b, lateral, high),
+    place(a, lateral, high),
+  ];
+  const normal = [-a.lx, 0, -a.lz];
+  const [r = 0, g = 0, blue = 0] = face.colour ?? [];
+  const atlas = face.rect
+    ? readable(corners, normal, face.rect)
+    : corners.map(() => [r, g]);
+  const metres = [
+    [m0, low],
+    [m1, low],
+    [m1, high],
+    [m0, high],
+  ];
+  facing(
+    builder,
+    corners,
+    normal,
+    corners.map((_, k) => [
+      metres[k] ?? [0, 0],
+      atlas[k] ?? [0, 0],
+      [face.kind, blue],
+    ]),
+  );
+}
+
+function bayFront(
+  builder: Builder,
+  at: (s: number) => Station,
+  paddock: Paddock,
+  bay: number,
+): void {
+  const s0 = paddock.from + bay * paddock.bay;
+  const s1 = s0 + paddock.bay;
+  const sign = paddock.sign ?? 1;
+  const front = paddock.front;
+  const face = (from: number, to: number, low: number, high: number) => {
+    frontFace(builder, at, {
+      from,
+      to,
+      lateral: front,
+      low,
+      high,
+      kind: frontKinds.cladding,
+    });
+  };
+  face(s0, s0 + pillar, 0, doorHeight);
+  face(s1 - pillar, s1, 0, doorHeight);
+  face(s0, s1, doorHeight, garageHeight);
+  const seat = seatOfBay(bay);
+  const colour = teamColour(bay);
+  const edge = (from: number, to: number, low: number, high: number) => {
+    frontFace(builder, at, {
+      from,
+      to,
+      lateral: front - proud,
+      low,
+      high,
+      kind: seat ? frontKinds.team : frontKinds.trim,
+      colour,
+    });
+  };
+  edge(s0 + pillar, s1 - pillar, doorHeight - trimHeight, doorHeight);
+  if (seat) {
+    edge(s0 + pillar - portal, s0 + pillar, 0, doorHeight);
+    edge(s1 - pillar, s1 - pillar + portal, 0, doorHeight);
+  }
+  const middle = sign > 0 ? s1 - pillar / 2 : s0 + pillar / 2;
+  frontFace(builder, at, {
+    from: middle - numberSize / 2,
+    to: middle + numberSize / 2,
+    lateral: front - proud,
+    low: numberLow,
+    high: numberLow + numberSize,
+    kind: frontKinds.number,
+    rect: numberRect(bay + 1),
+  });
+  if (!seat) {
+    frontFace(builder, at, {
+      from: s0 + pillar,
+      to: s1 - pillar,
+      lateral: front + shutterInset,
+      low: 0,
+      high: doorHeight - trimHeight,
+      kind: frontKinds.shutter,
+      along: [0, paddock.bay - 2 * pillar],
+    });
+    return;
+  }
+  const [boardWide, boardHigh] = boardTile;
+  frontFace(builder, at, {
+    from: s0,
+    to: s1,
+    lateral: front - proud,
+    low: boardLow,
+    high: boardLow + (paddock.bay * boardHigh) / boardWide,
+    kind: frontKinds.board,
+    rect: boardRect(seat.team.index * seats + seat.seat),
+  });
+}
+
+function bandFaces(
+  builder: Builder,
+  at: (s: number) => Station,
+  paddock: Paddock,
+  length: number,
+): void {
+  const run = wrap(paddock.end - paddock.from, length);
+  const tall = (paddock.bay * bandTall) / boardsWidth;
+  const [u0, v0, u1, v1] = bandRect();
+  for (let along = 0; along < run - 0.01; along += paddock.bay) {
+    const span = Math.min(paddock.bay, run - along);
+    const share = span / paddock.bay;
+    frontFace(builder, at, {
+      from: paddock.from + along,
+      to: paddock.from + along + span,
+      lateral: paddock.front - lip,
+      low: garageHeight,
+      high: garageHeight + tall,
+      kind: frontKinds.band,
+      rect: [u0, v0, u0 + (u1 - u0) * share, v1],
+    });
+  }
+}
+
 function garageBay(
   list: Station[],
   length: number,
@@ -110,34 +313,14 @@ function garageBay(
   const s0 = paddock.from + bay * paddock.bay;
   const s1 = s0 + paddock.bay;
   const colour = teamColour(bay);
-  const at = (s: number) => stationAt(list, length, wrap(s, length));
+  const sign = paddock.sign ?? 1;
+  const at = (s: number) =>
+    sided(stationAt(list, length, wrap(s, length)), sign);
   const front = paddock.front;
   const inward = (station: Station) => [-station.lx, 0, -station.lz];
-  const frame = (from: number, to: number, low: number, high: number) => {
-    const a = at(from);
-    const b = at(to);
-    garagePanel(
-      parts.garage,
-      [
-        place(a, front, low),
-        place(b, front, low),
-        place(b, front, high),
-        place(a, front, high),
-      ],
-      inward(a),
-      [
-        [from, low],
-        [to, low],
-        [to, high],
-        [from, high],
-      ],
-      colour,
-      interiorKinds.front,
-    );
-  };
-  frame(s0, s0 + pillar, 0, doorHeight);
-  frame(s1 - pillar, s1, 0, doorHeight);
-  frame(s0, s1, doorHeight, garageHeight);
+  bayFront(parts.garage, at, paddock, bay);
+  const seat = seatOfBay(bay);
+  if (!seat) return;
   const a = at(s0 + pillar);
   const b = at(s1 - pillar);
   const width = paddock.bay - 2 * pillar;
@@ -152,7 +335,11 @@ function garageBay(
   ) => {
     garagePanel(parts.interior, corners, normal, local, colour, kind);
   };
-  panel(
+  const art = backRect(seat.team.index);
+  const wall = (corners: number[][], normal: number[]) => {
+    panel(corners, normal, readable(corners, normal, art), interiorKinds.back);
+  };
+  wall(
     [
       box(a, back, 0),
       box(b, back, 0),
@@ -160,33 +347,19 @@ function garageBay(
       box(a, back, garageCeiling),
     ],
     inward(b),
-    [
-      [0, 0],
-      [width, 0],
-      [width, garageCeiling],
-      [0, garageCeiling],
-    ],
-    interiorKinds.back,
   );
   for (const [station, ahead] of [
     [a, 1],
     [b, -1],
   ] as const)
-    panel(
+    wall(
       [
         box(station, front, 0),
         box(station, back, 0),
         box(station, back, garageCeiling),
         box(station, front, garageCeiling),
       ],
-      [-station.lz * ahead, 0, station.lx * ahead],
-      [
-        [0, 0],
-        [garageDepth, 0],
-        [garageDepth, garageCeiling],
-        [0, garageCeiling],
-      ],
-      interiorKinds.side,
+      [-station.lz * ahead * sign, 0, station.lx * ahead * sign],
     );
   for (const [height, kind, normal] of [
     [garageCeiling, interiorKinds.ceiling, [0, -1, 0]],
@@ -218,6 +391,7 @@ function hallEnd(
 ): void {
   const near = paddock.front;
   const far = paddock.front + paddock.depth;
+  const sign = paddock.sign ?? 1;
   facing(
     builder,
     [
@@ -226,7 +400,7 @@ function hallEnd(
       place(station, far, paddock.height),
       place(station, near, paddock.height),
     ],
-    [-station.lz * ahead, 0, station.lx * ahead],
+    [-station.lz * ahead * sign, 0, station.lx * ahead * sign],
     [
       [[0, garageHeight]],
       [[paddock.depth, garageHeight]],
@@ -242,9 +416,22 @@ function pitBuildings(
   paddock: Paddock,
   parts: { garage: Builder; interior: Builder; hall: Builder; glow: Builder },
 ): void {
-  const garages = rowsBetween(list, track.length, paddock.from, paddock.to);
-  const whole = rowsBetween(list, track.length, paddock.from, paddock.end);
-  const tail = rowsBetween(list, track.length, paddock.to, paddock.end);
+  const sign = paddock.sign ?? 1;
+  const garages = rowsBetween(
+    list,
+    track.length,
+    paddock.from,
+    paddock.to,
+    sign,
+  );
+  const whole = rowsBetween(
+    list,
+    track.length,
+    paddock.from,
+    paddock.end,
+    sign,
+  );
+  const tail = rowsBetween(list, track.length, paddock.to, paddock.end, sign);
   const base = () => paddock.front;
   const top = paddock.height;
   const bays = Math.round(
@@ -252,16 +439,35 @@ function pitBuildings(
   );
   for (let bay = 0; bay < bays; bay++)
     garageBay(list, track.length, paddock, bay, parts);
+  const lipTop = garageHeight + (paddock.bay * bandTall) / boardsWidth;
   sweep(
     parts.hall,
-    garages,
+    whole,
     [
-      [0, garageHeight],
+      [-lip, garageHeight],
       [hallSetback, garageHeight],
     ],
     1,
     base,
     deckOffset,
+  );
+  sweep(
+    parts.hall,
+    whole,
+    [
+      [-lip, lipTop],
+      [lipDepth - lip, lipTop],
+      [lipDepth - lip, garageHeight],
+    ],
+    1,
+    base,
+    deckOffset,
+  );
+  bandFaces(
+    parts.garage,
+    (s) => sided(stationAt(list, track.length, wrap(s, track.length)), sign),
+    paddock,
+    track.length,
   );
   sweep(
     parts.hall,
@@ -330,8 +536,8 @@ const standBoards = ["revracers", "boulevard tag", "nimbara", "boulevard prix"];
 export function dressed(spec: StandSpec, index: number): StandSpec {
   return {
     ...spec,
-    roof: spec.rows >= roofedRows,
-    board: standBoards[index % standBoards.length] ?? "revracers",
+    roof: spec.roof ?? spec.rows >= roofedRows,
+    board: spec.board ?? standBoards[index % standBoards.length] ?? "revracers",
   };
 }
 
@@ -347,12 +553,13 @@ export function venueParts(
   const garage = new Builder(3);
   const interior = new Builder(3);
   const hall = new Builder(1);
+  const strip = new Builder(1);
   if (paddock)
     pitBuildings(list, track, paddock, {
       garage,
       interior,
       hall,
-      glow: built.glow,
+      glow: strip,
     });
   return [
     built.deck.part("stand concrete", "track stand concrete"),
@@ -365,6 +572,7 @@ export function venueParts(
     garage.part("garage front", "track garage front"),
     interior.part("garage interior", "track garage interior"),
     hall.part("paddock hall", "track paddock hall"),
+    strip.part("paddock lights", "track paddock lights"),
     ...(paddock
       ? pitKit(
           list,

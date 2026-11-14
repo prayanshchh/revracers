@@ -18,6 +18,7 @@ export interface PitLayout {
   speedLimit: number;
   boxDistance: number;
   boxLateral: number;
+  side?: number;
 }
 
 export type PitPhase = "track" | "lane" | "boxing" | "service" | "release";
@@ -194,6 +195,14 @@ export class PitStop {
     this.owed = penalty;
   }
 
+  private get side(): number {
+    return this.layout.side ?? 1;
+  }
+
+  private laneLateral(car: PitCarState): number {
+    return this.side * (car.toMiddle + this.shiftAt(car.distance));
+  }
+
   shiftAt(distance: number): number {
     const { wallStart, wallEnd, shift, ramp } = this.layout;
     if (this.onArc(distance, wallStart, wallEnd)) return shift;
@@ -206,12 +215,11 @@ export class PitStop {
     const { entry, wallStart, ramp, pitWall } = this.layout;
     if (!this.onArc(car.distance, entry + entryClear, wallStart + ramp))
       return false;
-    return car.toMiddle + this.shiftAt(car.distance) > pitWall + lanePad;
+    return this.laneLateral(car) > pitWall + lanePad;
   }
 
   private leftLane(car: PitCarState): boolean {
-    const lateral = car.toMiddle + this.shiftAt(car.distance);
-    return lateral < this.layout.pitWall - escapeMargin;
+    return this.laneLateral(car) < this.layout.pitWall - escapeMargin;
   }
 
   private movedForward(distance: number): boolean {
@@ -283,7 +291,8 @@ export class PitStop {
     look: number,
     now: number,
   ): PitDrive | null {
-    const { boxLateral, speedLimit } = this.layout;
+    const { speedLimit } = this.layout;
+    const boxLateral = this.side * this.layout.boxLateral;
     const taken = car.boxTaken === true;
     if (this.queued && !taken) this.stopping = this.queued = false;
     const toBox = this.ahead(
@@ -336,15 +345,14 @@ export class PitStop {
     const look = Math.max(releaseLook, car.speed * releaseLookTime);
     const reached = this.ahead(this.releaseAt, car.distance + look);
     const blend = ease((reached - releaseStraight) / releaseRun);
-    const lateral = car.toMiddle + this.shiftAt(car.distance);
     const settled =
       this.ahead(this.releaseAt, car.distance) > releaseRun + releaseSettle;
-    if (settled && Math.abs(lateral - fastLane) < releaseDone) {
+    if (settled && Math.abs(this.laneLateral(car) - fastLane) < releaseDone) {
       this.phase = "lane";
       return null;
     }
     return {
-      lateral: boxLateral + (fastLane - boxLateral) * blend,
+      lateral: this.side * (boxLateral + (fastLane - boxLateral) * blend),
       lookahead: look,
       speed: speedLimit / 3.6,
     };

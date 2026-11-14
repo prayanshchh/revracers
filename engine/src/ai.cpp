@@ -154,6 +154,8 @@ const double overlapBackOff = 0.94;
 const double mergeFloor = 0.7;
 const double pitClearance = 0.15;
 const double pitEntryGrace = 15.0;
+const double longMouth = 80.0;
+const double mouthClear = 1.0;
 const double fastLaneOffset = 1.2;
 const double fastLaneRamp = 40.0;
 const int garageBays = 25;
@@ -192,7 +194,7 @@ const double laneBand = 1.5;
 
 struct PitLayout
 {
-    double entry, wallStart, wallEnd, exit, pitWall, shift, ramp, fastLane, speedLimit, boxLateral, garageStart, spacing, firstBay;
+    double entry, wallStart, wallEnd, exit, pitWall, shift, ramp, fastLane, speedLimit, boxLateral, garageStart, spacing, firstBay, side = 1.0;
 };
 
 struct TrackModel
@@ -578,6 +580,24 @@ Projected project(tTrackSeg **hint, double wx, double wy)
     return {pos.seg->lgfromstart + along, pos.toMiddle};
 }
 
+tTrackSeg *nearestSegment(double wx, double wy)
+{
+    tTrackSeg *best = model.segments[0];
+    double closest = 1e18;
+    for (tTrackSeg *seg : model.segments)
+    {
+        double cx = (seg->vertex[TR_SL].x + seg->vertex[TR_SR].x + seg->vertex[TR_EL].x + seg->vertex[TR_ER].x) / 4.0;
+        double cy = (seg->vertex[TR_SL].y + seg->vertex[TR_SR].y + seg->vertex[TR_EL].y + seg->vertex[TR_ER].y) / 4.0;
+        double d = (cx - wx) * (cx - wx) + (cy - wy) * (cy - wy);
+        if (d < closest)
+        {
+            closest = d;
+            best = seg;
+        }
+    }
+    return best;
+}
+
 std::map<std::string, std::vector<double>> readData(const char *path)
 {
     std::map<std::string, std::vector<double>> result;
@@ -680,7 +700,7 @@ double stopBox(const Driver &driver)
 
 double boxLateralAt(double box)
 {
-    return model.pit.boxLateral - pitShift(box);
+    return model.pit.side * model.pit.boxLateral - pitShift(box);
 }
 
 double boxingPath(const Driver &driver, double at)
@@ -1317,7 +1337,7 @@ bool inBoxRow(tCarElt *car)
 {
     const PitLayout &p = model.pit;
     double at = car->_distFromStartLine;
-    return onArc(at, p.wallStart, p.wallEnd) && fabs(car->_trkPos.toMiddle + pitShift(at) - p.boxLateral) < boxRowHalf;
+    return onArc(at, p.wallStart, p.wallEnd) && fabs(car->_trkPos.toMiddle + pitShift(at) - p.side * p.boxLateral) < boxRowHalf;
 }
 
 bool crewOutFor(int i, tSituation *s)
@@ -1844,7 +1864,7 @@ void drivePit(int index, Driver &driver, tCarElt *car, tSituation *s, double dt)
         double soon = std::min(targetSpeedAt(driver, pos + std::max(4.0, v * 0.25), 0.0), sqrt(limit * limit + 2.0 * 26.0 * std::max(0.0, wrap(p.wallStart - 40.0 - pos - v * 0.25))));
         const auto path = [&](double at) { return approachPath(at); };
         steerAndGo(index, driver, car, s, path, speed, soon, dt);
-        double across = p.pitWall + 0.6 - car->_trkPos.toMiddle - pitShift(pos);
+        double across = p.pitWall + 0.6 - p.side * (car->_trkPos.toMiddle + pitShift(pos));
         bool reached = across < 0;
         bool hopeless = onArc(pos, p.wallStart - approachCheck, p.wallStart) && across > wrap(p.wallStart - pos) * approachSlope;
         if ((onArc(pos, p.wallStart - 18.0, p.wallEnd) && !reached) || hopeless)
@@ -2113,7 +2133,7 @@ bool sdAiLoadTrack(tTrack *track)
     }
 
     const auto &pitValues = data["pit"];
-    model.pit = {pitValues[0], pitValues[1], pitValues[2], pitValues[3], pitValues[4], pitValues[5], pitValues[6], pitValues[7], pitValues[8], pitValues[9], pitValues[10], pitValues[11], pitValues[12]};
+    model.pit = {pitValues[0], pitValues[1], pitValues[2], pitValues[3], pitValues[4], pitValues[5], pitValues[6], pitValues[7], pitValues[8], pitValues[9], pitValues[10], pitValues[11], pitValues[12], pitValues.size() > 13 ? pitValues[13] : 1.0};
 
     const auto &gridX = data["grid_x"];
     const auto &gridZ = data["grid_z"];
@@ -2138,6 +2158,8 @@ bool sdAiLoadTrack(tTrack *track)
     {
         double wx, wy;
         toWorld(frame, pitX[i], pitZ[i], &wx, &wy);
+        if (i == 0)
+            hint = nearestSegment(wx, wy);
         pitPoints.push_back(project(&hint, wx, wy));
     }
     model.pitLateral.assign(model.line.begin(), model.line.end());
@@ -2175,7 +2197,7 @@ bool sdAiLoadTrack(tTrack *track)
         double span = garageBays * model.pit.spacing + 2.0 * fastLaneRamp;
         double along = wrap(at - model.pit.garageStart + fastLaneRamp);
         if (along < span)
-            model.pitLateral[i] -= fastLaneOffset * std::min(ease(along / fastLaneRamp), ease((span - along) / fastLaneRamp));
+            model.pitLateral[i] -= model.pit.side * fastLaneOffset * std::min(ease(along / fastLaneRamp), ease((span - along) / fastLaneRamp));
     }
 
     buildLanes();
@@ -2507,7 +2529,7 @@ double sdAiHumanYield()
 bool sdAiBoxOf(int bay, double *distance, double *lateral)
 {
     *distance = boxDistance(bay);
-    *lateral = model.pit.boxLateral - pitShift(*distance);
+    *lateral = model.pit.side * model.pit.boxLateral - pitShift(*distance);
     return true;
 }
 
@@ -2526,9 +2548,15 @@ bool sdAiInPitLaneAt(double distance, double toMiddle)
     if (!model.ready)
         return false;
     const PitLayout &p = model.pit;
-    if (onArc(distance, p.entry - pitEntryGrace, p.wallStart) && toMiddle > 0)
-        return true;
-    return onArc(distance, p.entry, p.exit) && toMiddle + pitShift(distance) > p.pitWall;
+    if (onArc(distance, p.entry - pitEntryGrace, p.wallStart))
+    {
+        if (wrap(p.wallStart - p.entry) <= longMouth)
+            return p.side * toMiddle > 0 || p.side * (toMiddle + pitShift(distance)) > p.pitWall;
+        double edge = p.side > 0 ? sampled(model.leftLimit, distance) : -sampled(model.rightLimit, distance);
+        if (p.side * toMiddle > edge + mouthClear)
+            return true;
+    }
+    return onArc(distance, p.entry, p.exit) && p.side * (toMiddle + pitShift(distance)) > p.pitWall;
 }
 
 void sdAiDrive(int index, tCarElt *car, tSituation *s)
@@ -2572,7 +2600,7 @@ void sdAiDrive(int index, tCarElt *car, tSituation *s)
     }
     if (driver.pitPending && driver.pit == PIT_NONE && wrap(model.pit.entry - pos) < pitPendingDistance + 250.0)
         driver.laneTarget = 0;
-    if (driver.pit == PIT_NONE && onArc(pos, model.pit.wallStart, model.pit.wallEnd) && car->_trkPos.toMiddle + pitShift(pos) > model.pit.pitWall)
+    if (driver.pit == PIT_NONE && onArc(pos, model.pit.wallStart, model.pit.wallEnd) && model.pit.side * (car->_trkPos.toMiddle + pitShift(pos)) > model.pit.pitWall)
     {
         bool stopping = driver.pitPending && onArc(pos, model.pit.wallStart, model.pit.wallStart + laneJoin);
         driver.pit = stopping ? PIT_LANE : PIT_EXIT;

@@ -16,6 +16,7 @@ import { compounds } from "./tyres.ts";
 const trackNames: Record<string, string> = {
   "hill-country": "Hill Country Circuit",
   "neon-boulevard": "Neon Boulevard Circuit",
+  "dune-bay": "Dune Bay Circuit",
   "training-ground": "Training Ground",
 };
 

@@ -341,14 +341,22 @@ export function asphaltDetail(grain: THREE.Texture): AsphaltDetail {
   };
 }
 
+export interface KerbPaint {
+  red: [number, number, number];
+  white: [number, number, number];
+}
+
 export function shadeKerb(
   material: THREE.MeshStandardNodeMaterial,
   grain: THREE.Texture,
+  colours: KerbPaint | null = null,
 ): void {
+  const red = colours ? vec3(...colours.red) : kerbRed;
+  const white = colours ? vec3(...colours.white) : kerbWhite;
   const across = uv().x;
   const along = uv().y;
   const phase = fract(along);
-  const white = aa(float(kerbBlock), phase).mul(
+  const whiteBlock = aa(float(kerbBlock), phase).mul(
     float(1).sub(aa(float(1 - 0.004), phase)),
   );
   const groove = float(1)
@@ -374,7 +382,7 @@ export function shadeKerb(
   const foot = float(1).sub(smoothstep(kerbFoot * 0.4, kerbFoot, across));
   const face = smoothstep(1, 1 + kerbFace, across);
   const joint = smoothstep(1 - kerbJoint, 1, across);
-  const paint = mix(kerbRed, kerbWhite, white).mul(speck);
+  const paint = mix(red, white, whiteBlock).mul(speck);
   const marked = mix(paint, paint.mul(1 - kerbRubber), rubber);
   const top = marked
     .mul(float(1).sub(seam.mul(0.35)))
