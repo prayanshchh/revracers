@@ -238,6 +238,14 @@ def bays(track):
     return [(pit["garageStart"] + index * spacing, spacing) for index in range(count)]
 
 
+def team_boxes(track):
+    all_bays = bays(track)
+    first = (len(all_bays) - TEAM_COUNT * TEAM_BAYS) // 2
+    for team in range(TEAM_COUNT):
+        s, spacing = all_bays[first + team * TEAM_BAYS]
+        yield team, s + spacing, spacing
+
+
 def team_of(index, count):
     first = (count - TEAM_COUNT * TEAM_BAYS) // 2
     team = (index - first) // TEAM_BAYS
@@ -575,22 +583,16 @@ def spare_jack(batch, frame, s, lateral):
 def equipment(frame, pit, parts):
     front = pit["garageFront"]
     team_parts, metal = parts["team"], parts["metal"]
-    all_bays = bays(frame.track)
-    first = (len(all_bays) - TEAM_COUNT * TEAM_BAYS) // 2
-    for index, (s, spacing) in enumerate(all_bays):
-        team = team_of(index, len(all_bays))
-        if team is None:
-            continue
-        middle = s + spacing / 2
+    for team, middle, spacing in team_boxes(frame.track):
         for side in (-1, 1):
             arch(parts, frame, middle + side * BOOM_OFFSET, front, team)
         spare_jack(team_parts, frame, middle + SPARE_JACK[0], pit["boxLateral"] + SPARE_JACK[1])
-        outer = -1 if (index - first) % TEAM_BAYS == 0 else 1
-        rack = middle + outer * (spacing / 4 + 0.32)
-        box(team_parts, frame, rack - 0.42, rack + 0.42, front - 0.52, front - 0.1, 0.0, 0.12, flat("dark"))
-        for bottle in (-0.2, 0.2):
-            cylinder(metal, frame.at(rack + bottle, front - 0.31, 0.12), (0, 0, 1), BOTTLE_RADIUS, BOTTLE_HEIGHT, flat("blanket"), 10)
-            cylinder(metal, frame.at(rack + bottle, front - 0.31, 0.12 + BOTTLE_HEIGHT), (0, 0, 1), BOTTLE_RADIUS * 0.4, 0.14, flat("jack"), 8)
+        for outer in (-1, 1):
+            rack = middle + outer * (spacing * 3 / 4 + 0.32)
+            box(team_parts, frame, rack - 0.42, rack + 0.42, front - 0.52, front - 0.1, 0.0, 0.12, flat("dark"))
+            for bottle in (-0.2, 0.2):
+                cylinder(metal, frame.at(rack + bottle, front - 0.31, 0.12), (0, 0, 1), BOTTLE_RADIUS, BOTTLE_HEIGHT, flat("blanket"), 10)
+                cylinder(metal, frame.at(rack + bottle, front - 0.31, 0.12 + BOTTLE_HEIGHT), (0, 0, 1), BOTTLE_RADIUS * 0.4, 0.14, flat("jack"), 8)
 
 
 def crew(frame, pit, parts, rng, figures):

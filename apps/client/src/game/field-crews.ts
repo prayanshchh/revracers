@@ -2,7 +2,7 @@ import * as THREE from "three/webgpu";
 import { newLook } from "./car-damage.ts";
 import type { FieldCars } from "./field-cars.ts";
 import { aiPit, aiPitPhase, carStride, pitStateSize } from "./frame-layout.ts";
-import { crewKit, type PitCrew } from "./pit-crew.ts";
+import type { PitCrew } from "./pit-crew.ts";
 import type { ParkedBoxes } from "./pit-props.ts";
 import { planTimed, type StopPlan } from "./pit-service.ts";
 import type { PitPhase } from "./pitstop.ts";
@@ -14,7 +14,6 @@ interface Duty {
   car: number;
   box: number;
   plan: StopPlan | null;
-  ready: boolean;
 }
 
 interface Sight {
@@ -22,29 +21,31 @@ interface Sight {
 }
 
 const crewReach = 9;
-const keptKits = 4;
 const resting = [false, false, false, false];
+const boxMatch = 1;
+
+function sameBox(a: number, b: number): boolean {
+  return Math.abs(a - b) < boxMatch;
+}
 
 export class FieldCrews {
   private readonly duties: Duty[];
-  private readonly kits = new Map<string, Promise<THREE.Texture>>();
   private readonly carMatrix = new THREE.Matrix4();
   private readonly bounds = new THREE.Sphere(new THREE.Vector3(), crewReach);
   private point: Point | null = null;
   private lateral = 0;
   private parked: ParkedBoxes | null = null;
+  private home: Duty | null = null;
 
   constructor(
     crews: PitCrew[],
     private readonly field: FieldCars,
-    private readonly anisotropy: number,
   ) {
     this.duties = crews.map((crew) => ({
       crew,
       car: -1,
       box: 0,
       plan: null,
-      ready: false,
     }));
   }
 
@@ -54,6 +55,61 @@ export class FieldCrews {
 
   park(parked: ParkedBoxes): void {
     this.parked = parked;
+  }
+
+  lend(crew: PitCrew, box: number): void {
+    this.home = { crew, car: -1, box, plan: null };
+  }
+
+  guest(pits: Float64Array): number {
+    const home = this.home;
+    if (!home) return -1;
+    const count = Math.floor(pits.length / pitStateSize);
+    for (let car = 1; car < count; car++)
+      if (
+        this.serviced(pits, car) &&
+        sameBox(this.state(pits, car, aiPit.box), home.box) &&
+        this.phase(pits, car) !== "track"
+      )
+        return car;
+    return -1;
+  }
+
+  guestInBox(pits: Float64Array, car: number): boolean {
+    const phase = this.state(pits, car, aiPit.phase);
+    return phase === aiPitPhase.stopped || phase === aiPitPhase.release;
+  }
+
+  serveGuest(
+    car: number,
+    pits: Float64Array,
+    cars: Float64Array,
+    eye: THREE.Vector3,
+    now: number,
+  ): void {
+    const home = this.home;
+    if (!home) return;
+    if (home.car !== car) this.handOver(home, car);
+    this.serve(home, pits, cars, eye, now);
+  }
+
+  dropGuest(): void {
+    const home = this.home;
+    if (!home || home.car < 0) return;
+    this.field.setPitService(home.car, 0, 0, resting);
+    home.car = -1;
+    home.plan = null;
+    home.crew.rearm();
+  }
+
+  private handOver(duty: Duty, car: number): void {
+    if (duty.car >= 0) this.field.setPitService(duty.car, 0, 0, resting);
+    const mounts = this.field.crewMounts(car);
+    duty.crew.rearm();
+    duty.car = car;
+    duty.plan = null;
+    if (mounts)
+      duty.crew.attachCar(mounts, null, this.field.damageOf(car) ?? newLook());
   }
 
   place(point: Point, lateral: number): void {
@@ -76,69 +132,62 @@ export class FieldCrews {
     return pits[car * pitStateSize + field] ?? 0;
   }
 
+  private serviced(pits: Float64Array, car: number): boolean {
+    return (
+      this.state(pits, car, aiPit.noService) === 0 &&
+      this.state(pits, car, aiPit.autoRelease) === 1
+    );
+  }
+
   private wanted(pits: Float64Array, car: number): boolean {
     const phase = this.state(pits, car, aiPit.phase);
+    const box = this.state(pits, car, aiPit.box);
     return (
       (phase === aiPitPhase.lane || phase === aiPitPhase.boxing) &&
-      this.state(pits, car, aiPit.noService) === 0 &&
-      this.state(pits, car, aiPit.autoRelease) === 1 &&
-      !this.duties.some((duty) => duty.car === car)
+      this.serviced(pits, car) &&
+      !(this.home && sameBox(box, this.home.box)) &&
+      !this.duties.some((duty) => duty.car >= 0 && sameBox(duty.box, box))
     );
+  }
+
+  private waiting(pits: Float64Array, duty: Duty): number {
+    const count = Math.floor(pits.length / pitStateSize);
+    for (let car = 1; car < count; car++) {
+      const phase = this.state(pits, car, aiPit.phase);
+      if (
+        car !== duty.car &&
+        (phase === aiPitPhase.lane || phase === aiPitPhase.boxing) &&
+        this.serviced(pits, car) &&
+        sameBox(this.state(pits, car, aiPit.box), duty.box)
+      )
+        return car;
+    }
+    return -1;
   }
 
   private assign(pits: Float64Array): void {
     const count = Math.floor(pits.length / pitStateSize);
     for (let car = 1; car < count; car++) {
       if (!this.wanted(pits, car)) continue;
-      const duty = this.duties.find((d) => d.car < 0);
-      if (!duty) return;
-      this.take(duty, car, this.state(pits, car, aiPit.box));
+      const team = this.field.teamOf(car);
+      const duty = this.duties.find(
+        (each) => each.car < 0 && each.crew.team === team,
+      );
+      if (duty) this.take(duty, car, this.state(pits, car, aiPit.box));
     }
   }
 
   private take(duty: Duty, car: number, box: number): void {
-    const team = this.field.teamOf(car);
     const mounts = this.field.crewMounts(car);
-    if (!team || !mounts || !this.point) return;
+    if (!mounts || !this.point) return;
     const [x, y, z] = this.point(box, this.lateral);
     const [x2, y2] = this.point(box + 2, this.lateral);
     duty.car = car;
     duty.box = box;
     this.parked?.show(box, false);
     duty.plan = null;
-    duty.ready = false;
     duty.crew.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x));
     duty.crew.attachCar(mounts, null, this.field.damageOf(car) ?? newLook());
-    void this.kit(team).then((kit) => {
-      if (duty.car !== car) return;
-      duty.crew.useTeam(team, kit);
-      duty.ready = true;
-    });
-  }
-
-  private kit(team: string): Promise<THREE.Texture> {
-    const known = this.kits.get(team);
-    if (known) {
-      this.kits.delete(team);
-      this.kits.set(team, known);
-      return known;
-    }
-    const loading = crewKit(team, this.anisotropy);
-    this.kits.set(team, loading);
-    if (this.kits.size > keptKits) {
-      const [oldest] = this.kits.keys();
-      const stale = oldest === undefined ? undefined : this.kits.get(oldest);
-      const inUse = this.duties.some(
-        (duty) => duty.car >= 0 && this.field.teamOf(duty.car) === oldest,
-      );
-      if (oldest !== undefined && stale && !inUse) {
-        this.kits.delete(oldest);
-        void stale.then((texture) => {
-          texture.dispose();
-        });
-      }
-    }
-    return loading;
   }
 
   private phase(pits: Float64Array, car: number): PitPhase {
@@ -158,7 +207,11 @@ export class FieldCrews {
     eye: THREE.Vector3,
     now: number,
   ): void {
-    const phase = duty.ready ? this.phase(pits, duty.car) : "track";
+    const done = this.phase(pits, duty.car);
+    const next =
+      done === "release" || done === "lane" ? this.waiting(pits, duty) : -1;
+    if (next >= 0) this.handOver(duty, next);
+    const phase = this.phase(pits, duty.car);
     this.carMatrix.fromArray(cars, duty.car * carStride);
     const compound = this.state(pits, duty.car, aiPit.compound);
     if (compound >= 0) duty.crew.setCompounds(compound);
@@ -172,7 +225,7 @@ export class FieldCrews {
       cars,
       duty.car,
     );
-    if (!duty.ready || phase !== "track") {
+    if (phase !== "track") {
       this.field.setPitService(
         duty.car,
         result.heave,
@@ -209,14 +262,16 @@ export class FieldCrews {
           (sight.intersectsSphere(this.bounds) ||
             shadows.intersectsSphere(this.bounds));
       }
-      if (!crew.root.visible) continue;
-      crew.prepare();
-      crew.root.updateMatrixWorld();
+      if (crew.root.visible) crew.present();
     }
   }
 
   warm(): void {
     for (const { crew } of this.duties) crew.warm();
+  }
+
+  rest(): void {
+    for (const { crew } of this.duties) crew.standDown();
   }
 
   posts(out: number[]): void {

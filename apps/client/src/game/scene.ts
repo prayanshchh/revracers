@@ -126,8 +126,8 @@ const chaseFollow = 0.5;
 const cameraListSlot = 21;
 const carCameraList = -1;
 const crewReach = 12;
-const fieldCrewCount = 2;
 const playerBayClear = 7;
+const idleWheels = [false, false, false, false];
 const flipX = new THREE.Matrix4().makeScale(-1, 1, 1);
 const sunGlow = 2.4;
 const kelvinOffset = 273.15;
@@ -506,7 +506,7 @@ async function venueExtras(
   anisotropy: number,
   team: string,
   loads: SharedLoads,
-  spares: number,
+  others: string[],
   road: Promise<THREE.Object3D>,
 ): Promise<{ people: Crowd | null; crews: PitCrew[] }> {
   if (!circuit.venue) return { people: null, crews: [] };
@@ -516,22 +516,21 @@ async function venueExtras(
       : circuit.ground === "glb"
         ? Crowd.load(venuePeople(road))
         : null,
-    PitCrew.load(crewUrl, anisotropy, team, spares),
+    PitCrew.load(crewUrl, anisotropy, team, others),
   ]);
   return { people, crews };
 }
 
-function crewSpares(rivals: string[]): number {
-  return rivals.length > 0 ? fieldCrewCount : 0;
+function otherTeams(team: string, rivals: string[]): string[] {
+  return [...new Set(rivals)].filter((rival) => rival !== team);
 }
 
 function fieldCrewsFor(
   crews: PitCrew[],
   field: FieldCars | null,
-  anisotropy: number,
 ): FieldCrews | null {
   return field && crews.length > 1
-    ? new FieldCrews(crews.slice(1), field, anisotropy)
+    ? new FieldCrews(crews.slice(1), field)
     : null;
 }
 
@@ -643,6 +642,8 @@ export class Scene {
   private bodyWater = -1;
   private weatherTime = 0;
   private cars: Float64Array | null = null;
+  private pits: Float64Array | null = null;
+  private crewGuest = -1;
   private readonly baseHaze = new THREE.Color();
   private readonly greyHaze = new THREE.Color();
   private readonly streakColour = new THREE.Color();
@@ -677,6 +678,7 @@ export class Scene {
     ((d: number, l: number) => [number, number, number]) | null = null;
   private pitLateral = 0;
   private playerBox = 0;
+  private pitLength = 1;
   private readonly pitEye = new THREE.Vector3();
   private readonly pitCar = new THREE.Matrix4();
   private readonly posts: number[] = [];
@@ -861,7 +863,7 @@ export class Scene {
         anisotropy,
         team,
         loads,
-        crewSpares(rivals),
+        otherTeams(team, rivals),
         roadLoad,
       ),
       plantTrees(circuit, loads, anisotropy),
@@ -911,7 +913,7 @@ export class Scene {
       culler,
       racingLine,
       crews[0] ?? null,
-      fieldCrewsFor(crews, field, anisotropy),
+      fieldCrewsFor(crews, field),
       data.length / engine.trackLength(),
       field,
       lights,
@@ -949,6 +951,7 @@ export class Scene {
 
   updateField(cars: Float64Array, pits: Float64Array | null = null): void {
     this.cars = cars;
+    this.pits = pits;
     if (pits && this.fieldCrews) {
       this.pitEye.setFromMatrixPosition(this.camera.matrixWorld);
       this.fieldCrews.update(pits, cars, this.pitEye, performance.now() / 1000);
@@ -1301,12 +1304,38 @@ export class Scene {
   updatePit(control: PitControl, frame: Float64Array, fresh: number): void {
     const phase =
       control.penalty.kind === "drive-through" ? "track" : control.phase;
-    this.crewOut = phase !== "track";
-    this.parked?.show(this.playerBox, !this.crewOut);
     this.gate.update(control.countdown);
+    if (!this.crew) {
+      this.crewOut = phase !== "track";
+      this.parked?.show(this.playerBox, !this.crewOut);
+      return;
+    }
+    this.pitEye.setFromMatrixPosition(this.camera.matrixWorld);
+    const guest = this.crewClient(phase, control);
+    if (guest !== this.crewGuest) this.switchCrew(guest);
+    if (guest >= 0 && this.pits && this.cars) {
+      this.car.setPitService(0, 0, idleWheels);
+      this.car.hideFrontWing(false);
+      this.fieldCrews?.serveGuest(
+        guest,
+        this.pits,
+        this.cars,
+        this.pitEye,
+        performance.now() / 1000,
+      );
+    } else this.servePlayer(phase, control, frame, fresh);
+    this.crewOut = this.crew.out;
+    this.parked?.show(this.playerBox, !this.crewOut);
+  }
+
+  private servePlayer(
+    phase: PitControl["phase"],
+    control: PitControl,
+    frame: Float64Array,
+    fresh: number,
+  ): void {
     if (!this.crew) return;
     this.crew.setCompounds(fresh);
-    this.pitEye.setFromMatrixPosition(this.camera.matrixWorld);
     this.pitCar.fromArray(frame, frameIndex.posMat);
     const { heave, pitch, off, wingOff } = this.crew.update(
       phase,
@@ -1320,6 +1349,39 @@ export class Scene {
     );
     this.car.setPitService(heave, pitch, off);
     this.car.hideFrontWing(wingOff);
+  }
+
+  private crewClient(phase: PitControl["phase"], control: PitControl): number {
+    const guest = this.homeGuest();
+    if (guest < 0 || phase === "service") return -1;
+    if (phase === "boxing") return control.queued ? guest : -1;
+    if (phase !== "lane" || !control.choosingTyres) return guest;
+    return this.playerFirst(guest, control) ? -1 : guest;
+  }
+
+  private homeGuest(): number {
+    return this.pits ? (this.fieldCrews?.guest(this.pits) ?? -1) : -1;
+  }
+
+  private playerFirst(guest: number, control: PitControl): boolean {
+    if (this.pits && this.fieldCrews?.guestInBox(this.pits, guest))
+      return false;
+    const length = this.pitLength;
+    const at = this.cars?.[guest * carStride + carField.distance] ?? 0;
+    const theirs = (((this.playerBox - at) % length) + length) % length;
+    return (control.distanceToBox ?? Infinity) < theirs;
+  }
+
+  private switchCrew(guest: number): void {
+    if (this.crewGuest >= 0 && guest < 0) {
+      this.fieldCrews?.dropGuest();
+      this.crew?.attachCar(
+        this.car.tyreMounts(),
+        this.car.wingParts(),
+        this.car.damage,
+      );
+    }
+    this.crewGuest = guest;
   }
 
   crewPosts(steering: boolean): number[] {
@@ -1339,6 +1401,8 @@ export class Scene {
     const [x2, y2] = point(layout.boxDistance + 2, lateral);
     this.crew?.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x));
     this.fieldCrews?.place(point, lateral);
+    if (this.crew) this.fieldCrews?.lend(this.crew, layout.boxDistance);
+    this.pitLength = layout.length;
     this.pitPoint = point;
     this.pitLateral = lateral;
     this.playerBox = layout.boxDistance;
@@ -1624,9 +1688,7 @@ export class Scene {
         (this.seen.intersectsSphere(this.crewBounds) ||
           this.sunlight.intersectsSphere(this.crewBounds));
     }
-    if (!root.visible) return;
-    this.crew.prepare();
-    root.updateMatrixWorld();
+    if (root.visible) this.crew.present();
   }
 
   async warmUp(
@@ -1652,6 +1714,7 @@ export class Scene {
       },
     );
     this.warming = false;
+    this.fieldCrews?.rest();
     releaseCpuCopies(this.road, this.culler.retained());
     releaseUploadedImages(renderer, this.scene);
   }

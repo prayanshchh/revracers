@@ -514,7 +514,8 @@ static bool teammateStopping(tSituation *s, int i)
         const Timing &mate = timing[j];
         if (j == i || mate.retired || mate.finished || mate.disqualified)
             continue;
-        if ((sdAiBayOf(j) - firstTeamBay) / 2 == team && (sdAiInPitLane(j) || sdAiPitPending(j)))
+        bool pitting = sdAiInPitLane(j) || sdAiPitPending(j) || (playerDriven(s->cars[j]) && sdAiHumanPitting());
+        if ((sdAiBayOf(j) - firstTeamBay) / 2 == team && pitting)
             return true;
     }
     return false;
@@ -1047,6 +1048,14 @@ bool sdFieldActive()
 int sdFieldBay(int garage, int seat)
 {
     return firstTeamBay + garage * 2 + seat;
+}
+
+double sdFieldStopBox(int garage, int seat)
+{
+    double distance = 0, lateral = 0;
+    if (kind == KIND_QUALIFYING && sdAiBoxOf(sdFieldBay(garage, seat), &distance, &lateral))
+        return distance;
+    return sdAiSharedBox(sdFieldBay(garage, 0));
 }
 
 int sdPitCompound()

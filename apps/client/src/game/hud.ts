@@ -294,6 +294,13 @@ function estimateText(estimate: PitControl["estimate"]): string {
   return `${low.toFixed(1)}s - ${high.toFixed(1)}s`;
 }
 
+function boxText(control: PitControl): string {
+  if (control.queued) return "Teammate in your box - wait";
+  return control.distanceToBox === null
+    ? ""
+    : `Your box - ${String(Math.round(control.distanceToBox))}m`;
+}
+
 function turnInGrade(control: PitControl): PitControl["grade"] {
   return control.phase === "boxing" || control.phase === "service"
     ? control.grade
@@ -702,12 +709,7 @@ export class Hud {
     putData(banner, "over", String(control.speedKph > limitKph + 1));
     putText(this.find("pit-limit"), String(limitKph));
     putText(this.find("pit-speed"), String(Math.round(control.speedKph)));
-    putText(
-      this.find("pit-distance"),
-      control.distanceToBox === null
-        ? ""
-        : `Your box - ${String(Math.round(control.distanceToBox))}m`,
-    );
+    putText(this.find("pit-distance"), boxText(control));
   }
 
   private showPenaltyHold(control: PitControl, left: number): void {

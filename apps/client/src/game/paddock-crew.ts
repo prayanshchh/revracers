@@ -3,10 +3,9 @@ import { MeshoptSimplifier } from "meshoptimizer/simplifier";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { clone as cloneRig } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { gltfLoader } from "./gltf-loader.ts";
-import { releaseOnceUploaded } from "./preload.ts";
+import { teamKit } from "./pit-crew.ts";
 import { surface } from "./road.ts";
 import type { CrewSpot } from "./street-pit.ts";
-import { carFile } from "./teams.ts";
 
 const kitMaterials = new Set(["crew suit", "crew shell"]);
 const poseShare = 0.4;
@@ -102,17 +101,6 @@ function bake(model: THREE.Object3D, clip: THREE.AnimationClip): Pose {
   return pose;
 }
 
-async function kit(team: string, anisotropy: number): Promise<THREE.Texture> {
-  const texture = await new THREE.TextureLoader().loadAsync(
-    carFile(team, "crew.jpg"),
-  );
-  texture.flipY = false;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = anisotropy;
-  releaseOnceUploaded(texture);
-  return texture;
-}
-
 function teamMaterial(
   source: THREE.Material,
   map: THREE.Texture,
@@ -167,7 +155,7 @@ export async function paddockCrew(
   const names = [...new Set(spots.map((spot) => spot.team))];
   const [gltf, kits] = await Promise.all([
     gltfLoader().loadAsync(url),
-    Promise.all(names.map((team) => kit(team, anisotropy))),
+    Promise.all(names.map((team) => teamKit(team, anisotropy))),
     MeshoptSimplifier.ready,
   ]);
   const poses = new Map<string, Pose>();

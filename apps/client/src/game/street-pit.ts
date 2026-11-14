@@ -43,7 +43,7 @@ export interface Paint {
   glow: number;
 }
 
-const firstTeamBay = 2;
+const firstTeamBay = 1;
 const emptyGarage = [0.3, 0.31, 0.33];
 
 const wallBack = 0.6;
@@ -57,6 +57,8 @@ const boomHeight = 4.9;
 const boomReach = 3.9;
 const boomSize = 0.18;
 const boomSpread = 2.7;
+const cartsAhead = 2.9;
+const jackAhead = 5.7;
 const tyreRadius = 0.37;
 const tyreWidth = 0.33;
 const tyreSides = 14;
@@ -277,8 +279,6 @@ function bayKit(
   const middle = s0 + side.bay / 2;
   const team: Paint = { colour: teamColour(bay), glow: 0.35 };
   const front = side.front;
-  boom(builder, at(middle - boomSpread), front, team, false);
-  boom(builder, at(middle + boomSpread), front, team, true);
   for (let k = 0; k < 4; k++) {
     const compound =
       compounds[(bay + Math.floor(k / 2)) % compounds.length] ?? white;
@@ -290,9 +290,6 @@ function bayKit(
       compound,
     );
   }
-  for (let k = 0; k < 4; k++)
-    gunCart(builder, at(s0 + side.bay - 4.2 + k * 0.68), front - 0.4, team);
-  frontJack(builder, at(s0 + side.bay - 1.4), front - 0.5, team);
   const deep = front + garageDepth;
   for (const edge of [s0 + 1.6, s0 + side.bay - 1.6])
     for (let k = 0; k < 4; k++)
@@ -311,6 +308,29 @@ function bayKit(
     block(builder, monitor, deep - 1.45, 1.0, [0.95, 0.58, 0.05], dark);
     block(builder, monitor, deep - 1.48, 1.03, [0.88, 0.52, 0.02], screen);
   }
+}
+
+function boxKit(
+  builder: Builder,
+  at: (s: number) => Station,
+  side: PitSide,
+  bay: number,
+): void {
+  const centre = side.from + (bay + 1) * side.bay;
+  const team: Paint = { colour: teamColour(bay), glow: 0.35 };
+  const front = side.front;
+  boom(builder, at(centre - boomSpread), front, team, false);
+  boom(builder, at(centre + boomSpread), front, team, true);
+  for (let k = 0; k < 4; k++)
+    gunCart(builder, at(centre + cartsAhead + k * 0.68), front - 0.4, team);
+  frontJack(builder, at(centre + jackAhead), front - 0.5, team);
+}
+
+export function boxCentres(from: number, bay: number, count: number): number[] {
+  return Array.from({ length: count }, (_, index) => index).flatMap((index) => {
+    if (!teamOfBay(index)) return [from + (index + 0.5) * bay];
+    return (index - firstTeamBay) % 2 === 0 ? [from + (index + 1) * bay] : [];
+  });
 }
 
 function pitStand(
@@ -525,8 +545,9 @@ export function pitKit(
   const bays = teamBays(side, length);
   for (const bay of bays) {
     bayKit(builder, at, side, bay);
-    if ((bay - firstTeamBay) % 2 === 0)
-      pitStand(builder, at, side, side.from + (bay + 1) * side.bay, bay);
+    if ((bay - firstTeamBay) % 2 !== 0) continue;
+    boxKit(builder, at, side, bay);
+    pitStand(builder, at, side, side.from + (bay + 1) * side.bay, bay);
   }
   pitSigns(builder, faces, at, side, ends);
   return [

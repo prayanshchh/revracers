@@ -1,5 +1,6 @@
 import {
   PitStop,
+  pitReport,
   steerCommand,
   type PitControl,
   type PitDrive,
@@ -752,21 +753,21 @@ function parkTeamBoxes(
 ): void {
   if (!venue || !Number.isFinite(layout.pitWall)) return;
   scene.parkBoxes(
-    teams.flatMap((team, garage) =>
-      [0, 1].map((seat) => ({
-        team: team.id,
-        distance: engine.teamBox(garage, seat),
-      })),
-    ),
+    teams.map((team, garage) => ({
+      team: team.id,
+      distance: engine.teamBox(garage),
+    })),
   );
 }
 
-function pitInput(frame: Float64Array, laneClear: boolean) {
+function pitInput(frame: Float64Array, engine: Engine) {
   return {
     distance: frame[frameIndex.distFromStart] ?? 0,
     toMiddle: frame[frameIndex.toMiddle] ?? 0,
     speed: Math.abs(frame[frameIndex.speed] ?? 0),
-    laneClear,
+    laneClear: engine.pitLaneClear(),
+    boxTaken: engine.pitBoxTaken(),
+    sideBlocked: engine.pitSideBlocked(),
   };
 }
 
@@ -1671,11 +1672,8 @@ async function main(): Promise<void> {
     pit.requestWing(replaceWing);
     const tyre = controls.tyre();
     hud.setTyreChoice(tyre);
-    const control = pit.update(
-      pitInput(frame, engine.pitLaneClear()),
-      now,
-      pressed,
-    );
+    const control = pit.update(pitInput(frame, engine), now, pressed);
+    engine.playerPit(...pitReport(control));
     engine.speedLimit(control.limit);
     engine.pitHold(control.hold);
     engine.analog(

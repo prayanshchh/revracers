@@ -21,6 +21,7 @@ import {
   wrap,
 } from "./training-layout.ts";
 import {
+  boxCentres,
   type CrewSpot,
   crewSpots,
   type GarageCar,
@@ -653,8 +654,7 @@ function pitMarkings(list: Station[], track: StreetTrack): Part {
   const bays = Math.round(garageSpan / pit.baySpacing);
   const near = pit.boxLateral - boxWidth / 2;
   const far = pit.boxLateral + boxWidth / 2;
-  for (let bay = 0; bay < bays; bay++) {
-    const centre = pit.garageStart + (bay + 0.5) * pit.baySpacing;
+  for (const centre of boxCentres(pit.garageStart, pit.baySpacing, bays)) {
     const back = centre - boxLength / 2;
     const front = centre + boxLength / 2;
     rectangle(builder, list, length, [back, back + pitLine], [near, far]);

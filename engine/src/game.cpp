@@ -647,9 +647,7 @@ EMSCRIPTEN_KEEPALIVE void sdFieldAutopilot(int on)
 
 EMSCRIPTEN_KEEPALIVE double sdFieldPlayerBox()
 {
-    double distance = 0, lateral = 0;
-    sdAiBoxOf(sdFieldBay(playerEntry.garage, playerEntry.seat), &distance, &lateral);
-    return distance;
+    return sdFieldStopBox(playerEntry.garage, playerEntry.seat);
 }
 
 EMSCRIPTEN_KEEPALIVE void sdFieldPits(double *out)
@@ -658,11 +656,9 @@ EMSCRIPTEN_KEEPALIVE void sdFieldPits(double *out)
         sdAiPitState(i, &out[i * SD_PIT_STATE]);
 }
 
-EMSCRIPTEN_KEEPALIVE double sdPitTeamBox(int garage, int seat)
+EMSCRIPTEN_KEEPALIVE double sdPitTeamBox(int garage)
 {
-    double distance = 0, lateral = 0;
-    sdAiBoxOf(sdFieldBay(garage, seat), &distance, &lateral);
-    return distance;
+    return sdAiSharedBox(sdFieldBay(garage, 0));
 }
 
 EMSCRIPTEN_KEEPALIVE int sdFieldCount()
@@ -836,10 +832,12 @@ EMSCRIPTEN_KEEPALIVE int sdInit(const char *trackCategory, const char *trackName
     if (carCount > 1)
     {
         sdAiConfigure(0, 1.0, 1.0, 1.0, sdFieldBay(playerEntry.garage, playerEntry.seat));
+        sdAiSetBox(0, sdFieldStopBox(playerEntry.garage, playerEntry.seat));
         for (int i = 1; i < carCount; i++)
         {
             const FieldEntry &entry = fieldEntries[i - 1];
             sdAiConfigure(i, entry.pace, entry.racePace, entry.racecraft, sdFieldBay(entry.garage, entry.seat));
+            sdAiSetBox(i, sdFieldStopBox(entry.garage, entry.seat));
         }
         for (int i = 0; i < carCount; i++)
         {

@@ -329,7 +329,7 @@ def player_box(garage_rows, step, length):
     start = float(garage_rows[0]) * step
     span = (float(garage_rows[-1]) * step - start) % length
     spacing = span / int(span // BAY_SPACING)
-    return (start + (PLAYER_BAY + 0.5) * spacing) % length
+    return (start + (PLAYER_BAY + 1) * spacing) % length
 
 
 def walls(osm, points, tangents, width, rings, k, step, reach):
