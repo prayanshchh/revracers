@@ -580,6 +580,7 @@ export class PitCrew {
   private readonly props: PitProps;
   private readonly anchor = new THREE.Matrix4();
   private readonly anchorInverse = new THREE.Matrix4();
+  private garageSide = 1;
   private readonly car = { x: 0, y: 0, yaw: 0 };
   private readonly live = { x: -Infinity, y: 0, yaw: 0 };
   private readonly before = { x: -Infinity, y: 0 };
@@ -698,7 +699,7 @@ export class PitCrew {
         member,
         work: this.workSpot(member.role, member.corner, member.side),
       }))
-      .sort((a, b) => a.work.y - b.work.y);
+      .sort((a, b) => this.garageSide * (a.work.y - b.work.y));
     for (let from = 0; from < order.length; from += homeRow) {
       const row = order
         .slice(from, from + homeRow)
@@ -707,10 +708,12 @@ export class PitCrew {
         .slice(from, from + homeRow)
         .sort((a, b) => a[0] - b[0]);
       row.forEach(({ member }, i) => {
-        const [x, y] = places[i] ?? [0, garageFront + 1];
+        const [x, deep] = places[i] ?? [0, garageFront + 1];
+        const y = this.garageSide * deep;
         member.home.x = x;
         member.home.y = y;
-        member.home.yaw = -Math.PI / 2 + 0.5 * Math.sin(member.seed * 3.1);
+        member.home.yaw =
+          (-this.garageSide * Math.PI) / 2 + 0.5 * Math.sin(member.seed * 3.1);
         member.spot = { ...member.home };
         member.led = { x, y };
       });
@@ -824,7 +827,20 @@ export class PitCrew {
     this.fresh.wear = 0;
   }
 
-  setAnchor(x: number, y: number, z: number, heading: number): void {
+  setAnchor(
+    x: number,
+    y: number,
+    z: number,
+    heading: number,
+    garageSide = 1,
+  ): void {
+    if (garageSide !== this.garageSide) {
+      this.garageSide = garageSide;
+      this.props.garageSide = garageSide;
+      this.arrange();
+      if (!this.state.out)
+        for (const member of this.members) this.sendHome(member);
+    }
     this.anchor.makeRotationZ(heading).setPosition(x, y, z);
     this.anchorInverse.copy(this.anchor).invert();
     this.root.matrix.copy(this.anchor);
@@ -882,9 +898,17 @@ export class PitCrew {
       case "wing":
         return this.wingSpot(side, 0, 0);
       case "spare":
-        return this.at(spareSpot[0], spareSpot[1], toCar + 0.5);
+        return this.at(
+          spareSpot[0],
+          this.garageSide * spareSpot[1],
+          this.garageSide * (toCar + 0.5),
+        );
       case "chief":
-        return this.at(chiefSpot[0], chiefSpot[1], chiefFacing);
+        return this.at(
+          chiefSpot[0],
+          this.garageSide * chiefSpot[1],
+          this.garageSide * chiefFacing,
+        );
       default:
         return this.wheelSpot(role, corner, side);
     }
@@ -956,7 +980,11 @@ export class PitCrew {
 
   private readySpot(member: Member): Spot {
     if (member.role === "rearJack") {
-      const [x, y] = this.carPoint(rearPoint - 0.55, readyOut, 0);
+      const [x, y] = this.carPoint(
+        rearPoint - 0.55,
+        this.garageSide * readyOut,
+        0,
+      );
       return { x, y, yaw: this.car.yaw + Math.PI };
     }
     return (
@@ -1079,7 +1107,7 @@ export class PitCrew {
   private fenceTraffic(): void {
     this.traffic.forEach((pose, i) => {
       if (!(Math.hypot(pose.x, pose.y) < hullRange)) return;
-      if (pose.y > trafficDepth) return;
+      if (this.garageSide * pose.y > trafficDepth) return;
       const speed = this.trafficSpeed[i] ?? 0;
       this.hulls.push(
         Math.abs(speed) > stillSpeed
@@ -1162,7 +1190,8 @@ export class PitCrew {
       const walk = Math.hypot(spot.x - member.home.x, spot.y - member.home.y);
       const slack = eta - outEarly - outSettle - walk / jogSpeed;
       member.leaveAt = (member.seed * 0.37) % 1;
-      const wait = spot.y < 0 ? 0 : member.leaveAt * outSpread;
+      const wait =
+        this.garageSide * spot.y < 0 ? 0 : member.leaveAt * outSpread;
       member.startAt = this.handover ? now : now + Math.min(wait, slack);
       if (this.garage || (slack < 0 && !this.handover))
         this.placeAt(member, spot);
@@ -1286,7 +1315,11 @@ export class PitCrew {
   private jackMove(member: Member): Spot | null {
     if (member.role === "frontJack")
       return this.clearing()
-        ? this.at(noseTip + asideAhead, asideOut, Math.PI / 2)
+        ? this.at(
+            noseTip + asideAhead,
+            this.garageSide * asideOut,
+            (this.garageSide * Math.PI) / 2,
+          )
         : null;
     if (member.role !== "rearJack" || this.state.plan?.service === false)
       return null;
@@ -1430,7 +1463,9 @@ export class PitCrew {
     }
     member.pressed = this.now < member.hurry;
     if (!member.crab && !member.pressed) {
-      const door = throughDoor(at, to);
+      const g = this.garageSide;
+      const mirrored = throughDoor([at[0], g * at[1]], [to[0], g * to[1]]);
+      const door: [number, number] = [mirrored[0], g * mirrored[1]];
       rest += Math.hypot(door[0] - to[0], door[1] - to[1]);
       to = door;
     }
@@ -2313,12 +2348,12 @@ export class PitCrew {
     const wing = plan.wing;
     const home = wingHome(plan.duration);
     if (time >= home.pick - homeApproach && time < home.down + homeLetGo)
-      return wingPath(wing, plan.duration, time, "old");
+      return wingPath(wing, plan.duration, time, "old", this.garageSide);
     if (time < wing.unlock - 0.3 || time > wing.done + 0.1) return null;
-    const old = wingPath(wing, plan.duration, time, "old");
+    const old = wingPath(wing, plan.duration, time, "old", this.garageSide);
     return old.held || time < wing.unlock
       ? old
-      : wingPath(wing, plan.duration, time, "new");
+      : wingPath(wing, plan.duration, time, "new", this.garageSide);
   }
 
   private wingPoint(
@@ -2403,8 +2438,8 @@ export class PitCrew {
     ];
     this.kneel(draft, kneeling);
     const poses = [
-      wingPath(wing, plan.duration, time, "old"),
-      wingPath(wing, plan.duration, time, "new"),
+      wingPath(wing, plan.duration, time, "old", this.garageSide),
+      wingPath(wing, plan.duration, time, "new", this.garageSide),
     ];
     const rate = Math.min(1, this.poseDelta * 10);
     member.grab = member.grab.map((g, k) =>

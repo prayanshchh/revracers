@@ -1,5 +1,6 @@
 import type { CircuitData } from "./circuit-map.ts";
 import { circuitOf } from "./circuits.ts";
+import { headed } from "./map-heading.ts";
 import { weatherOf } from "./settings.ts";
 
 const pictures = import.meta.glob<string>(
@@ -159,11 +160,12 @@ const outlinePad = 40;
 const outlineStep = 3;
 const outlines = new Map<string, Promise<Outline>>();
 
-function outlineFrom(data: CircuitData): Outline {
+function outlineFrom(data: CircuitData, heading?: number): Outline {
   const raw = data.track.points;
-  const points: [number, number][] = [];
+  const track: [number, number][] = [];
   for (let i = 0; i + 2 < raw.length; i += 3 * outlineStep)
-    points.push([raw[i] ?? 0, raw[i + 2] ?? 0]);
+    track.push([raw[i] ?? 0, raw[i + 2] ?? 0]);
+  const points = headed(track, heading, false);
   const xs = points.map((p) => p[0]);
   const ys = points.map((p) => p[1]);
   const minX = Math.min(...xs);
@@ -193,7 +195,7 @@ export function outlineOf(track: string): Promise<Outline> {
   if (known) return known;
   const load = fetch(circuitOf(track).map)
     .then((response) => response.json() as Promise<CircuitData>)
-    .then(outlineFrom);
+    .then((data) => outlineFrom(data, circuitOf(track).mapHeading));
   load.catch(() => outlines.delete(track));
   outlines.set(track, load);
   return load;

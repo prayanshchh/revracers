@@ -134,6 +134,7 @@ describe("race event conditions", () => {
     expect(looks).toEqual({
       "hill-country": "afternoon",
       "neon-boulevard": "night",
+      "dune-bay": "night",
     });
   });
 

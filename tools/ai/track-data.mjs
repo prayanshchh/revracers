@@ -109,6 +109,7 @@ export function writeTrackData(root, id, target) {
       pit.garageStart,
       spacing,
       firstFreeBay,
+      frame.pit.side ?? 1,
     ]),
     section(
       "grid_x",

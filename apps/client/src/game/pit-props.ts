@@ -102,6 +102,17 @@ export function wingPath(
   duration: number,
   time: number,
   which: "old" | "new",
+  side = 1,
+): WingPose {
+  const pose = wingSide(wing, duration, time, which);
+  return { ...pose, l: pose.l * side };
+}
+
+function wingSide(
+  wing: WingPlan,
+  duration: number,
+  time: number,
+  which: "old" | "new",
 ): WingPose {
   if (which === "old") {
     const k1 = span(time, wing.unlock, wing.off);
@@ -571,6 +582,7 @@ export class PitProps {
   ];
   private readonly view: CarPose = { x: 0, y: 0, yaw: 0 };
   private car: CarPose = { x: 0, y: 0, yaw: 0 };
+  garageSide = 1;
   private state: PropState = {
     plan: null,
     time: -Infinity,
@@ -886,12 +898,16 @@ export class PitProps {
     };
     place(
       rig.old,
-      wingPath(wing, plan.duration, time, "old"),
+      wingPath(wing, plan.duration, time, "old", this.garageSide),
       rig.offBase ?? frame,
     );
     const fitted = span(time, wing.fit, wing.fit + slideIn);
     this.blendFrames(nominal, frame, fitted, this.m);
-    place(rig.fresh, wingPath(wing, plan.duration, time, "new"), this.m);
+    place(
+      rig.fresh,
+      wingPath(wing, plan.duration, time, "new", this.garageSide),
+      this.m,
+    );
   }
 
   private blendFrames(

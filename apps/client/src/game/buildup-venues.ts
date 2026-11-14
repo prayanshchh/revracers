@@ -158,9 +158,70 @@ const neonBoulevard: BuildUpVenue = {
   },
 };
 
+const duneCentre: [number, number, number] = [404, 0, -160];
+const duneTurns: [number, number, number] = [404, 20, -160];
+
+const duneBay: BuildUpVenue = {
+  event: "Dune Bay Grand Prix 2026",
+  place: "Lusail - Qatar",
+  city: "Lusail",
+  turns: 16,
+  fact: "A kilometre-long main straight feeds a lap of fast, flowing corners, most of them right-handers, all lit by rows of floodlight masts.",
+  country: "QA",
+  temperatures: { spring: 29, summer: 37, autumn: 30, winter: 22 },
+  season: "autumn",
+  title: {
+    eyeFrom: at(760, 60, 50),
+    eyeTo: at(730, 66, 58),
+    lookFrom: at(300, 0, 6),
+    lookTo: at(330, 0, 10),
+    fov: 44,
+  },
+  weather: {
+    eyeFrom: at(1150, -55, 60),
+    eyeTo: at(1180, -60, 66),
+    lookFrom: at(1500, 0, 8),
+    lookTo: at(1530, 0, 10),
+    fov: 40,
+  },
+  feature: {
+    eyeFrom: at(322, -3, 0.8),
+    eyeTo: at(352, -3, 1),
+    lookFrom: at(720, 0, 4),
+    lookTo: at(720, 0, 6),
+    fov: 32,
+  },
+  featureSeconds: 6,
+  gridCards: false,
+  mapLook: {
+    centre: [404, -160],
+    top: [0.15, 0.27, 0.32],
+    lit: [0.055, 0.11, 0.14],
+    shadow: [0.055, 0.11, 0.14],
+    parking: [0.035, 0.07, 0.085],
+    water: [0.02, 0.05, 0.08],
+    ground: null,
+  },
+  maps: {
+    "map-sectors": [
+      orbit(duneCentre, 2.14, 0.68, 2700, 34),
+      orbit(duneCentre, 2.24, 0.62, 2580, 34),
+    ],
+    "map-zones": [
+      orbit(duneCentre, -1.22, 0.56, 2700, 34),
+      orbit(duneCentre, -1.32, 0.5, 2600, 34),
+    ],
+    "map-turns": [
+      orbit(duneTurns, -1.02, 0.26, 2700, 30),
+      orbit(duneTurns, -0.86, 0.2, 2580, 30),
+    ],
+  },
+};
+
 const venues: Record<string, BuildUpVenue> = {
   "hill-country": hillCountry,
   "neon-boulevard": neonBoulevard,
+  "dune-bay": duneBay,
 };
 
 export function buildUpVenue(circuit: string): BuildUpVenue {

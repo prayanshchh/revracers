@@ -20,7 +20,7 @@ const char *const bedsSection = "Gravel Beds";
 const char *const sealedSection = "Sealed Run-off";
 const double rowMetres = 1.0;
 const double cellMetres = 0.25;
-const double reach = 64.0;
+const double reach = 128.0;
 const int columns = (int)(2 * reach / cellMetres);
 const int words = (columns + 63) / 64;
 

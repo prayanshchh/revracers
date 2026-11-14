@@ -34,6 +34,7 @@ export class FieldCrews {
   private readonly bounds = new THREE.Sphere(new THREE.Vector3(), crewReach);
   private point: Point | null = null;
   private lateral = 0;
+  private garageSide = 1;
   private parked: ParkedBoxes | null = null;
   private home: Duty | null = null;
 
@@ -112,9 +113,10 @@ export class FieldCrews {
       duty.crew.attachCar(mounts, null, this.field.damageOf(car) ?? newLook());
   }
 
-  place(point: Point, lateral: number): void {
+  place(point: Point, lateral: number, garageSide = 1): void {
     this.point = point;
     this.lateral = lateral;
+    this.garageSide = garageSide;
   }
 
   update(
@@ -186,7 +188,7 @@ export class FieldCrews {
     duty.box = box;
     this.parked?.show(box, false);
     duty.plan = null;
-    duty.crew.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x));
+    duty.crew.setAnchor(x, y, z, Math.atan2(y2 - y, x2 - x), this.garageSide);
     duty.crew.attachCar(mounts, null, this.field.damageOf(car) ?? newLook());
   }
 

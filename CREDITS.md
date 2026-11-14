@@ -87,6 +87,9 @@ folder under `content/tracks` has a `SOURCES.md` with the full pipeline.
 - Elevation: U.S. Geological Survey 3D Elevation Program, public domain.
 - Aerial imagery: USGS National Agriculture Imagery Program and The National
   Map, public domain.
+- Dune Bay track edges and run-off spans: measured from aerial imagery
+  (Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community).
+  Only the measured lines and masks are in the repo, not the imagery.
 - Surface textures and skies: [Poly Haven](https://polyhaven.com/), CC0 1.0.
   Each file, author and checksum is listed in `TEXTURE-SOURCES.json`.
 - Trees (`content/scenery/trees`) are pictures rendered from tree models

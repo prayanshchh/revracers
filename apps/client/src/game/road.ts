@@ -48,6 +48,7 @@ import {
   type AsphaltDetail,
   gravelBed,
   type GravelMaps,
+  type KerbPaint,
   lushGrass,
   mownAlong,
   meadow,
@@ -828,8 +829,13 @@ const shadersBySuffix: {
   { suffix: "asphalt", shade: shadeAsphaltSurface },
   {
     suffix: "road kerb",
-    shade: (material, _source, baked) => {
-      if (baked) shadeKerb(material, baked.grain);
+    shade: (material, source, baked) => {
+      if (baked)
+        shadeKerb(
+          material,
+          baked.grain,
+          (source.userData["kerb"] as KerbPaint | undefined) ?? null,
+        );
     },
   },
   {

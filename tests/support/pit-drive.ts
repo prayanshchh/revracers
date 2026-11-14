@@ -67,7 +67,9 @@ function approach(
   const entering =
     armed && fromEntry < aheadOn(pit, pit.entry - 30, pit.wallEnd);
   return {
-    lateral: entering ? Math.min(pit.fastLane, fromEntry * 0.14) : 0,
+    lateral: entering
+      ? (pit.side ?? 1) * Math.min(pit.fastLane, fromEntry * 0.14)
+      : 0,
     lookahead: look,
     speed: 22,
   };
@@ -173,7 +175,7 @@ function stepStop(run: StopRun): void {
     lap,
     control,
     car,
-    car.toMiddle + pit.shiftAt(car.distance),
+    (plan.side ?? 1) * (car.toMiddle + pit.shiftAt(car.distance)),
     run.fuel(),
   );
   if (control.serviceNow) {

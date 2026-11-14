@@ -23,7 +23,7 @@ import wrapsUrl from "../../../../content/tracks/neon-boulevard/textures/wraps.w
 import fenceUrl from "../../../../content/tracks/neon-boulevard/textures/fence.webp?url";
 import screensUrl from "../../../../content/tracks/neon-boulevard/textures/screens.webp?url";
 import { releaseOnceUploaded } from "./preload.ts";
-import { type SkyRadiance, surface } from "./road.ts";
+import { type BakedGround, type SkyRadiance, surface } from "./road.ts";
 import {
   bakedGround,
   loadMaps,
@@ -105,7 +105,7 @@ function image(url: string, colour: boolean, anisotropy: number) {
   return map;
 }
 
-function streetSources(
+export function streetSources(
   maps: Maps,
   anisotropy: number,
 ): Record<string, THREE.MeshStandardMaterial> {
@@ -167,7 +167,7 @@ function streetSources(
   };
 }
 
-type Decorate = (
+export type Decorate = (
   made: THREE.MeshStandardNodeMaterial,
   source: THREE.MeshStandardMaterial,
 ) => void;
@@ -182,7 +182,7 @@ const steelGlow: Decorate = (made, source) => {
   made.emissiveNode = glowOf(source, steelSpill);
 };
 
-const decorations: Record<string, Decorate> = {
+export const decorations: Record<string, Decorate> = {
   "track mesh fence": (made, source) => {
     if (!source.map) return;
     made.opacityNode = texture(source.map, uv()).a.mul(fenceDensity).min(1);
@@ -354,6 +354,40 @@ function lampMaterial(): THREE.MeshBasicNodeMaterial {
   return lamp;
 }
 
+export function materialPicker(
+  byName: Record<string, THREE.MeshStandardMaterial>,
+  decorate: Decorate,
+  look: {
+    anisotropy: number;
+    baked: BakedGround;
+    sky: SkyRadiance | null;
+    special?: Record<string, THREE.Material>;
+  },
+): (name: string) => THREE.Material {
+  const materials = new Map<string, THREE.Material>();
+  const special: Record<string, THREE.Material> = {
+    "track pole lamps": lampMaterial(),
+    "track stand lights": lightStripMaterial(),
+    "track paddock lights": lightStripMaterial(),
+    "track garage front": garageMaterial(),
+    "track garage interior": garageInteriorMaterial(),
+    "track pit kit": pitKitMaterial(),
+    "track pit signs": pitSignMaterial(),
+    "track paddock hall": hallMaterial(),
+    ...look.special,
+  };
+  return (name) => {
+    const custom = special[name] ?? materials.get(name);
+    if (custom) return custom;
+    const source = byName[name];
+    if (!source) throw new Error(`circuit has no material ${name}`);
+    const made = surface(source, look.anisotropy, look.baked, look.sky);
+    decorate(made, source);
+    materials.set(name, made);
+    return made;
+  };
+}
+
 export async function buildStreetCircuit(
   track: StreetTrack,
   line: LinePath | null,
@@ -365,30 +399,11 @@ export async function buildStreetCircuit(
   const maps = loadMaps(anisotropy, after);
   const byName = streetSources(maps, anisotropy);
   const sky = await skyLoad;
-  const baked = bakedGround(maps);
-  const materials = new Map<string, THREE.Material>();
-  const lamp = lampMaterial();
-  const special: Record<string, THREE.Material> = {
-    "track pole lamps": lamp,
-    "track stand lights": lightStripMaterial(),
-    "track garage front": garageMaterial(),
-    "track garage interior": garageInteriorMaterial(),
-    "track pit kit": pitKitMaterial(),
-    "track pit signs": pitSignMaterial(),
-    "track paddock hall": hallMaterial(),
-  };
-  const materialOf = (name: string) => {
-    const custom = special[name];
-    if (custom) return custom;
-    const known = materials.get(name);
-    if (known) return known;
-    const source = byName[name];
-    if (!source) throw new Error(`street circuit has no material ${name}`);
-    const made = surface(source, anisotropy, baked, sky);
-    decorations[name]?.(made, source);
-    materials.set(name, made);
-    return made;
-  };
+  const materialOf = materialPicker(
+    byName,
+    (made, source) => decorations[source.name]?.(made, source),
+    { anisotropy, baked: bakedGround(maps), sky },
+  );
   const root = new THREE.Group();
   root.name = "street circuit";
   const { parts, poles, crew, cars } = streetParts(

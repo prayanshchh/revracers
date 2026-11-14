@@ -20,6 +20,10 @@ EVENT_ROWS = (
     ("#HILLCOUNTRYGP", "#0a0a0c", "#ffffff", "montserrat", 800),
     ("HILL COUNTRY GRAND PRIX", "#12296b", "#ffffff", "oswald", 700),
 )
+LATE_ROWS = (
+    ("#DUNEBAYGP", "#0a0a0c", "#ffffff", "montserrat", 800),
+    ("DUNE BAY GRAND PRIX", "#6a1638", "#f3e9d2", "oswald", 700),
+)
 BACKDROPS = {
     "NORTHWIND": "#141f5c",
     "VOLTARA": "#ffd21f",
@@ -122,6 +126,7 @@ def wraps(fonts):
     tiles = [mark_tile(art, BACKDROPS.get(name, background), INKS.get(name), fonts) for name, background, _, art in BRANDS]
     tiles += [word_tile(text, bg, ink, face, weight, fonts) for text, bg, ink, face, weight in EVENT_ROWS]
     tiles.append(number_tile(fonts))
+    tiles += [word_tile(text, bg, ink, face, weight, fonts) for text, bg, ink, face, weight in LATE_ROWS]
     width, height = WRAP
     row = height + 2 * PANEL_GAP
     atlas = np.zeros((row * len(tiles), width, 3), np.float32)

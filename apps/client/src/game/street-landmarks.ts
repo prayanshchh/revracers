@@ -91,7 +91,7 @@ const towerGlowHigh = 0.12;
 const towerFlare = 0.4;
 const up = new THREE.Vector3(0, 1, 0);
 
-class Boxes extends Quads {
+export class Boxes extends Quads {
   beam(a: THREE.Vector3, b: THREE.Vector3, size: number): void {
     const along = b.clone().sub(a);
     if (along.lengthSq() < 1e-6) return;

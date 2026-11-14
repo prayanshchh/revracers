@@ -49,7 +49,8 @@ export class PitGate {
     this.mesh.visible = false;
   }
 
-  place(x: number, y: number, z: number, heading: number): void {
+  place(x: number, y: number, z: number, heading: number, side = 1): void {
+    this.mesh.scale.x = side;
     this.mesh.position.set(x, y, z + height / 2 + 0.2);
     this.mesh.rotation.set(Math.PI / 2, heading - Math.PI / 2, 0, "ZXY");
     this.mesh.rotation.set(Math.PI / 2, 0, heading - Math.PI / 2, "ZYX");

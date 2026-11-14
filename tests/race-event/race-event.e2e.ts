@@ -92,6 +92,11 @@ test.describe("race event screens", () => {
     await expect(active).toHaveAttribute("data-track", "neon-boulevard");
     await expect.poll(() => centreOffset(page)).toBeLessThan(30);
     await page.keyboard.press("ArrowRight");
+    await expect(active).toHaveAttribute("data-track", "dune-bay");
+    await expect.poll(() => centreOffset(page)).toBeLessThan(30);
+    await page.keyboard.press("ArrowRight");
+    await expect(active).toHaveAttribute("data-track", "dune-bay");
+    await page.keyboard.press("ArrowLeft");
     await expect(active).toHaveAttribute("data-track", "neon-boulevard");
     await page.keyboard.press("ArrowLeft");
     await expect(active).toHaveAttribute("data-track", "hill-country");

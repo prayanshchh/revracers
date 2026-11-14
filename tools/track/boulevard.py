@@ -108,7 +108,7 @@ def densify(points, values):
     return np.stack([x, y], 1), length, values[np.clip(owner, 0, len(values) - 1)]
 
 
-def smooth_path(raw, length):
+def smooth_path(raw, length, calm=None):
     count = len(raw)
     step = length / count
     delta = np.roll(raw, -1, 0) - raw
@@ -118,7 +118,10 @@ def smooth_path(raw, length):
     tight = box(box(kappa, TIGHT_SMOOTHING), TIGHT_SMOOTHING)
     share = np.clip((np.abs(gentle) - TIGHT_FROM) / (TIGHT_FULL - TIGHT_FROM), 0, 1)
     share = box(windowed_max(share, TIGHT_REACH, TIGHT_REACH), TIGHT_REACH)
+    raw_kappa = kappa
     kappa = gentle + (tight - gentle) * share
+    if calm is not None:
+        kappa = calm(raw_kappa, kappa)
     total = kappa.sum() * step
     kappa *= 2 * np.pi * np.sign(total) / total
     turned = np.concatenate([[0.0], np.cumsum(kappa[:-1]) * step])

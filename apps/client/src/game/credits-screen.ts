@@ -41,6 +41,12 @@ const credits: Credit[] = [
     url: "https://www.usgs.gov/",
   },
   {
+    name: "Esri, Maxar, Earthstar Geographics and the GIS User Community",
+    role: "Aerial imagery measured for Dune Bay track edges and run-offs",
+    licence: "Measurements only, imagery not shipped",
+    url: "https://www.esri.com/",
+  },
+  {
     name: "Poly Haven",
     role: "Surface textures and skies",
     licence: "CC0 1.0",

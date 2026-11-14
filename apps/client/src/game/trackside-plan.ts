@@ -40,6 +40,8 @@ const boards = [
   "hill tag",
   "hill prix",
   "distance",
+  "dune tag",
+  "dune prix",
 ];
 const rowPixels = 268;
 const gapPixels = 6;

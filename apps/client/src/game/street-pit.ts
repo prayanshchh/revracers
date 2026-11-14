@@ -3,6 +3,7 @@ import {
   Builder,
   type Part,
   place,
+  sided,
   type Station,
   stationAt,
   wrap,
@@ -10,6 +11,7 @@ import {
 import { type Team, teams } from "./weekend.ts";
 
 export interface PitSide {
+  sign?: number;
   from: number;
   to: number;
   front: number;
@@ -43,7 +45,7 @@ export interface Paint {
   glow: number;
 }
 
-const firstTeamBay = 1;
+export const firstTeamBay = 1;
 const emptyGarage = [0.3, 0.31, 0.33];
 
 const wallBack = 0.6;
@@ -64,7 +66,8 @@ const tyreWidth = 0.33;
 const tyreSides = 14;
 const garageDepth = 12;
 const carInGarage = 5.6;
-const signCells = 3;
+const signCells = 4;
+const mouthGap = 6;
 const signSize = 1.1;
 const signLift = 1.9;
 const poses = ["arms_folded", "hands_hips", "talking", "interact"];
@@ -73,7 +76,7 @@ const dark: Paint = { colour: [0.07, 0.075, 0.085], glow: 0 };
 const steel: Paint = { colour: [0.5, 0.52, 0.55], glow: 0.05 };
 const white: Paint = { colour: [0.86, 0.87, 0.88], glow: 0.08 };
 const blanket: Paint = { colour: [0.11, 0.11, 0.12], glow: 0 };
-const screen: Paint = { colour: [0.3, 0.55, 0.95], glow: 1.8 };
+const screen: Paint = { colour: [0.1, 0.24, 0.55], glow: 0.9 };
 const lampRed: Paint = { colour: [1, 0.08, 0.05], glow: 3 };
 const lampGreen: Paint = { colour: [0.08, 1, 0.3], glow: 3 };
 const compounds: Paint[] = [
@@ -87,7 +90,7 @@ function hash(value: number): number {
   return x - Math.floor(x);
 }
 
-function teamOfBay(bay: number): Team | null {
+export function teamOfBay(bay: number): Team | null {
   if (bay < firstTeamBay) return null;
   const index = Math.floor((bay - firstTeamBay) / 2);
   return teams.find((t) => t.index === index) ?? null;
@@ -468,13 +471,14 @@ function board(
   lateral: number,
   low: number,
   cell: number,
+  sign: number,
 ): void {
   const half = signSize / 2;
-  const normal = [station.lz, 0, -station.lx];
+  const normal = [station.lz * sign, 0, -station.lx * sign];
   const first = faces.count;
-  const u0 = cell / signCells;
-  const u1 = (cell + 1) / signCells;
-  const ahead = [-station.lz * -0.06, 0, station.lx * -0.06];
+  const u0 = (sign > 0 ? cell : cell + 1) / signCells;
+  const u1 = (sign > 0 ? cell + 1 : cell) / signCells;
+  const ahead = [station.lz * 0.06 * sign, 0, -station.lx * 0.06 * sign];
   const corner = (side: number, height: number) =>
     place(station, lateral + side, low + height).map(
       (v, i) => v + (ahead[i] ?? 0),
@@ -483,7 +487,8 @@ function board(
   faces.vertex(corner(-half, 0), normal, [[u1, 0]]);
   faces.vertex(corner(-half, signSize), normal, [[u1, 1]]);
   faces.vertex(corner(half, signSize), normal, [[u0, 1]]);
-  faces.quad(first, first + 1, first + 2, first + 3);
+  if (sign > 0) faces.quad(first, first + 1, first + 2, first + 3);
+  else faces.quad(first, first + 3, first + 2, first + 1);
 }
 
 function signPost(
@@ -492,6 +497,7 @@ function signPost(
   station: Station,
   lateral: number,
   cell: number,
+  sign: number,
 ): void {
   block(kit, station, lateral, 0, [0.08, signLift, 0.08], steel);
   block(
@@ -502,7 +508,7 @@ function signPost(
     [0.06, signSize + 0.04, signSize + 0.04],
     white,
   );
-  board(faces, station, lateral, signLift + 0.02, cell);
+  board(faces, station, lateral, signLift + 0.02, cell, sign);
 }
 
 function exitLight(kit: Builder, station: Station, lateral: number): void {
@@ -524,12 +530,15 @@ function pitSigns(
 ): void {
   const lane = side.wall + wallBack + 0.4;
   const garage = side.front - 0.6;
+  const sign = side.sign ?? 1;
   for (const lateral of [lane, garage])
-    signPost(kit, faces, at(ends.wallStart + 2), lateral, 0);
+    signPost(kit, faces, at(ends.wallStart + 2), lateral, 0, sign);
   for (const lateral of [lane, garage])
-    signPost(kit, faces, at(ends.wallEnd - 6), lateral, 1);
+    signPost(kit, faces, at(ends.wallEnd - 6), lateral, 1, sign);
   const mouth = at(ends.entry - 30);
-  signPost(kit, faces, mouth, mouth.wallLeft + 0.5, 2);
+  const wall = sign > 0 ? mouth.wallLeft : mouth.wallRight;
+  const beside = Math.min(wall + 0.5, mouth.half + mouthGap);
+  signPost(kit, faces, mouth, beside, sign > 0 ? 2 : 3, sign);
   exitLight(kit, at(ends.wallEnd - 2), lane);
 }
 
@@ -541,7 +550,8 @@ export function pitKit(
 ): Part[] {
   const builder = new Builder(3);
   const faces = new Builder(1);
-  const at = (s: number) => stationAt(list, length, wrap(s, length));
+  const at = (s: number) =>
+    sided(stationAt(list, length, wrap(s, length)), side.sign ?? 1);
   const bays = teamBays(side, length);
   for (const bay of bays) {
     bayKit(builder, at, side, bay);
@@ -587,7 +597,8 @@ export function crewSpots(
   length: number,
   side: PitSide,
 ): CrewSpot[] {
-  const at = (s: number) => stationAt(list, length, wrap(s, length));
+  const at = (s: number) =>
+    sided(stationAt(list, length, wrap(s, length)), side.sign ?? 1);
   const out: CrewSpot[] = [];
   for (const bay of teamBays(side, length)) {
     const team = teamOfBay(bay);
@@ -642,7 +653,7 @@ export function garageCars(side: PitSide, length: number): GarageCar[] {
     return [
       {
         s: wrap(side.from + (bay + 0.5) * side.bay, length),
-        lateral: side.front + carInGarage,
+        lateral: (side.sign ?? 1) * (side.front + carInGarage),
         team: team.car,
       },
     ];
