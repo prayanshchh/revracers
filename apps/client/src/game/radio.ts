@@ -1,5 +1,5 @@
 import type { RadioCall } from "./engineer.ts";
-import { putData, putText } from "./hud-dom.ts";
+import { putAttr, putData, putText } from "./hud-dom.ts";
 
 const queueSize = 4;
 const staleAfter = 12;
@@ -94,7 +94,7 @@ export class Radio {
 
   update(now: number): void {
     if (this.muted) return;
-    const talking = this.speaking && now < this.shownUntil + speechGrace;
+    const talking = this.talking(now);
     if (this.current && (now < this.shownUntil || talking)) return;
     if (this.current) {
       this.current = null;
@@ -127,7 +127,16 @@ export class Radio {
     this.current = null;
     this.shownUntil = 0;
     this.root.classList.remove("show");
-    if (this.speaking) window.speechSynthesis.cancel();
+    if (this.speaking) this.silence();
+  }
+
+  private talking(now: number): boolean {
+    if (this.speaking && !this.voice().on) this.silence();
+    return this.speaking && now < this.shownUntil + speechGrace;
+  }
+
+  private silence(): void {
+    window.speechSynthesis.cancel();
     this.speaking = false;
   }
 
@@ -147,5 +156,38 @@ export class Radio {
     line.onend = done;
     line.onerror = done;
     window.speechSynthesis.speak(line);
+  }
+}
+
+export class VoiceSwitch {
+  constructor(
+    private readonly tab: HTMLElement,
+    private readonly settings: { engineerVoice: boolean },
+    private readonly save: () => void,
+  ) {
+    tab.addEventListener("click", () => {
+      tab.blur();
+      this.toggle();
+    });
+    this.paint();
+  }
+
+  toggle(): void {
+    this.settings.engineerVoice = !this.settings.engineerVoice;
+    this.save();
+    this.paint();
+  }
+
+  paint(): void {
+    const on = this.settings.engineerVoice;
+    putData(this.tab, "voice", on ? "on" : "off");
+    putAttr(this.tab, "aria-pressed", String(on));
+    putAttr(
+      this.tab,
+      "title",
+      on
+        ? "Engineer voice on - V to mute"
+        : "Engineer voice off - V to hear it",
+    );
   }
 }
