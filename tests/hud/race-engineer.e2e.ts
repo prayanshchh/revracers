@@ -5,10 +5,9 @@ interface Debugged {
 }
 
 const letters = ["S", "M", "H", "I", "W"];
-const names = ["soft", "medium", "hard", "intermediate", "wet"];
 
 if (process.platform !== "linux") {
-  test("the strategy card fits the chosen plan's tyres and the engineer briefs that plan", async ({
+  test("the strategy card keeps the tyre picked in settings until a plan is picked, then fits that plan's tyres, and the engineer gives the race's weather", async ({
     page,
   }) => {
     test.setTimeout(420_000);
@@ -34,7 +33,6 @@ if (process.platform !== "linux") {
     );
     const plans = page.locator(".ready-plan");
     await expect(plans).toHaveCount(3);
-    await expect(plans.first()).toHaveClass(/on/);
     const compound = () =>
       page.evaluate(
         () =>
@@ -42,14 +40,22 @@ if (process.platform !== "linux") {
       );
     const firstLetter = async (index: number) =>
       plans.nth(index).locator(".ready-stints i").first().textContent();
-    expect(letters[await compound()]).toBe(await firstLetter(0));
-    await page.keyboard.press("2");
-    await expect(plans.nth(1)).toHaveClass(/on/);
-    expect(letters[await compound()]).toBe(await firstLetter(1));
+    const starts = await Promise.all([0, 1, 2].map(firstLetter));
+    const hard = starts.indexOf("H");
+    expect(hard).toBeGreaterThan(0);
+    await expect(page.locator(".ready-plan.on")).toHaveCount(1);
+    await expect(plans.nth(hard)).toHaveClass(/on/);
+    expect(letters[await compound()]).toBe("H");
+    await page.keyboard.press("1");
+    await expect(plans.first()).toHaveClass(/on/);
+    expect(letters[await compound()]).toBe(starts[0]);
+    expect(starts[0]).not.toBe("H");
     await page.keyboard.press("Enter");
     await expect(page.locator("[data-ready=root]")).toBeHidden();
     const radio = page.locator("[data-radio-root] [data-radio=text]");
-    await expect(radio).toContainText("Radio check", { timeout: 20_000 });
-    await expect(radio).toContainText(names[await compound()] ?? "-");
+    await expect(radio).toHaveText(
+      "Weather for the race: dry all race, no rain expected.",
+      { timeout: 20_000 },
+    );
   });
 }

@@ -17,7 +17,6 @@ import * as THREE from "three/webgpu";
 import {
   boostMode,
   ersModes,
-  fuelBurnPerLap,
   fuelMixes,
   nextErsMode,
   OvertakeDetector,
@@ -656,7 +655,6 @@ function hudOptions(
   lights: StartLights,
   turns: CourseTurn[],
   onLap: HudOptions["onLap"],
-  onSector: HudOptions["onSector"],
 ): HudOptions {
   return {
     stewards: {
@@ -675,7 +673,6 @@ function hudOptions(
     startHint: setup.stage === "race" && settings.startType === "standing",
     rewindRetired: false,
     onLap,
-    onSector,
   };
 }
 
@@ -1181,7 +1178,7 @@ function pitWallFor(
   parts: Pick<PitWallContext, "engine" | "hud" | "trace" | "radio" | "fastest">,
   settings: Settings,
   setup: SessionSetup,
-  wear: number,
+  systems: Pick<RaceSystems, "wearScale" | "weather">,
 ): PitWall {
   const race = setup.stage === "race";
   return new PitWall({
@@ -1191,7 +1188,8 @@ function pitWallFor(
     qualifying: setup.stage === "qualifying",
     totalLaps: race ? settings.laps : null,
     trackLength: parts.engine.trackLength(),
-    wearScale: wear,
+    wearScale: systems.wearScale,
+    weather: systems.weather,
     chatter: () => settings.engineer,
   });
 }
@@ -1203,6 +1201,7 @@ function strategyChoice(
   if (stage !== "race") return null;
   return {
     plans: wall.options,
+    chosen: wall.chosen,
     choose: (index) => {
       wall.choose(index);
     },
@@ -1302,9 +1301,6 @@ async function main(): Promise<void> {
           log?.lap(lap, compoundId(engine.tyreInfo().compound));
           wall?.onLap(lap, performance.now() / 1000);
         },
-        (index, status) => {
-          wall?.onSector(index, status);
-        },
       ),
       entry.tutorial,
     ),
@@ -1329,7 +1325,7 @@ async function main(): Promise<void> {
     },
     settings,
     setup,
-    raceSystems(settings, stage, lights, interventions).wearScale,
+    raceSystems(settings, stage, lights, interventions),
   );
   wall = pitWall;
   const pad = padLink();
@@ -1837,14 +1833,7 @@ async function main(): Promise<void> {
     sound.update(audio);
     const status = engine.carStatus();
     hud.update(frame, info, tyres, energy, status, now, steward, weather);
-    pitWall.update(now, {
-      frame,
-      inPitLane: control.phase !== "track",
-      weather,
-      wingDamage: Math.max(status.damage.wingLeft, status.damage.wingRight),
-      fuel: info.fuel,
-      fuelPerLap: fuelBurnPerLap(energy.lastLapFuel),
-    });
+    pitWall.update(now, { frame, weather, status, tyres });
     beepLights();
     hud.updatePit(control);
     watchBest();

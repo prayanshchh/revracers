@@ -1,4 +1,5 @@
-import { compoundName, type Plan, planSummary } from "./strategy.ts";
+import type { DamageAlert } from "./damage.ts";
+import type { WeatherPlan } from "./weather-plan.ts";
 
 export type Tone = "info" | "good" | "warn" | "box";
 
@@ -9,20 +10,11 @@ export interface RadioCall {
   tone: Tone;
 }
 
-export interface Rival {
-  car: number;
-  name: string;
-  gap: number;
-  compound: number;
-  tyreAge: number;
-  inPit: boolean;
-}
-
 export interface WeatherOutlook {
-  rain: number;
-  soon: number;
+  clock: number;
+  level: number;
   call: "slicks" | "inters" | "wets" | null;
-  minutesToRain: number | null;
+  drying: boolean;
 }
 
 export interface RaceState {
@@ -32,43 +24,31 @@ export interface RaceState {
   totalLaps: number | null;
   race: boolean;
   started: boolean;
-  position: number;
-  carCount: number;
-  ahead: Rival | null;
-  behind: Rival | null;
-  compound: number;
-  wear: number;
-  fuelLaps: number | null;
-  wingDamage: number;
-  weather: WeatherOutlook;
-  plan: Plan | null;
-  inPitLane: boolean;
   finished: boolean;
   lapTime: number;
-}
-
-export interface LapReport {
-  lap: number;
-  time: number;
-  personalBest: boolean;
-  fastestOfRace: boolean;
-  full: boolean;
+  wear: number;
+  worstWheel: number;
+  tyreLapsLeft: number | null;
+  weather: WeatherOutlook;
 }
 
 export type Chatter = "full" | "reduced" | "off";
 
-const closeGap = 1.0;
-const minGap = 0.05;
-const rivalRepeat = 100;
-const gapEvery = 3;
-const purpleRepeat = 40;
-const fuelShort = -0.15;
-const wingWarn = 0.3;
-const wingBad = 0.6;
-const wearMarks = [0.5, 0.72];
-const boxShare = 0.45;
-const windowLaps = 2;
-const wetAhead = 0.2;
+type Shift = WeatherPlan["shifts"][number];
+
+const wearMarks = [0.3, 0.5, 0.7, 0.85];
+const wearPriority = [1, 2, 3, 3];
+const freshTyres = 0.15;
+const warnLaps = 2;
+const rainWords = ["dry", "light rain", "heavy rain", "a storm"];
+const wheelNames = ["front right", "front left", "rear right", "rear left"];
+const trackLines: Record<string, string> = {
+  slicks: "The racing line is dry enough for slicks now.",
+  inters: "It's too wet for slicks now, intermediates are the tyre.",
+  clearing:
+    "Not enough standing water for full wets, intermediates are the tyre.",
+  wets: "Standing water on the racing line, full wets are the tyre.",
+};
 
 function spoken(name: string): string {
   return name
@@ -76,10 +56,6 @@ function spoken(name: string): string {
     .split(/([\s-]+)/)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join("");
-}
-
-function seconds(value: number): string {
-  return value < 10 ? value.toFixed(1) : String(Math.round(value));
 }
 
 function lapText(time: number): string {
@@ -90,77 +66,62 @@ function lapText(time: number): string {
     : rest.toFixed(1);
 }
 
-function tyreWords(rival: Rival): string {
-  const name = compoundName(rival.compound).toLowerCase();
-  if (rival.tyreAge <= 1) return `fresh ${name}s`;
-  return `${String(rival.tyreAge)}-lap-old ${name}s`;
+function rainOf(level: number): string {
+  return rainWords[Math.max(0, Math.min(3, level))] ?? "rain";
 }
 
-function pick(options: string[], seed: number): string {
-  return options[Math.abs(Math.floor(seed)) % options.length] ?? "";
+function capital(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-function place(position: number): string {
-  return `P${String(position)}`;
+function forecastPart(before: number, after: number, lap: number): string {
+  const at = `lap ${String(lap)}`;
+  if (after === 0) return `rain stops on ${at}`;
+  if (before === 0) return `${rainOf(after)} from ${at}`;
+  return after > before
+    ? `turning to ${rainOf(after)} from ${at}`
+    : `easing to ${rainOf(after)} from ${at}`;
 }
 
-function finishLine(position: number, cars: number): string {
-  if (position === 1)
-    return "Yes! Yes! You've won the race! Fantastic job, mate!";
-  if (position <= 3)
-    return `${place(position)}, that's a podium! Brilliant drive.`;
-  if (position <= 10)
-    return `Chequered flag, ${place(position)}. Good points today, well done.`;
-  return position === cars
-    ? `Chequered flag, ${place(position)}. Tough one. We'll learn from it.`
-    : `Chequered flag, ${place(position)}. Not our day, we'll go again.`;
+function whenText(laps: number, lap: number): string {
+  if (laps <= 0) return "later this lap";
+  if (laps === 1) return `next lap, lap ${String(lap)}`;
+  return `in ${String(laps)} laps, around lap ${String(lap)}`;
 }
 
-function aheadReport(ahead: Rival, before: number | null): string {
-  const trend = before === null ? null : (ahead.gap - before) / gapEvery;
-  const pace =
-    trend === null || Math.abs(trend) < 0.05
-      ? ""
-      : trend < 0
-        ? `, you're gaining ${Math.abs(trend).toFixed(1)} a lap`
-        : `, losing ${trend.toFixed(1)} a lap`;
-  return `Gap to ${spoken(ahead.name)} ${seconds(ahead.gap)}${pace}.`;
+function aheadText(before: number, after: number, when: string): string {
+  if (after === 0) return `Rain stopping ${when}. The track will start drying.`;
+  if (before === 0) return `${capital(rainOf(after))} expected ${when}.`;
+  return after > before
+    ? `Rain getting heavier ${when}, ${rainOf(after)} expected.`
+    : `Rain easing to ${rainOf(after)} ${when}.`;
 }
 
-function boxPlan(plan: Plan | null, lap: number): number | null {
-  const stop = plan?.stops[0];
-  return stop === undefined ? null : lap + stop - 1;
+function nowText(before: number, after: number): string {
+  if (after === 0) return "Rain has stopped. The track will start drying.";
+  if (before === 0) return `It's raining now, ${rainOf(after)}.`;
+  return after > before
+    ? `Rain is getting heavier, ${rainOf(after)} now.`
+    : `Rain is easing, ${rainOf(after)} now.`;
 }
 
 export class Engineer {
-  private readonly said = new Map<string, number>();
   private readonly pending: RadioCall[] = [];
   private wearCalled = 0;
-  private wingCalled = 0;
-  private fuelWarned = false;
+  private peakWear = 0;
   private briefed = false;
-  private startPosition = 0;
-  private lastLapSeen = 0;
-  private boxLap: number | null = null;
-  private boxCalled = -1;
-  private windowCalled = -1;
   private weatherKey = "";
-  private rainWarned = false;
+  private lastTrackCall = { key: "", at: -Infinity };
   private finished = false;
-  private gapHistory: { lap: number; ahead: number | null }[] = [];
-  private wasInPit = false;
-  private lastPlan = "";
-  private counter = 0;
+  private readonly warned = new Set<number>();
+  private readonly arrived = new Set<number>();
 
-  constructor(private readonly chatter: () => Chatter) {}
-
-  private ready(topic: string, now: number, repeat: number): boolean {
-    const last = this.said.get(topic);
-    return last === undefined || now - last >= repeat;
-  }
+  constructor(
+    private readonly chatter: () => Chatter,
+    private readonly forecast: WeatherPlan | null = null,
+  ) {}
 
   private say(
-    now: number,
     topic: string,
     text: string,
     priority: number,
@@ -169,8 +130,6 @@ export class Engineer {
     const chatter = this.chatter();
     if (chatter === "off") return;
     if (chatter === "reduced" && priority < 2) return;
-    this.said.set(topic, now);
-    this.counter++;
     this.pending.push({ topic, text, priority, tone });
   }
 
@@ -178,397 +137,202 @@ export class Engineer {
     return this.pending.splice(0, this.pending.length);
   }
 
-  get plannedBox(): number | null {
-    return this.boxLap;
-  }
-
   brief(state: RaceState): void {
     if (this.briefed || !state.race) return;
     this.briefed = true;
-    this.startPosition = state.position;
-    const plan = state.plan;
-    if (!plan) {
-      this.say(
-        state.time,
-        "brief",
-        `Radio check. Track is wet, start on ${compoundName(state.compound).toLowerCase()}s and keep it on the island.`,
-        2,
-      );
-      return;
-    }
-    this.boxLap = boxPlan(plan, 1);
-    this.lastPlan = plan.stops.join();
-    const stops =
-      this.boxLap === null
-        ? "No stop planned, look after the tyres."
-        : `Plan to box around lap ${String(this.boxLap)}.`;
-    this.say(
-      state.time,
-      "brief",
-      `Radio check. Strategy is ${planSummary(plan).toLowerCase()}. You start ${place(state.position)}. ${stops}`,
-      2,
-    );
+    const start = this.forecast?.start ?? state.weather.level;
+    const parts = [start === 0 ? "dry start" : `${rainOf(start)} at the start`];
+    let before = start;
+    this.shifts().forEach((shift, index) => {
+      const lap = this.lapOf(shift, state);
+      if (lap === null) return;
+      parts.push(forecastPart(before, shift.level, lap));
+      before = shift.level;
+      if (this.lapsUntil(shift, state) <= warnLaps) this.warned.add(index);
+    });
+    const text =
+      parts.length > 1
+        ? parts.join(", ")
+        : start === 0
+          ? "dry all race, no rain expected"
+          : `${rainOf(start)} all race`;
+    this.say("forecast", `Weather for the race: ${text}.`, 3);
   }
 
   update(state: RaceState): RadioCall[] {
     if (!state.race || this.finished) return this.drain();
     if (state.finished) {
       this.finished = true;
-      this.say(
-        state.time,
-        "finish",
-        finishLine(state.position, state.carCount),
-        4,
-        state.position <= 3 ? "good" : "info",
-      );
       return this.drain();
     }
     if (!state.started) return this.drain();
-    this.followPlan(state);
-    this.watchPit(state);
-    this.watchRivals(state);
+    this.watchForecast(state);
+    this.watchTrack(state);
     this.watchTyres(state);
-    this.watchFuel(state);
-    this.watchWing(state);
-    this.watchWeather(state);
     return this.drain();
   }
 
-  passed(
-    now: number,
-    byPlayer: boolean,
-    name: string,
-    position: number,
-    next: Rival | null,
-  ): void {
-    if (byPlayer) {
-      const lead = position === 1;
-      const line = lead
-        ? `Brilliant move on ${spoken(name)}! You're leading the race!`
-        : pick(
-            [
-              `Good overtake! That's ${place(position)}.`,
-              `Great move on ${spoken(name)}, ${place(position)}.`,
-              `Nicely done, clean pass. ${place(position)} now.`,
-              `Lovely move! ${place(position)}.`,
-            ],
-            this.counter + position,
-          );
-      const chase =
-        next && !lead
-          ? ` ${spoken(next.name)} is next, ${seconds(next.gap)} up the road.`
-          : "";
-      this.say(now, "pass", `${line}${chase}`, 3, "good");
-      return;
-    }
+  ownFastest(time: number): void {
     this.say(
-      now,
-      "passed",
-      pick(
-        [
-          `${spoken(name)} is through, you're ${place(position)}. Stay with them.`,
-          `Lost ${place(position - 1)} to ${spoken(name)}. Keep your head down, we'll get it back.`,
-          `${spoken(name)} got by. ${place(position)}. Let's go again.`,
-        ],
-        this.counter + position,
-      ),
+      "fastest",
+      `That's the fastest lap of the race, ${lapText(time)}! Purple!`,
       3,
-      "warn",
-    );
-  }
-
-  lapDone(report: LapReport, state: RaceState): void {
-    const now = state.time;
-    if (report.fastestOfRace) {
-      this.say(
-        now,
-        "fastest",
-        `That's the fastest lap of the race, ${lapText(report.time)}! Purple!`,
-        3,
-        "good",
-      );
-    } else if (report.personalBest && report.full) {
-      this.say(
-        now,
-        "pb",
-        `Personal best, ${lapText(report.time)}. Good lap.`,
-        1,
-        "good",
-      );
-    }
-    if (!state.race) return;
-    if (report.lap === 1 && this.startPosition > 0) this.startReport(state);
-    this.gapReport(report.lap, state);
-    this.countdown(report.lap + 1, state);
-  }
-
-  rivalFastest(now: number, name: string, time: number): void {
-    this.say(
-      now,
-      "rival-fastest",
-      `${spoken(name)} has the fastest lap, ${lapText(time)}.`,
-      1,
-    );
-  }
-
-  purpleSector(now: number, sector: number): void {
-    if (!this.ready("purple", now, purpleRepeat)) return;
-    this.say(
-      now,
-      "purple",
-      `Purple sector ${String(sector + 1)}. Keep pushing.`,
-      1,
       "good",
     );
   }
 
-  qualifyingLap(now: number, time: number, position: number): void {
+  rivalFastest(name: string, time: number): void {
+    this.say(
+      "rival-fastest",
+      `${spoken(name)} has the fastest lap, ${lapText(time)}.`,
+      2,
+    );
+  }
+
+  damage(alert: DamageAlert): void {
+    this.say("damage", `${alert.title}. ${alert.detail}.`, 3, "warn");
+  }
+
+  qualifyingLap(time: number, position: number): void {
     const verdict =
       position === 1
         ? "That's provisional pole! Great lap!"
-        : `That's ${place(position)} for now.`;
-    this.say(now, "q-lap", `${lapText(time)}. ${verdict}`, 3, "good");
+        : `That's P${String(position)} for now.`;
+    this.say("q-lap", `${lapText(time)}. ${verdict}`, 3, "good");
   }
 
-  qualifyingRun(now: number, outLap: boolean): void {
+  qualifyingRun(outLap: boolean): void {
     if (outLap)
       this.say(
-        now,
         "q-out",
         "Out lap. Get some heat in the tyres and the brakes, push from the line.",
         2,
       );
-    else this.say(now, "q-push", "OK, push now. This is your lap.", 2);
+    else this.say("q-push", "OK, push now. This is your lap.", 2);
   }
 
-  private startReport(state: RaceState): void {
-    const gained = this.startPosition - state.position;
-    const text =
-      gained > 0
-        ? `Great start, up ${String(gained)} place${gained > 1 ? "s" : ""}. ${place(state.position)}.`
-        : gained < 0
-          ? `Lost ${String(-gained)} on the opening lap. ${place(state.position)}, long way to go.`
-          : `Held position, ${place(state.position)}. Settle in now.`;
-    this.say(state.time, "start", text, 2, gained >= 0 ? "good" : "info");
+  private shifts(): Shift[] {
+    return this.forecast?.shifts ?? [];
   }
 
-  private rememberGap(lap: number, ahead: Rival | null): number | null {
-    this.gapHistory.push({ lap, ahead: ahead ? ahead.gap : null });
-    if (this.gapHistory.length > 6) this.gapHistory.shift();
-    return this.gapHistory.at(-gapEvery - 1)?.ahead ?? null;
+  private progress(state: RaceState): number {
+    return state.started ? state.lap - 1 + state.lapShare : 0;
   }
 
-  private gapReport(lap: number, state: RaceState): void {
-    const before = this.rememberGap(lap, state.ahead);
-    if (lap < 2 || lap % gapEvery !== 0) return;
-    const parts = [
-      state.ahead ? aheadReport(state.ahead, before) : "",
-      state.behind
-        ? `${spoken(state.behind.name)} ${seconds(state.behind.gap)} behind.`
-        : "",
-    ].filter((part) => part !== "");
-    if (parts.length > 0)
-      this.say(state.time, "gaps", parts.join(" "), 1, "info");
+  private lapsUntil(shift: Shift, state: RaceState): number {
+    return (shift.at - state.weather.clock) / Math.max(1, state.lapTime);
   }
 
-  private countdown(next: number, state: RaceState): void {
-    const total = state.totalLaps;
-    if (!total || next > total) return;
-    if (next === total)
+  private lapOf(shift: Shift, state: RaceState): number | null {
+    const ahead = Math.max(0, this.lapsUntil(shift, state));
+    const lap = Math.max(
+      state.lap,
+      Math.floor(this.progress(state) + ahead) + 1,
+    );
+    return state.totalLaps !== null && lap > state.totalLaps ? null : lap;
+  }
+
+  private levelBefore(index: number): number {
+    return index === 0
+      ? (this.forecast?.start ?? 0)
+      : (this.shifts()[index - 1]?.level ?? 0);
+  }
+
+  private nextOutlook(index: number, state: RaceState): string {
+    const after = this.shifts()[index]?.level ?? 0;
+    const next = this.shifts()[index + 1];
+    const lap = next ? this.lapOf(next, state) : null;
+    if (next && lap !== null)
+      return ` Forecast: ${forecastPart(after, next.level, lap)}.`;
+    return after === 0
+      ? " No more rain forecast."
+      : " It stays wet to the flag.";
+  }
+
+  private watchForecast(state: RaceState): void {
+    this.shifts().forEach((shift, index) => {
+      const before = this.levelBefore(index);
+      if (this.arrived.has(index)) return;
+      if (state.weather.clock >= shift.at) {
+        this.arrived.add(index);
+        this.warned.add(index);
+        this.say(
+          "weather-now",
+          `${nowText(before, shift.level)}${this.nextOutlook(index, state)}`,
+          4,
+          "warn",
+        );
+        return;
+      }
+      const lap = this.lapOf(shift, state);
+      if (
+        this.warned.has(index) ||
+        lap === null ||
+        this.lapsUntil(shift, state) > warnLaps
+      )
+        return;
+      this.warned.add(index);
       this.say(
-        state.time,
-        "last-lap",
-        `Final lap. ${place(state.position)}. Bring it home.`,
-        2,
-      );
-    else if (next === total - 1 && total > 3)
-      this.say(state.time, "two-to-go", "Two laps to go after this one.", 1);
-  }
-
-  private replan(state: RaceState): void {
-    if (state.lap === this.lastLapSeen) return;
-    this.lastLapSeen = state.lap;
-    const box = boxPlan(state.plan, state.lap);
-    const key = state.plan?.stops.join() ?? "";
-    const known = this.boxLap;
-    if (
-      box !== null &&
-      known !== null &&
-      Math.abs(box - known) >= 2 &&
-      key !== this.lastPlan
-    )
-      this.say(
-        state.time,
-        "replan",
-        box < known
-          ? `Tyres are wearing faster than planned. New target: box lap ${String(box)}.`
-          : `Tyres are holding up well. We can extend, box lap ${String(box)}.`,
-        2,
+        "weather-ahead",
+        aheadText(before, shift.level, whenText(lap - state.lap, lap)),
+        3,
         "warn",
       );
-    this.boxLap = box;
-    this.lastPlan = key;
+    });
   }
 
-  private windowCall(state: RaceState, box: number, tyre: string): void {
-    if (state.lap !== box - windowLaps || this.windowCalled === box) return;
-    this.windowCalled = box;
-    this.say(
-      state.time,
-      "window",
-      `Pit window opens soon. Target lap ${String(box)} for ${tyre}.`,
-      2,
-    );
+  private watchTrack(state: RaceState): void {
+    const { call, drying, clock } = state.weather;
+    const key = call === "inters" && drying ? "clearing" : (call ?? "");
+    if (key === this.weatherKey) return;
+    this.weatherKey = key;
+    if (!call) return;
+    const last = this.lastTrackCall;
+    if (key === last.key && clock - last.at < state.lapTime) return;
+    this.lastTrackCall = { key, at: clock };
+    this.say("track", trackLines[key] ?? "", 4, "warn");
   }
 
-  private followPlan(state: RaceState): void {
-    this.replan(state);
-    const box = this.boxLap;
-    const next = state.plan?.stints[1]?.compound;
-    if (box === null || next === undefined) return;
-    const tyre = `${compoundName(next).toLowerCase()}s`;
-    this.windowCall(state, box, tyre);
-    const due = state.lap === box && state.lapShare >= boxShare;
-    if (!due || this.boxCalled === box || state.inPitLane) return;
-    this.boxCalled = box;
-    this.say(
-      state.time,
-      "box",
-      `Box, box. Box this lap for ${tyre}.`,
-      4,
-      "box",
-    );
+  private tyreLife(state: RaceState): string {
+    const life = state.tyreLapsLeft;
+    if (life === null) return "";
+    const toGo =
+      state.totalLaps === null
+        ? Infinity
+        : state.totalLaps - (state.lap - 1 + state.lapShare);
+    if (life >= toGo) return " They'll make the flag.";
+    const laps = Math.max(0, Math.floor(life));
+    return laps === 1
+      ? " About 1 lap left in them."
+      : ` About ${String(laps)} laps left in them.`;
   }
 
-  private watchPit(state: RaceState): void {
-    if (this.wasInPit && !state.inPitLane) {
-      this.wearCalled = 0;
-      this.wingCalled = 0;
-      this.say(
-        state.time,
-        "out-lap",
-        `Good stop. You rejoin ${place(state.position)}. ${state.ahead ? `${spoken(state.ahead.name)} ahead by ${seconds(state.ahead.gap)}.` : "Clear air, push now."}`,
-        2,
-      );
-    }
-    this.wasInPit = state.inPitLane;
-  }
-
-  private nearby(rival: Rival | null, reach: number, now: number): boolean {
-    if (!rival || rival.inPit || rival.gap <= minGap || rival.gap > reach)
-      return false;
-    const key = `near-${String(rival.car)}`;
-    if (!this.ready(key, now, rivalRepeat)) return false;
-    this.said.set(key, now);
-    return true;
-  }
-
-  private watchRivals(state: RaceState): void {
-    const { ahead, behind, time } = state;
-    if (ahead && this.nearby(ahead, closeGap, time))
-      this.say(
-        time,
-        "ahead",
-        `${spoken(ahead.name)} ahead, ${seconds(ahead.gap)}. They're on ${tyreWords(ahead)}. You're in overtake range.`,
-        2,
-      );
-    if (behind && this.nearby(behind, closeGap * 0.8, time))
-      this.say(
-        time,
-        "behind",
-        `${spoken(behind.name)} is right behind, ${seconds(behind.gap)}. Defend your position.`,
-        2,
-        "warn",
-      );
+  private markPassed(wear: number): number | null {
+    if (wear < this.peakWear - freshTyres) this.wearCalled = 0;
+    this.peakWear =
+      this.wearCalled === 0 ? wear : Math.max(this.peakWear, wear);
+    const before = this.wearCalled;
+    while ((wearMarks[this.wearCalled] ?? Infinity) <= wear) this.wearCalled++;
+    return this.wearCalled > before ? this.wearCalled - 1 : null;
   }
 
   private watchTyres(state: RaceState): void {
-    const mark = wearMarks[this.wearCalled];
-    if (mark === undefined || state.wear < mark) return;
-    this.wearCalled++;
-    const laps = state.totalLaps ? state.totalLaps - state.lap + 1 : null;
-    const coming =
-      this.boxLap !== null && this.boxLap >= state.lap
-        ? ` We box in ${String(this.boxLap - state.lap)} laps.`
-        : laps !== null && laps > 1
-          ? ` They need to last ${String(laps)} more laps.`
-          : "";
+    const mark = this.markPassed(state.wear);
+    if (mark === null) return;
+    const worn = String(Math.round((wearMarks[mark] ?? 0) * 100));
+    const worst = wheelNames[state.worstWheel] ?? "front left";
+    const life = this.tyreLife(state);
+    const lines = [
+      `Tyres at ${worn}% wear.${life}`,
+      `Tyres at half life, ${worst} is the worst.${life}`,
+      `Tyres are going off now, ${worn}% worn, ${worst} worst.${life}`,
+      `Tyres are nearly gone, ${worn}% worn. Grip will drop off fast.${life}`,
+    ];
     this.say(
-      state.time,
       "wear",
-      this.wearCalled === 1
-        ? `Tyres are at about half life.${coming}`
-        : `Tyres are going off now, look after the rears.${coming}`,
-      2,
-      "warn",
+      lines[mark] ?? "",
+      wearPriority[mark] ?? 3,
+      mark >= 2 ? "warn" : "info",
     );
-  }
-
-  private watchFuel(state: RaceState): void {
-    const fuel = state.fuelLaps;
-    if (fuel === null || state.lap < 2) return;
-    if (fuel < fuelShort && this.ready("fuel", state.time, 150)) {
-      this.fuelWarned = true;
-      this.say(
-        state.time,
-        "fuel",
-        `We're ${Math.abs(fuel).toFixed(1)} laps short on fuel. Lift and coast into the big stops, switch to lean mix.`,
-        3,
-        "warn",
-      );
-    } else if (this.fuelWarned && fuel > 0.1) {
-      this.fuelWarned = false;
-      this.say(state.time, "fuel-ok", "Fuel is OK now. Back to normal.", 2);
-    }
-  }
-
-  private watchWing(state: RaceState): void {
-    const level =
-      state.wingDamage >= wingBad ? 2 : state.wingDamage >= wingWarn ? 1 : 0;
-    if (level <= this.wingCalled) return;
-    this.wingCalled = level;
-    this.say(
-      state.time,
-      "wing",
-      level === 2
-        ? "Front wing is badly damaged. Box this lap, we'll change the nose."
-        : "We see front wing damage. Box for a new nose if the balance is bad.",
-      level === 2 ? 4 : 3,
-      level === 2 ? "box" : "warn",
-    );
-  }
-
-  private watchWeather(state: RaceState): void {
-    const { weather } = state;
-    if (
-      !this.rainWarned &&
-      weather.rain < 0.05 &&
-      weather.soon >= wetAhead &&
-      weather.minutesToRain !== null
-    ) {
-      this.rainWarned = true;
-      const lapsAway = Math.max(
-        1,
-        Math.round((weather.minutesToRain * 60) / Math.max(60, state.lapTime)),
-      );
-      this.say(
-        state.time,
-        "rain",
-        `Rain expected in about ${String(Math.round(weather.minutesToRain))} minutes, around lap ${String(state.lap + lapsAway)}. Stay out for now, we'll call it.`,
-        3,
-        "warn",
-      );
-    }
-    if (weather.rain < 0.05 && weather.soon < 0.05) this.rainWarned = false;
-    const key = weather.call ?? "";
-    if (key === this.weatherKey) return;
-    this.weatherKey = key;
-    if (!weather.call) return;
-    const lines = {
-      slicks: "Track is drying. Box, box for slicks.",
-      inters: "It's too wet for slicks now. Box, box for intermediates.",
-      wets: "Standing water on the racing line. Box for full wets.",
-    } as const;
-    this.say(state.time, "weather", lines[weather.call], 4, "box");
   }
 }

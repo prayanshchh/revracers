@@ -121,7 +121,6 @@ export interface HudOptions {
   startHint: boolean;
   rewindRetired: boolean;
   onLap: (lap: LapResult) => void;
-  onSector: (index: number, status: string | null) => void;
   stewards: StewardView;
 }
 
@@ -835,7 +834,6 @@ export class Hud {
     const closed = sectors.active - 1;
     const time = sectors.times[closed];
     if (time !== undefined && time !== null) {
-      this.options.onSector(closed, sectors.status[closed] ?? null);
       const cell = this.sectorCells[closed];
       if (cell) replay(cell, "fill");
       const split = sectors.times

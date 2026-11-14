@@ -1,5 +1,3 @@
-import { compounds } from "./tyres.ts";
-
 const dryCompounds = [0, 1, 2];
 const paceOffset = [-0.4, 0, 0.3];
 const realLife = [22, 28, 37];
@@ -191,16 +189,6 @@ export function stintRange(plan: Plan, index: number, firstLap = 1): string {
   return from === to
     ? `Lap ${String(from)}`
     : `Laps ${String(from)}-${String(to)}`;
-}
-
-export function compoundName(compound: number): string {
-  return compounds[compound]?.label ?? "Medium";
-}
-
-export function planSummary(plan: Plan): string {
-  const names = plan.stints.map((s) => compoundName(s.compound)).join(" - ");
-  const stops = plan.stops.length;
-  return `${names} (${stops === 0 ? "no stop" : `${String(stops)} stop${stops > 1 ? "s" : ""}`})`;
 }
 
 export function observedWear(

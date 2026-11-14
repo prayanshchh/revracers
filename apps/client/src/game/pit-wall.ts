@@ -1,9 +1,9 @@
+import { DamageMonitor } from "./damage.ts";
 import type { CarTiming, Engine } from "./engine.ts";
 import {
   type Chatter,
   Engineer,
   type RaceState,
-  type Rival,
   type WeatherOutlook,
 } from "./engineer.ts";
 import {
@@ -15,6 +15,7 @@ import {
 import { frameIndex } from "./frame-layout.ts";
 import type { GapView, Hud } from "./hud.ts";
 import type { LapResult, LapTrace } from "./laptrace.ts";
+import type { CarStatus } from "./mfd.ts";
 import type { Radio } from "./radio.ts";
 import {
   baseWearPerLap,
@@ -26,14 +27,15 @@ import {
   twoCompoundLaps,
 } from "./strategy.ts";
 import { surname } from "./tower.ts";
-import { idealCompound, weatherCall, type WeatherInfo } from "./weather.ts";
+import type { TyreInfo } from "./tyres.ts";
+import { weatherCall, type WeatherInfo } from "./weather.ts";
+import { lapSeconds, type WeatherPlan } from "./weather-plan.ts";
 import type { Entrant } from "./weekend.ts";
 
 const pollPeriod = 0.25;
 const trendWindow = 20;
-const rainSoon = 0.2;
-const forecastStep = 5;
-const fuelNominal = 1.35;
+const rainLevels = 3;
+const wetTyre = 4;
 
 const sameLap = (a: FastestLap | null, b: FastestLap | null) =>
   a?.car === b?.car && a?.time === b?.time;
@@ -49,8 +51,15 @@ export interface PitWallContext {
   totalLaps: number | null;
   trackLength: number;
   wearScale: number;
+  weather: WeatherPlan | null;
   chatter: () => Chatter;
   fastest: (lapTime: number) => void;
+}
+
+interface Rival {
+  car: number;
+  name: string;
+  gap: number;
 }
 
 interface GapSample {
@@ -90,32 +99,18 @@ class GapTrends {
   }
 }
 
-function fuelMargin(
-  tick: PlayerTick,
-  totalLaps: number | null,
-  lapsDone: number,
-): number | null {
-  if (!totalLaps) return null;
-  const left = Math.max(0, totalLaps - lapsDone);
-  return tick.fuel / Math.max(0.2, tick.fuelPerLap || fuelNominal) - left;
-}
-
 export interface PlayerTick {
   frame: Float64Array;
-  inPitLane: boolean;
   weather: WeatherInfo;
-  wingDamage: number;
-  fuel: number;
-  fuelPerLap: number;
+  status: CarStatus;
+  tyres: TyreInfo;
 }
 
 function outlook(weather: WeatherInfo, fitted: number): WeatherOutlook {
-  const call = weatherCall(weather, fitted);
-  const title = call.message?.title ?? "";
-  const soonAt = weather.forecast.findIndex((rain) => rain >= rainSoon);
+  const title = weatherCall(weather, fitted).message?.title ?? "";
   return {
-    rain: weather.rain,
-    soon: weather.forecast[0] ?? 0,
+    clock: weather.clock,
+    level: Math.round(weather.rain * rainLevels),
     call: title.includes("slicks")
       ? "slicks"
       : title.includes("intermediates")
@@ -123,8 +118,18 @@ function outlook(weather: WeatherInfo, fitted: number): WeatherOutlook {
         : title.includes("wets")
           ? "wets"
           : null,
-    minutesToRain: soonAt >= 0 ? (soonAt + 1) * forecastStep : null,
+    drying: fitted === wetTyre,
   };
+}
+
+function lastLap(frame: Float64Array): number | null {
+  const time = frame[frameIndex.lastLapTime] ?? 0;
+  return time > 0 ? time : null;
+}
+
+function boxLap(plan: Plan | null, lap: number): number | null {
+  const stop = plan?.stops[0];
+  return stop === undefined ? null : lap + stop - 1;
 }
 
 export class PitWall {
@@ -132,7 +137,7 @@ export class PitWall {
   private clock = -Infinity;
   private timing: CarTiming[] = [];
   private fastest: FastestLap | null = null;
-  private passCursor = 0;
+  private readonly damage = new DamageMonitor();
   private plans: Plan[] = [];
   private plan: Plan | null = null;
   private readonly trends = new GapTrends();
@@ -145,19 +150,8 @@ export class PitWall {
   private lastTick: PlayerTick | null = null;
 
   constructor(private readonly ctx: PitWallContext) {
-    this.engineer = new Engineer(ctx.chatter);
-    this.passCursor = ctx.entrants ? ctx.engine.passes(0).total : 0;
+    this.engineer = new Engineer(ctx.chatter, ctx.weather);
     if (!ctx.race) return;
-    const weather = ctx.engine.weather();
-    const wet = idealCompound(
-      Math.max(weather.lineWater, weather.forecast[0] ?? 0),
-      weather,
-      0,
-    );
-    if (wet > 2) {
-      ctx.engine.startTyres(wet);
-      return;
-    }
     this.plans = this.planFrom(1, null);
     const fitted = ctx.engine.tyreInfo().compound;
     this.plan =
@@ -168,6 +162,10 @@ export class PitWall {
 
   get options(): Plan[] {
     return this.plans;
+  }
+
+  get chosen(): number {
+    return this.plan ? this.plans.indexOf(this.plan) : -1;
   }
 
   choose(index: number): number | null {
@@ -218,14 +216,7 @@ export class PitWall {
   private rival(row: CarTiming | undefined, gap: number): Rival | null {
     const entrant = row ? this.ctx.entrants?.[row.index] : undefined;
     if (!row || !entrant) return null;
-    return {
-      car: row.index,
-      name: surname(entrant),
-      gap,
-      compound: row.compound,
-      tyreAge: row.tyreAge,
-      inPit: row.inPit,
-    };
+    return { car: row.index, name: surname(entrant), gap };
   }
 
   private neighbours(): { ahead: Rival | null; behind: Rival | null } {
@@ -287,68 +278,36 @@ export class PitWall {
     if (mine && this.ctx.race) this.ctx.fastest(fresh.time);
     if (!mine && (this.ctx.qualifying || fresh.lap < 2)) return;
     hud.fastestLap(name, fresh.time, now);
-    if (!mine && this.ctx.race)
-      this.engineer.rivalFastest(this.simTime(), name, fresh.time);
+    if (!mine && this.ctx.race) this.engineer.rivalFastest(name, fresh.time);
   }
 
-  private simTime(): number {
-    return this.lastTick?.frame[frameIndex.time] ?? 0;
-  }
-
-  private watchPasses(ahead: Rival | null): void {
-    const { engine, entrants } = this.ctx;
-    const { total, list } = engine.passes(this.passCursor);
-    if (total < this.passCursor) this.passCursor = total;
-    for (const pass of list) {
-      this.passCursor++;
-      if (pass.passer !== 0 && pass.passed !== 0) continue;
-      const other = pass.passer === 0 ? pass.passed : pass.passer;
-      const entrant = entrants?.[other];
-      if (!entrant) continue;
-      this.engineer.passed(
-        pass.time,
-        pass.passer === 0,
-        surname(entrant),
-        pass.passer === 0 ? pass.position : pass.position + 1,
-        ahead,
-      );
-    }
+  private lapsLeft(compound: number, wear: number): number | null {
+    const perLap = this.wearPerLap(compound)[compound] ?? 0;
+    return perLap > 0 ? Math.max(0, tyreLife(perLap) - wear / perLap) : null;
   }
 
   private raceState(tick: PlayerTick): RaceState {
-    const { frame, weather } = tick;
-    const { engine, totalLaps, trackLength } = this.ctx;
-    const mine = this.timing[0];
-    const tyres = engine.tyreInfo();
+    const { frame, weather, tyres } = tick;
+    const { totalLaps, trackLength } = this.ctx;
     const time = frame[frameIndex.time] ?? 0;
     const lap = Math.max(1, frame[frameIndex.laps] ?? 1);
-    const share = (frame[frameIndex.distFromStart] ?? 0) / trackLength;
+    const wears = tyres.wheels.map((w) => w.wear);
+    const wear = Math.max(...wears);
     return {
       time,
       lap,
-      lapShare: share,
+      lapShare: (frame[frameIndex.distFromStart] ?? 0) / trackLength,
       totalLaps,
       race: this.ctx.race,
       started: time > 0,
-      position: mine ? mine.position : 1,
-      carCount: this.timing.length,
-      ...this.neighbours(),
-      compound: tyres.compound,
-      wear: Math.max(...tyres.wheels.map((w) => w.wear)),
-      fuelLaps: fuelMargin(tick, totalLaps, lap - 1 + share),
-      wingDamage: tick.wingDamage,
+      finished: this.timing[0]?.finished === true,
+      lapTime:
+        lastLap(frame) ?? this.ctx.trace.bestTime ?? lapSeconds(trackLength),
+      wear,
+      worstWheel: wears.indexOf(wear),
+      tyreLapsLeft: this.lapsLeft(tyres.compound, wear),
       weather: outlook(weather, tyres.compound),
-      plan: this.plan,
-      inPitLane: tick.inPitLane,
-      finished: mine?.finished === true,
-      lapTime: this.ctx.trace.bestTime ?? 100,
     };
-  }
-
-  brief(tick: PlayerTick): void {
-    if (!this.ctx.race) return;
-    this.lastTick = tick;
-    this.engineer.brief(this.raceState(tick));
   }
 
   update(now: number, tick: PlayerTick): void {
@@ -362,13 +321,15 @@ export class PitWall {
       this.flush(now);
       return;
     }
+    const { ahead, behind } = this.neighbours();
+    this.updateGaps(now, ahead, behind);
     const state = this.raceState(tick);
-    this.updateGaps(now, state.ahead, state.behind);
-    this.watchPasses(state.ahead);
-    this.followStint(state);
+    this.followStint(state.lap, state.wear, tick.tyres.compound);
     this.engineer.brief(state);
+    const alert = this.damage.update(tick.status, tick.tyres);
+    if (alert && state.started) this.engineer.damage(alert);
     this.ctx.radio.push(this.engineer.update(state), now);
-    this.showStrategy(state);
+    this.showStrategy(state.lap, state.tyreLapsLeft);
   }
 
   private flush(now: number): void {
@@ -378,36 +339,24 @@ export class PitWall {
   private watchRun(): void {
     const run = this.ctx.engine.session().playerRun;
     if (run === this.lastRun) return;
-    if (run === 1 || run === 2)
-      this.engineer.qualifyingRun(this.simTime(), run === 1);
+    if (run === 1 || run === 2) this.engineer.qualifyingRun(run === 1);
     this.lastRun = run;
   }
 
-  private followStint(state: RaceState): void {
-    if (state.compound !== this.stintStart.compound) {
-      this.stintStart = {
-        lap: state.lap,
-        wear: state.wear,
-        compound: state.compound,
-      };
+  private followStint(lap: number, wear: number, compound: number): void {
+    if (compound !== this.stintStart.compound) {
+      this.stintStart = { lap, wear, compound };
       this.observed = null;
     }
   }
 
-  private showStrategy(state: RaceState): void {
-    const perLap = this.wearPerLap(state.compound)[state.compound] ?? 0;
+  private showStrategy(lap: number, lifeLaps: number | null): void {
     this.ctx.hud.showStrategy({
       plan: this.plan,
-      lap: state.lap,
-      boxLap: this.engineer.plannedBox,
-      lifeLaps:
-        perLap > 0 ? Math.max(0, tyreLife(perLap) - state.wear / perLap) : null,
+      lap,
+      boxLap: boxLap(this.plan, lap),
+      lifeLaps,
     });
-  }
-
-  onSector(index: number, status: string | null): void {
-    if (status === "pb" && (this.ctx.race || this.ctx.qualifying))
-      this.engineer.purpleSector(this.simTime(), index);
   }
 
   private judgeClean(result: LapResult): void {
@@ -434,7 +383,6 @@ export class PitWall {
     const laps = state.lap - this.stintStart.lap;
     if (laps >= 1 && wearDone > 0) this.observed = wearDone / laps;
     this.plan = this.planFrom(state.lap, null)[0] ?? null;
-    state.plan = this.plan;
   }
 
   onLap(result: LapResult, now: number): void {
@@ -442,20 +390,12 @@ export class PitWall {
     const tick = this.lastTick;
     if (!tick) return;
     const state = this.raceState(tick);
-    if (this.ctx.race) this.replanAfterLap(state);
-    this.engineer.lapDone(
-      {
-        lap: result.lap,
-        time: result.time,
-        personalBest: result.best,
-        fastestOfRace: this.ownsFastest(result.time),
-        full: result.full,
-      },
-      state,
-    );
+    if (this.ctx.race) {
+      this.replanAfterLap(state);
+      if (this.ownsFastest(result.time)) this.engineer.ownFastest(result.time);
+    }
     if (this.ctx.qualifying && result.full && result.valid)
       this.engineer.qualifyingLap(
-        state.time,
         result.time,
         this.qualifyingPlace(result.time),
       );

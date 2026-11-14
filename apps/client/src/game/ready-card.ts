@@ -4,6 +4,7 @@ import { compounds } from "./tyres.ts";
 
 export interface StrategyChoice {
   plans: Plan[];
+  chosen: number;
   choose: (index: number) => void;
 }
 
@@ -46,9 +47,12 @@ function showStrategy(root: HTMLElement, strategy: StrategyChoice | null) {
   if (!strategy || plans.length === 0) return () => false;
   const best = plans[0]?.time ?? 0;
   const cards = plans.map((plan, i) => planCard(plan, i, best));
+  const mark = (index: number) => {
+    cards.forEach((card, k) => card.classList.toggle("on", k === index));
+  };
   const pick = (index: number) => {
     if (!cards[index]) return false;
-    cards.forEach((card, k) => card.classList.toggle("on", k === index));
+    mark(index);
     strategy.choose(index);
     return true;
   };
@@ -56,7 +60,7 @@ function showStrategy(root: HTMLElement, strategy: StrategyChoice | null) {
     card.addEventListener("click", () => pick(i));
   });
   part(root, "plans").replaceChildren(...cards);
-  pick(0);
+  mark(strategy.chosen);
   return pick;
 }
 
