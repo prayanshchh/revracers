@@ -1835,12 +1835,39 @@ button {
   border-radius: 4px 4px 0 0;
 }
 
+.mfd-radio {
+  border: none;
+  color: inherit;
+  font: inherit;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.mfd-radio:hover {
+  background: rgb(52 54 64 / 78%);
+}
+
 .mfd-radio svg {
   width: 22px;
   height: 22px;
   fill: none;
   stroke: #e9eaee;
   stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.mfd-radio .voice-cross-gap {
+  stroke: #1c1d24;
+  stroke-width: 5;
+}
+
+.mfd-radio[data-voice="off"] .headset {
+  opacity: 0.62;
+}
+
+.mfd-radio[data-voice="on"] .voice-cross,
+.mfd-radio[data-voice="on"] .voice-cross-gap {
+  display: none;
 }
 
 .mfd-pages i {

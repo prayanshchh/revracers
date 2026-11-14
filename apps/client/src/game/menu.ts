@@ -189,6 +189,15 @@ function infoKey(id: string): string {
   return setupInfo[id] ? id : id.replace(/^(front|rear)-/, "");
 }
 
+function restartKey(settings: Settings): string {
+  return JSON.stringify({
+    ...settings,
+    hud: null,
+    engineerVoice: null,
+    engineerVolume: null,
+  });
+}
+
 export class Menu {
   private readonly root: HTMLElement;
   private readonly body: HTMLElement;
@@ -213,7 +222,7 @@ export class Menu {
     this.body = this.find("body");
     this.tabBar = this.find("tabs");
     this.info = this.find("info");
-    this.initial = JSON.stringify({ ...settings, hud: null });
+    this.initial = restartKey(settings);
     this.find("reset").addEventListener("click", () => {
       this.resetTab();
     });
@@ -253,6 +262,10 @@ export class Menu {
 
   useTutorial(store: (settings: Settings) => void): void {
     this.store = store;
+  }
+
+  save(): void {
+    this.store(this.settings);
   }
 
   guard(guardKey: (event: KeyboardEvent) => boolean): void {
@@ -724,7 +737,7 @@ export class Menu {
 
   private refreshFooter(): void {
     const s = this.settings;
-    const dirty = JSON.stringify({ ...s, hud: null }) !== this.initial;
+    const dirty = restartKey(s) !== this.initial;
     const tab = this.current();
     this.find("start-label").textContent = this.inSession
       ? "Restart Session"
@@ -1232,7 +1245,7 @@ export class Menu {
       ),
       this.toggle(
         "Engineer Voice",
-        "Speaks the radio messages with your browser's voice. With this off you still see them as subtitles.",
+        "Speaks the radio messages with your browser's voice. Off by default: you still see every message as a subtitle. Press V or click the headset above the MFD to switch it during a session.",
         () => s.engineerVoice,
         (v) => {
           s.engineerVoice = v;

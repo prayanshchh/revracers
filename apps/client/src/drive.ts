@@ -75,7 +75,7 @@ import { PhotoMode } from "./game/photo-mode.ts";
 import { PitWall, type PitWallContext } from "./game/pit-wall.ts";
 import { PlayerError, playerMessage } from "./game/player-error.ts";
 import { PodiumCeremony, type PodiumPlace } from "./game/podium.ts";
-import { Radio } from "./game/radio.ts";
+import { Radio, VoiceSwitch } from "./game/radio.ts";
 import { readyCard, type StrategyChoice } from "./game/ready-card.ts";
 import { Atmosphere } from "./game/atmosphere.ts";
 import { RaceLog } from "./game/race-log.ts";
@@ -373,6 +373,7 @@ function raceControls(
   settings: Settings,
   race: boolean,
   planned: () => number | null,
+  toggleVoice: () => void,
 ) {
   let cruise = settings.ersMode === boostMode ? 1 : settings.ersMode;
   let padBoost = 0;
@@ -435,6 +436,7 @@ function raceControls(
     },
     n: flipWing,
     t: cycleTyre,
+    v: toggleVoice,
     ...Object.fromEntries(
       Array.from({ length: pitCompounds }, (_, compound) => [
         String(compound + 1),
@@ -1313,6 +1315,13 @@ async function main(): Promise<void> {
     volume: settings.engineerVolume,
     subtitles: settings.hud.radio,
   }));
+  const voice = new VoiceSwitch(
+    element("[data-hud=radio-voice]"),
+    settings,
+    () => {
+      menu.save();
+    },
+  );
   const pitWall = pitWallFor(
     {
       engine,
@@ -1389,6 +1398,7 @@ async function main(): Promise<void> {
       if (action === "resume" || action === "replay" || action === "photo") {
         pad.close();
         hud.setParts(settings.hud);
+        voice.paint();
         paused = false;
         sound.mute(coach?.quiet ?? false);
         radio.mute(false);
@@ -1493,8 +1503,15 @@ async function main(): Promise<void> {
   window.addEventListener("keydown", phoneKey, true);
   window.addEventListener("keyup", phoneKey, true);
 
-  const controls = raceControls(engine, hud, settings, stage === "race", () =>
-    pitWall.nextCompound(),
+  const controls = raceControls(
+    engine,
+    hud,
+    settings,
+    stage === "race",
+    () => pitWall.nextCompound(),
+    () => {
+      voice.toggle();
+    },
   );
 
   const drive = (down: boolean, event: KeyboardEvent) => {

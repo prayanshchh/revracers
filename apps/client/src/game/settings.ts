@@ -269,7 +269,7 @@ export const defaults: Settings = {
   buildUp: true,
   musicVolume: 70,
   engineer: "full",
-  engineerVoice: true,
+  engineerVoice: false,
   engineerVolume: 80,
   laps: 10,
   difficulty: 40,
@@ -319,7 +319,7 @@ export const defaults: Settings = {
 };
 
 const storageKey = "revracers.settings";
-const settingsVersion = 2;
+const settingsVersion = 3;
 
 type Stored = Partial<Settings> & { version?: number };
 
@@ -328,7 +328,8 @@ function storedSettings(): Partial<Settings> {
     const { version = 1, ...stored } = JSON.parse(
       localStorage.getItem(storageKey) ?? "{}",
     ) as Stored;
-    if (version < settingsVersion) delete stored.qualifying;
+    if (version < 2) delete stored.qualifying;
+    if (version < 3) delete stored.engineerVoice;
     return stored;
   } catch {
     return {};
