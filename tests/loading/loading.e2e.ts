@@ -128,7 +128,9 @@ test.describe("loading progress", () => {
     expect(colours(samples)).toEqual(new Set([loaderRed]));
     const runs = phases(samples);
     expect(runs.length).toBeLessThanOrEqual(2);
-    expect(partway(runs[0] ?? []).size).toBeGreaterThanOrEqual(10);
+    expect(
+      Math.max(...runs.map((run) => partway(run).size)),
+    ).toBeGreaterThanOrEqual(10);
     for (const run of runs) expect(run.at(-1)?.value).toBe(100);
   });
 

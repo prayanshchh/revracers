@@ -135,7 +135,7 @@ export class LoadShow {
     const { received, expected, plans } = downloadTotals();
     if (this.sound) this.sound.hidden = this.soundtrack?.blocked !== true;
     if (plans === 0 || expected <= 0 || !this.bytes) return;
-    const done = Math.min(received, expected);
+    const done = expected - received < 1 ? expected : received;
     this.paint(done / expected);
     this.bytes.textContent = `${size(done)} / ${size(expected)} · ${String(Math.floor(this.shown * 100))}%`;
   }

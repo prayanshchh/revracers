@@ -57,6 +57,7 @@ import {
   turf,
 } from "./track-surface.ts";
 import { releaseOnceUploaded } from "./preload.ts";
+import { prime, primed } from "./prime.ts";
 import { reliefKerbs } from "./kerb-relief.ts";
 import { cloudShade } from "./scenery-look.ts";
 import { glaze } from "./venue-facade.ts";
@@ -67,6 +68,9 @@ export const groundFiles = [
   streaksUrl,
   terrainUrl,
   grainUrl,
+  gravelUrl,
+  gravelHeightUrl,
+  turfUrl,
 ];
 
 const asphaltDark = 0.165;
@@ -977,6 +981,54 @@ async function loadBaked(
   };
 }
 
+const groundKey = "ground";
+
+function roadKey(url: string): string {
+  return `road:${url}`;
+}
+
+function dropRoad(gltf: { scene: THREE.Object3D }): void {
+  gltf.scene.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    (object.geometry as THREE.BufferGeometry).dispose();
+    const material = object.material as THREE.MeshStandardMaterial;
+    for (const map of [
+      material.map,
+      material.normalMap,
+      material.roughnessMap,
+      material.emissiveMap,
+    ])
+      releaseImage(map);
+  });
+}
+
+function dropBaked(baked: BakedGround): void {
+  const maps = [
+    baked.apronA,
+    baked.apronB,
+    baked.streaks,
+    baked.terrain,
+    baked.grain,
+    baked.natural?.gravel.albedo,
+    baked.natural?.gravel.height,
+    baked.natural?.turf,
+  ];
+  for (const map of maps) map?.dispose();
+}
+
+export function roadPrimes(url: string): string[] {
+  return [roadKey(url), groundKey];
+}
+
+export function primeRoad(
+  url: string,
+  anisotropy: number,
+  textureLimit: number,
+): void {
+  prime(roadKey(url), () => gltfLoader().loadAsync(url), dropRoad);
+  prime(groundKey, () => loadBaked(anisotropy, textureLimit), dropBaked);
+}
+
 export async function loadRoad(
   url: string,
   anisotropy: number,
@@ -985,21 +1037,21 @@ export async function loadRoad(
   frames: Promise<Frames> | null = null,
 ): Promise<THREE.Object3D> {
   const [gltf, baked, sky, line] = await Promise.all([
-    gltfLoader().loadAsync(url),
-    loadBaked(anisotropy, textureLimit),
+    primed(roadKey(url), () => gltfLoader().loadAsync(url)),
+    primed(groundKey, () => loadBaked(anisotropy, textureLimit)),
     skyLoad,
     frames,
   ]);
+  const surfaces = new Map<THREE.Material, THREE.Material>();
   gltf.scene.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
-    if ((object.material as THREE.Material).name === kerbMaterial)
+    const source = object.material as THREE.MeshStandardMaterial;
+    if (source.name === kerbMaterial)
       object.geometry = reliefKerbs(object.geometry as THREE.BufferGeometry);
-    object.material = surface(
-      object.material as THREE.MeshStandardMaterial,
-      anisotropy,
-      baked,
-      sky,
-    );
+    const made =
+      surfaces.get(source) ?? surface(source, anisotropy, baked, sky);
+    surfaces.set(source, made);
+    object.material = made;
     object.receiveShadow = true;
     object.castShadow = shadowCasters.test(object.name);
     if ((object.material as THREE.Material).alphaTest > 0)

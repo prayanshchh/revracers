@@ -8,6 +8,7 @@ import { type EventPick, type FootPrompt, RaceEvent } from "./race-event.ts";
 import { type Settings, trackOf } from "./settings.ts";
 import { LoadBar } from "./load-bar.ts";
 import { framings, type Studio } from "./studio.ts";
+import type { EventStep } from "./warm-cache.ts";
 import { teamLogo } from "./team-logos.ts";
 import { type Team, teamOf, teams, type TeamRatings } from "./teams.ts";
 
@@ -87,6 +88,7 @@ export class FrontEnd {
     private readonly root: HTMLElement,
     private readonly studio: Studio,
     private readonly settings: Settings,
+    private readonly picked: (step: EventStep) => void = () => undefined,
   ) {
     this.stage = el("div", "stage");
     root.append(this.stage);
@@ -114,6 +116,7 @@ export class FrontEnd {
       if (request !== this.carRequest) return;
       this.carBar.set(1);
       this.carLoader.remove();
+      this.picked("hub");
     };
     this.studio.select(team, enter).then(done, done);
   }
@@ -154,6 +157,7 @@ export class FrontEnd {
           this.show(keys, ...nodes);
         },
         footer: (...prompts) => this.footer(...prompts),
+        picked: this.picked,
       },
       this.settings,
     );

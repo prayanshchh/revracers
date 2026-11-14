@@ -26,7 +26,7 @@ import {
 } from "three/tsl";
 import { type CarLamps, lampMaterials } from "./lamps.ts";
 import { carFile } from "./teams.ts";
-import { releaseOnceUploaded } from "./preload.ts";
+import { loadPicture, releaseOnceUploaded } from "./preload.ts";
 import { scraped } from "./car-damage.ts";
 import { replaceImage, swapLater, upgradeLater } from "./upgrades.ts";
 
@@ -224,8 +224,7 @@ function heightMap(
   map.anisotropy = anisotropy;
   const manager = THREE.DefaultLoadingManager;
   manager.itemStart(url);
-  void new THREE.ImageLoader()
-    .loadAsync(url)
+  void loadPicture(url)
     .then(
       (image) => {
         map.image = redChannel(image);
@@ -609,8 +608,15 @@ brakeLamp.onObjectUpdate(({ object }) => {
     (object?.userData as { lamps?: CarLamps } | undefined)?.lamps?.lit ?? 0;
 });
 
+function lampLight() {
+  return color(lampColour).mul(max(rainLight, brakeLamp));
+}
+
+let lampShine: ReturnType<typeof lampLight> | null = null;
+
 export function lampGlow(material: THREE.MeshStandardNodeMaterial): void {
-  material.emissiveNode = color(lampColour).mul(max(rainLight, brakeLamp));
+  lampShine ??= lampLight();
+  material.emissiveNode = lampShine;
 }
 
 function brakeGlow(physical: THREE.MeshPhysicalNodeMaterial): void {

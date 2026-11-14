@@ -227,15 +227,42 @@ function lookupOf(list: Station[]): Map<number, Station[]> {
   return made;
 }
 
-function nearby(list: Station[], x: number, z: number): Station[] {
+interface Nearest {
+  station: Station | null;
+  reach: number;
+}
+
+function closest(
+  found: Nearest,
+  held: Station[],
+  every: number,
+  x: number,
+  z: number,
+): void {
+  for (let i = 0; i < held.length; i += every) {
+    const station = held[i];
+    if (!station) continue;
+    const distance = (station.x - x) ** 2 + (station.z - z) ** 2;
+    if (distance < found.reach) {
+      found.reach = distance;
+      found.station = station;
+    }
+  }
+}
+
+function nearest(list: Station[], x: number, z: number): Station | null {
   const lookup = lookupOf(list);
-  const found: Station[] = [];
+  const found: Nearest = { station: null, reach: Infinity };
+  let any = false;
   for (let dx = -1; dx <= 1; dx++)
     for (let dz = -1; dz <= 1; dz++) {
       const held = lookup.get(bucket(x + dx * bucketSize, z + dz * bucketSize));
-      if (held) found.push(...held);
+      if (!held) continue;
+      any = true;
+      closest(found, held, 1, x, z);
     }
-  return found.length > 0 ? found : list.filter((_, i) => i % coarse === 0);
+  if (!any) closest(found, list, coarse, x, z);
+  return found.station;
 }
 
 export function locate(
@@ -243,15 +270,7 @@ export function locate(
   x: number,
   z: number,
 ): { station: Station; lateral: number } | null {
-  let best: Station | null = null;
-  let reach = Infinity;
-  for (const station of nearby(list, x, z)) {
-    const distance = (station.x - x) ** 2 + (station.z - z) ** 2;
-    if (distance < reach) {
-      reach = distance;
-      best = station;
-    }
-  }
+  const best = nearest(list, x, z);
   if (!best) return null;
   return {
     station: best,
@@ -358,10 +377,12 @@ export function without(
   if (!index) return;
   const kept: number[] = [];
   for (let i = 0; i + 2 < index.count; i += 3) {
-    const corners = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
-    const x = corners.reduce((sum, k) => sum + position.getX(k), 0) / 3;
-    const z = corners.reduce((sum, k) => sum + position.getZ(k), 0) / 3;
-    if (!gone(x, z)) kept.push(...corners);
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    const x = (position.getX(a) + position.getX(b) + position.getX(c)) / 3;
+    const z = (position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3;
+    if (!gone(x, z)) kept.push(a, b, c);
   }
   geometry.setIndex(kept);
 }

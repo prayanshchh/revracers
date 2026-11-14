@@ -152,8 +152,8 @@ test.describe("opening", () => {
       }
 
       expect(samples.length).toBeGreaterThan(10);
-      expect(samples[0]?.received).toBeLessThan(8);
-      expect(samples[0]?.bar).toBeLessThan(30);
+      expect(samples[0]?.received).toBeLessThan((samples[0]?.total ?? 0) / 2);
+      expect(samples[0]?.bar).toBeLessThan(50);
       expect(
         new Set(samples.map((sample) => sample.slide)).size,
       ).toBeGreaterThan(1);

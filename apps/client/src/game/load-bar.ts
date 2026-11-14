@@ -1,5 +1,5 @@
 import { revBars } from "./dom.ts";
-import { downloadsFromNow } from "./preload.ts";
+import { downloadsFromNow } from "./asset-store.ts";
 
 export class LoadBar {
   readonly element: HTMLElement;

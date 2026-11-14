@@ -33,6 +33,7 @@ import {
   weatherPresets,
 } from "./settings.ts";
 import { compounds } from "./tyres.ts";
+import type { EventStep } from "./warm-cache.ts";
 import {
   forecastText,
   lapSeconds,
@@ -61,6 +62,7 @@ export type FootPrompt = [
 export interface FrontScreen {
   show(keys: Keys, ...nodes: HTMLElement[]): void;
   footer(...prompts: FootPrompt[]): HTMLElement;
+  picked(step: EventStep): void;
 }
 
 type Track = (typeof tracks)[number];
@@ -290,11 +292,16 @@ export class RaceEvent {
 
   run(): Promise<EventPick> {
     this.settings.weatherSeed = newWeatherSeed();
-    saveSettings(this.settings);
+    this.keep("circuits");
     return new Promise((resolve) => {
       this.done = resolve;
       this.circuits("next");
     });
+  }
+
+  private keep(step: EventStep): void {
+    saveSettings(this.settings);
+    this.screen.picked(step);
   }
 
   private finish(pick: EventPick): void {
@@ -526,7 +533,7 @@ export class RaceEvent {
       if (i === at) return;
       at = i;
       s.track = track.id;
-      saveSettings(s);
+      this.keep("circuits");
       paint();
     };
     const confirm = () => {
@@ -686,7 +693,7 @@ export class RaceEvent {
   }
 
   private conditions(dir: Dir): void {
-    const s = this.settings;
+    this.screen.picked("conditions");
     const track = this.track();
     const rows = this.conditionRows(track);
     let focus = 0;
@@ -708,7 +715,7 @@ export class RaceEvent {
       this.conditionHead(head, rows[focus]);
     };
     const changed = () => {
-      saveSettings(s);
+      this.keep("conditions");
       paint();
     };
     const shift = (delta: number) => {
@@ -1056,7 +1063,7 @@ export class RaceEvent {
   }
 
   private raceSettings(dir: Dir): void {
-    const s = this.settings;
+    this.screen.picked("settings");
     const track = this.track();
     const hero = new Shot("ev-hero blurred", false);
     hero.show(track.id, this.look());
@@ -1101,7 +1108,7 @@ export class RaceEvent {
       summary.paint();
     };
     const changed = () => {
-      saveSettings(s);
+      this.keep("settings");
       paint();
     };
     const select = (i: number) => {

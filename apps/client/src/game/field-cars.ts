@@ -1,5 +1,4 @@
 import * as THREE from "three/webgpu";
-import { MeshoptSimplifier } from "meshoptimizer/simplifier";
 import {
   mergeGeometries,
   mergeVertices,
@@ -41,7 +40,8 @@ import {
 } from "./debris.ts";
 import { teamModel } from "./grid.ts";
 import { RearFlap } from "./rear-flap.ts";
-import { simplified, simplifiedBody } from "./simplify.ts";
+import { simplified, simplifiedBody, Simplifier } from "./simplify.ts";
+import type { Simplify } from "./simplify-jobs.ts";
 import type { TyreMount } from "./tyre-stones.ts";
 import { compounds } from "./tyres.ts";
 import {
@@ -204,7 +204,70 @@ function wheelShapes(model: THREE.Object3D): WheelShape[] {
   });
 }
 
-function staticWheels(wheels: WheelShape[], error: number): THREE.Mesh[] {
+interface Weld {
+  merged: THREE.BufferGeometry;
+  welded: THREE.BufferGeometry;
+  levels: Map<number, Promise<THREE.BufferGeometry>>;
+}
+
+const welds: Weld[] = [];
+
+function sameValues(
+  a: THREE.BufferGeometry,
+  b: THREE.BufferGeometry,
+  name: string,
+): boolean {
+  const first = a.getAttribute(name).array;
+  const second = b.getAttribute(name).array;
+  if (first.length !== second.length) return false;
+  for (let i = 0; i < first.length; i++)
+    if (first[i] !== second[i]) return false;
+  return true;
+}
+
+function sameShape(a: THREE.BufferGeometry, b: THREE.BufferGeometry): boolean {
+  const names = Object.keys(a.attributes);
+  return (
+    !a.index &&
+    !b.index &&
+    names.length === Object.keys(b.attributes).length &&
+    names.every(
+      (name) =>
+        b.hasAttribute(name) &&
+        a.getAttribute(name).itemSize === b.getAttribute(name).itemSize &&
+        sameValues(a, b, name),
+    )
+  );
+}
+
+function weldOf(merged: THREE.BufferGeometry): Weld {
+  const known = welds.find((weld) => sameShape(weld.merged, merged));
+  if (known) return known;
+  const weld = { merged, welded: mergeVertices(merged), levels: new Map() };
+  welds.push(weld);
+  return weld;
+}
+
+async function weldedWheels(
+  merged: THREE.BufferGeometry,
+  error: number,
+  run: Simplify,
+): Promise<THREE.BufferGeometry> {
+  const weld = weldOf(merged);
+  const known = weld.levels.get(error);
+  const level = known ?? simplified(weld.welded, error, run);
+  if (!known) {
+    weld.levels.set(error, level);
+    level.catch(() => weld.levels.delete(error));
+  }
+  return (await level).clone();
+}
+
+function staticWheels(
+  wheels: WheelShape[],
+  error: number,
+  run: Simplify,
+): Promise<THREE.Mesh[]> {
   const groups = new Map<THREE.Material, THREE.BufferGeometry[]>();
   for (const shape of wheels)
     for (const mesh of shape.meshes) {
@@ -215,29 +278,43 @@ function staticWheels(wheels: WheelShape[], error: number): THREE.Mesh[] {
         .translate(shape.centre.x, shape.centre.y, shape.centre.z);
       groups.set(material, [...(groups.get(material) ?? []), placed]);
     }
-  return Array.from(groups, ([material, parts]) => {
-    const merged = mergeGeometries(parts);
-    for (const part of parts) part.dispose();
-    const welded = mergeVertices(merged);
-    merged.dispose();
-    const mesh = new THREE.Mesh(simplified(welded, error), material);
-    mesh.name = staticWheelsName;
-    return mesh;
-  });
+  return Promise.all(
+    Array.from(groups, async ([material, parts]) => {
+      const merged = mergeGeometries(parts);
+      for (const part of parts) part.dispose();
+      const mesh = new THREE.Mesh(
+        await weldedWheels(merged, error, run),
+        material,
+      );
+      mesh.name = staticWheelsName;
+      return mesh;
+    }),
+  );
 }
 
-function detailModels(body: THREE.Object3D, wheels: WheelShape[]) {
-  return detailLevels.map(({ error, spinning }) => {
-    const level = new THREE.Group();
-    level.add(simplifiedBody(body, error));
-    if (!spinning) level.add(...staticWheels(wheels, error));
-    return level;
-  });
+function detailModels(
+  body: THREE.Object3D,
+  wheels: WheelShape[],
+  run: Simplify,
+): Promise<THREE.Object3D[]> {
+  return Promise.all(
+    detailLevels.map(async ({ error, spinning }) => {
+      const [simple, fixed] = await Promise.all([
+        simplifiedBody(body, error, run),
+        spinning ? [] : staticWheels(wheels, error, run),
+      ]);
+      const level = new THREE.Group();
+      level.add(simple);
+      if (fixed.length > 0) level.add(...fixed);
+      return level;
+    }),
+  );
 }
 
 async function loadTemplate(
   team: string,
   env: CarEnvironment,
+  run: Simplify,
 ): Promise<Template> {
   const model = await teamModel(team, env);
   const wheels = wheelShapes(model);
@@ -257,7 +334,7 @@ async function loadTemplate(
   return {
     body,
     wheels,
-    levels: detailModels(body, wheels),
+    levels: await detailModels(body, wheels, run),
     pieces,
     axleMid: mean((shape) => shape.centre.x),
     wheelHeight: mean((shape) => shape.centre.z),
@@ -276,16 +353,21 @@ export class FieldCars {
   private viewHeight = referenceHeight;
 
   static async load(teams: string[], env: CarEnvironment): Promise<FieldCars> {
-    await MeshoptSimplifier.ready;
     const field = new FieldCars();
     const unique = [...new Set(teams)];
+    const simplifier = new Simplifier();
     const templates = new Map(
       await Promise.all(
         unique.map(
           async (team) =>
-            [team, await loadTemplate(team, env)] as [string, Template],
+            [team, await loadTemplate(team, env, simplifier.run)] as [
+              string,
+              Template,
+            ],
         ),
-      ),
+      ).finally(() => {
+        simplifier.close();
+      }),
     );
     for (const team of teams) {
       const template = templates.get(team);

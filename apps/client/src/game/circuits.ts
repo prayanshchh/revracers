@@ -187,6 +187,10 @@ const circuits: Circuit[] = [
   },
 ];
 
+export function venues(): Circuit[] {
+  return circuits.filter((circuit) => circuit.venue);
+}
+
 export function circuitOf(id: string): Circuit {
   const circuit = circuits.find((c) => c.id === id) ?? circuits[0];
   if (!circuit) throw new Error("no circuits defined");

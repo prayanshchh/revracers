@@ -156,8 +156,17 @@ import {
 import { gpuDevice } from "./game/gpu-device.ts";
 import { handOverStill, stillSeen, stillSkipped } from "./game/school-still.ts";
 import { fitStage } from "./game/stage.ts";
-import { releaseUploadedImages } from "./game/preload.ts";
-import { warmGame } from "./game/warm-cache.ts";
+import { claimDownloads, demand, settle } from "./game/asset-store.ts";
+import { releaseUploadedImages, useRenderer } from "./game/preload.ts";
+import { raceFiles } from "./game/race-files.ts";
+import {
+  dropPrimes,
+  eventFiles,
+  loadingFiles,
+  primeEvent,
+  warmEvent,
+  warmGame,
+} from "./game/warm-cache.ts";
 import { loadShow } from "./game/opening.ts";
 import { showActions } from "./game/weekend-ui.ts";
 
@@ -719,9 +728,8 @@ function afterFrames(count: number): Promise<void> {
 }
 
 function warmInBackground(
-  tutorial: boolean,
   mirrorsWarm: boolean,
-  team: string,
+  event: Settings,
   renderer: THREE.WebGPURenderer,
   scene: Scene,
   draw: () => void,
@@ -740,7 +748,7 @@ function warmInBackground(
       .catch(() => undefined);
   void scene
     .finishCar()
-    .then(() => warmGame(team, release, tutorial))
+    .then(() => warmGame(event, release))
     .catch(() => undefined);
 }
 
@@ -794,6 +802,7 @@ async function createRenderer(
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   await renderer.init();
+  useRenderer(renderer);
   return renderer;
 }
 
@@ -1019,10 +1028,17 @@ async function enterGame(
   known: Driver | null,
 ): Promise<Entry> {
   const studio = new Studio(renderer);
-  const front = new FrontEnd(element("[data-front=root]"), studio, settings);
+  const front = new FrontEnd(
+    element("[data-front=root]"),
+    studio,
+    settings,
+    (step) => {
+      warmEvent(settings);
+      primeEvent(renderer, settings, step);
+    },
+  );
   front.open();
   music.opening();
-  void studio.preloadTeams();
   setStatus("");
   let driver = known ?? (await front.welcome());
   const leave = (tutorial: boolean): Entry => {
@@ -1043,6 +1059,7 @@ async function enterGame(
     if (choice.action === "tutorial") return leave(true);
     menuMusic(music);
     if ((await front.raceEvent()) === "start") return leave(false);
+    dropPrimes();
   }
 }
 
@@ -1093,7 +1110,7 @@ async function enter(
   const entry = asked
     ? { driver: await (early ?? currentDriver()), tutorial: true }
     : await signIn(autostart, renderer, settings, music);
-  if (await redeployed(entry.tutorial)) return never();
+  void redeployed(entry.tutorial);
   return {
     driver: Promise.resolve(entry.driver),
     tutorial: entry.tutorial,
@@ -1168,12 +1185,36 @@ function debugHooks(
     Object.assign(window, { f1Debug: { engine, scene, renderer } });
 }
 
-async function bootEngine(): ReturnType<typeof loadSpeedDreams> {
+function bootEngine(): ReturnType<typeof loadSpeedDreams> {
   setStatus("Loading");
   statusBar.followDownloads(0, 0.95);
-  const module = await (speedDreams ?? loadSpeedDreams());
-  statusBar.set(1);
-  return module;
+  const engine = speedDreams ?? loadSpeedDreams();
+  engine.catch(() => undefined);
+  return engine;
+}
+
+function showLoading(shown: boolean, label: string): void {
+  if (!shown) return;
+  setStatus(`Loading ${label}…`);
+  statusBar.reset();
+  statusBar.followDownloads(0, 0.85);
+}
+
+function showRaceLoading(tutorial: boolean, settings: Settings): void {
+  if (tutorial) return;
+  showLoading(true, trackOf(settings).label);
+  claimDownloads(loadingFiles(settings));
+}
+
+function neededFiles(
+  settings: Settings,
+  circuit: Circuit,
+  team: string,
+  rivals: string[],
+): string[] {
+  return circuit.venue
+    ? [...raceFiles(circuit, team, rivals), ...eventFiles(settings)]
+    : Scene.downloads(circuit, team, rivals);
 }
 
 function pitWallFor(
@@ -1220,22 +1261,28 @@ async function main(): Promise<void> {
   const renderer = await createRenderer(canvas);
 
   const params = new URLSearchParams(location.search);
-  const module = await bootEngine();
+  const engineLoad = bootEngine();
   const settings = loadSettings(params);
-  const source = setupSource(module);
   const interventions = params.has("interventions");
-  const menu = new Menu(source, settings, interventions);
   const music = new Music(() => settings.musicVolume / 100);
   scoreLoadShow(music);
 
   const entry = await enter(params, renderer, settings, music);
   const { autostart } = entry;
+  const event = structuredClone(settings);
+  showRaceLoading(entry.tutorial, settings);
+  const module = await engineLoad;
+  const source = setupSource(module);
+  const menu = new Menu(source, settings, interventions);
   startTutorial(entry.tutorial, settings, menu);
 
   const track = trackOf(settings);
   const circuit = circuitOf(track.id);
   useSeason(seasonOf(settings.season, circuit.season));
   const setup = prepareSession(settings);
+  demand(
+    neededFiles(settings, circuit, carOf(settings).id, rivalCars(setup.field)),
+  );
   const seek = params.get("buildup");
   if (wantsBuildUp(settings, setup, autostart, seek)) music.preload("buildup");
   const { stage, field, plan } = setup;
@@ -1248,9 +1295,7 @@ async function main(): Promise<void> {
       : loadReference(known, settings.track, car.car),
   );
   await installTrack(module, circuit.engineFiles);
-  setStatus(`Loading ${track.label}…`);
-  statusBar.reset();
-  statusBar.followDownloads(0, 0.85);
+  showLoading(entry.tutorial, track.label);
   const engine = Engine.start(
     module,
     track.category,
@@ -1274,6 +1319,7 @@ async function main(): Promise<void> {
   );
   const soundStart = GameSound.start(gameAudio());
   const scene = await sceneLoad;
+  dropPrimes();
   const driver = await entry.driver;
   const log = raceLog(driver, settings, stage);
   const seat = playerSeat(driver, car.id);
@@ -1609,14 +1655,8 @@ async function main(): Promise<void> {
     }
   };
   document.body.dataset["driveStatus"] = "running";
-  warmInBackground(
-    entry.tutorial,
-    circuit.venue,
-    car.id,
-    renderer,
-    scene,
-    draw,
-  );
+  settle();
+  warmInBackground(circuit.venue, event, renderer, scene, draw);
 
   const startFuel = engine.hudInfo().fuel;
   let padBrakeWas = false;
