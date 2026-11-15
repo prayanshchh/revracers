@@ -3,6 +3,7 @@ import { asha, seedPlayer } from "../support/player.ts";
 import { slowNetwork } from "../support/slow-network.ts";
 
 interface Sample {
+  at: number;
   label: string;
   value: number;
   colour: string;
@@ -23,6 +24,7 @@ function sampleLoadBars(): void {
     if (!box?.isConnected || !bar) return;
     const fill = bar.querySelector("i");
     window.loadSamples.push({
+      at: performance.now(),
       label:
         box.querySelector("[data-status-text], span")?.textContent.trim() ?? "",
       value: Number(bar.getAttribute("aria-valuenow")),
@@ -128,8 +130,27 @@ test.describe("loading progress", () => {
     expect(colours(samples)).toEqual(new Set([loaderRed]));
     const runs = phases(samples);
     expect(runs.length).toBeLessThanOrEqual(2);
+    const timings = await page.evaluate(() =>
+      performance
+        .getEntriesByType("resource")
+        .map((entry) => entry as PerformanceResourceTiming)
+        .filter((entry) => entry.name.includes("/assets/"))
+        .map(
+          (entry) =>
+            `${entry.name.split("/").at(-1) ?? ""} ${String(Math.round(entry.startTime))}-${String(Math.round(entry.responseEnd))} ${String(entry.transferSize)}/${String(entry.decodedBodySize)}`,
+        ),
+    );
     expect(
       Math.max(...runs.map((run) => partway(run).size)),
+      JSON.stringify({
+        runs: runs.map((run) =>
+          run.map(
+            (sample) =>
+              `${String(Math.round(sample.at))}:${String(sample.value)}`,
+          ),
+        ),
+        timings,
+      }),
     ).toBeGreaterThanOrEqual(10);
     for (const run of runs) expect(run.at(-1)?.value).toBe(100);
   });
