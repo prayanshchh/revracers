@@ -130,6 +130,11 @@ test.describe("loading progress", () => {
     expect(runs.length).toBeLessThanOrEqual(2);
     expect(
       Math.max(...runs.map((run) => partway(run).size)),
+      JSON.stringify(
+        runs.map((run) =>
+          run.map((sample) => `${sample.label}:${String(sample.value)}`),
+        ),
+      ),
     ).toBeGreaterThanOrEqual(10);
     for (const run of runs) expect(run.at(-1)?.value).toBe(100);
   });
