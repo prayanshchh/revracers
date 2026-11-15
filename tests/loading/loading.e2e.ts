@@ -114,7 +114,7 @@ test.describe("loading progress", () => {
 
     await page.evaluate(() => caches.delete("revracers-assets"));
     await page.addInitScript(sampleLoadBars);
-    await slowNetwork(page, 40);
+    await slowNetwork(page, 4);
     await page.goto("/?intro=off");
     await expect(page.locator(".front-hub")).toBeVisible({ timeout: 120_000 });
     await expect(page.locator(".front-car-loading")).toHaveCount(0, {
@@ -130,11 +130,6 @@ test.describe("loading progress", () => {
     expect(runs.length).toBeLessThanOrEqual(2);
     expect(
       Math.max(...runs.map((run) => partway(run).size)),
-      JSON.stringify(
-        runs.map((run) =>
-          run.map((sample) => `${sample.label}:${String(sample.value)}`),
-        ),
-      ),
     ).toBeGreaterThanOrEqual(10);
     for (const run of runs) expect(run.at(-1)?.value).toBe(100);
   });
