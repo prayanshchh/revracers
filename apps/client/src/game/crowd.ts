@@ -350,19 +350,23 @@ export class Crowd {
       map.colorSpace = colorSpace;
       return map;
     };
-    const [albedo, mask, values] = await Promise.all([
-      atlas(albedoUrl, THREE.SRGBColorSpace),
+    const sprites = async () => {
+      const map = await atlas(albedoUrl, THREE.SRGBColorSpace);
+      const image = map.image as Atlas;
+      return {
+        map,
+        bounds: spriteBounds(alphaOf(image), image.width, image.height),
+      };
+    };
+    const [{ map: albedo, bounds }, mask, values] = await Promise.all([
+      sprites(),
       atlas(maskUrl, THREE.NoColorSpace),
       placed ??
         fetch(crowdUrl)
           .then((response) => response.arrayBuffer())
           .then((buffer) => new Float32Array(buffer)),
     ]);
-    const image = albedo.image as Atlas;
-    const boxes = uniformArray(
-      spriteBounds(alphaOf(image), image.width, image.height),
-      "vec4",
-    );
+    const boxes = uniformArray(bounds, "vec4");
     const tiles = new Map<string, number[]>();
     for (let i = 0; i < values.length; i += stride) {
       const key = `${String(Math.floor((values[i] ?? 0) / tileSize))}|${String(Math.floor((values[i + 1] ?? 0) / tileSize))}`;

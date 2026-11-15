@@ -38,6 +38,7 @@ const raceOnly = [
   /^\/assets\/crew-[\w-]+\.glb$/,
   /^\/assets\/car-[\w-]+\.glb$/,
   /^\/assets\/[a-z]+(-env)?-[\w-]+\.hdr$/,
+  /^\/assets\/[a-z]+-sky-[\w-]+\.webp$/,
   /^\/assets\/tyre-[\w-]+\.png$/,
   /^\/assets\/terrain_albedo-[\w-]+\.jpg$/,
   /^\/assets\/crowd-[\w-]+\.bin$/,
@@ -277,7 +278,7 @@ test.describe("first visit", () => {
             return [
               /\/road-[\w-]+\.glb$/,
               /\/car-[\w-]+\.glb$/,
-              /\/circuit-[\w-]+\.hdr$/,
+              /\/circuit-sky-[\w-]+\.webp$/,
               /\/lod-[\w-]+\.glb$/,
             ].every((pattern) => paths.some((path) => pattern.test(path)));
           },

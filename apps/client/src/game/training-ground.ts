@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
 import { trainingMaps, trainingUpgrades } from "./training-files.ts";
 import { swapLater } from "./upgrades.ts";
-import { releaseOnceUploaded } from "./preload.ts";
+import { loadPicture, releaseOnceUploaded } from "./preload.ts";
 import {
   alphaTestedOrder,
   type BakedGround,
@@ -43,7 +43,7 @@ function later(url: string, after: Promise<unknown>): THREE.Texture {
   const manager = THREE.DefaultLoadingManager;
   manager.itemStart(url);
   void after
-    .then(() => new THREE.ImageLoader().loadAsync(url))
+    .then(() => loadPicture(url))
     .then(
       (image) => {
         map.image = image;

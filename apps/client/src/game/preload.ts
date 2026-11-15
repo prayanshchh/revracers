@@ -1,7 +1,6 @@
 import * as THREE from "three/webgpu";
 import { DefaultLoadingManager } from "three/webgpu";
-import { currentPhase } from "./download-phase.ts";
-import { takeEarly } from "./early.ts";
+import "./asset-store.ts";
 
 const settleFrames = 3;
 let loading = 0;
@@ -20,174 +19,7 @@ DefaultLoadingManager.itemEnd = (url: string) => {
   waiting = [];
 };
 
-const sizes = JSON.parse(
-  document.querySelector("[data-asset-sizes]")?.textContent ?? "{}",
-) as Record<string, number>;
-const wire = JSON.parse(
-  document.querySelector("[data-asset-wire]")?.textContent ?? "{}",
-) as Record<string, number>;
-let expectedBytes = 0;
-let receivedBytes = 0;
-const declared = new Set<string>();
-const plainFetch = globalThis.fetch.bind(globalThis);
-const storeName = "revracers-assets";
-let store: Promise<Cache | null> | null = null;
-
-function requestUrl(input: RequestInfo | URL): URL {
-  if (input instanceof Request) return new URL(input.url);
-  return new URL(input, location.href);
-}
-
-function wireShare(path: string): number {
-  const size = sizes[path];
-  const sent = wire[path];
-  return size && sent ? sent / size : 1;
-}
-
-function expectedSize(url: URL, response: Response): number {
-  const known = sizes[url.pathname];
-  if (known !== undefined) return known;
-  if (response.headers.has("content-encoding")) return 0;
-  return Number(response.headers.get("content-length") ?? 0);
-}
-
-function buildAsset(
-  url: URL,
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): boolean {
-  const method =
-    init?.method ?? (input instanceof Request ? input.method : "GET");
-  return (
-    method.toUpperCase() === "GET" &&
-    url.origin === location.origin &&
-    sizes[url.pathname] !== undefined
-  );
-}
-
-function assetStore(): Promise<Cache | null> {
-  store ??=
-    "caches" in globalThis
-      ? caches.open(storeName).catch(() => null)
-      : Promise.resolve(null);
-  return store;
-}
-
-async function keptFetch(
-  url: URL,
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<Response> {
-  const kept = await assetStore();
-  const hit = await kept?.match(url.href).catch(() => undefined);
-  if (hit) return hit;
-  const response = await plainFetch(input, init);
-  if (kept && response.status === 200)
-    void kept.put(url.href, response.clone()).catch(() => undefined);
-  return response;
-}
-
-async function forgetOldAssets(): Promise<void> {
-  const kept = await assetStore();
-  if (!kept) return;
-  for (const request of await kept.keys())
-    if (sizes[new URL(request.url).pathname] === undefined)
-      await kept.delete(request);
-}
-
-function takeHeld(
-  url: URL,
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<Response> | null {
-  const method =
-    init?.method ?? (input instanceof Request ? input.method : "GET");
-  if (method.toUpperCase() !== "GET") return null;
-  return takeEarly(url.href)?.catch(() => plainFetch(input, init)) ?? null;
-}
-
-if (Object.keys(sizes).length > 0)
-  setTimeout(() => {
-    void forgetOldAssets().catch(() => undefined);
-  }, 10_000);
-
-globalThis.fetch = async (input, init) => {
-  const mine = currentPhase();
-  const url = requestUrl(input);
-  const response = await (takeHeld(url, input, init) ??
-    (buildAsset(url, input, init)
-      ? keptFetch(url, input, init)
-      : plainFetch(input, init)));
-  const size =
-    url.origin === location.origin && url.protocol === location.protocol
-      ? expectedSize(url, response)
-      : 0;
-  if (!response.ok || !response.body || size <= 0) return response;
-  const share = wireShare(url.pathname);
-  if (!declared.delete(url.pathname)) {
-    expectedBytes += size * share;
-    mine.expected += size * share;
-  }
-  const counted = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      receivedBytes += chunk.byteLength * share;
-      mine.received += chunk.byteLength * share;
-      controller.enqueue(chunk);
-    },
-  });
-  return new Response(response.body.pipeThrough(counted), {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
-};
-
-export async function prefetch(urls: string[], lanes = 2): Promise<void> {
-  const kept = await assetStore();
-  if (!kept) return;
-  const wanted = [
-    ...new Set(urls.map((url) => new URL(url, location.href).href)),
-  ].filter((href) => sizes[new URL(href).pathname] !== undefined);
-  const queue = [...wanted];
-  const lane = async (): Promise<void> => {
-    for (let href = queue.shift(); href; href = queue.shift()) {
-      const hit = await kept.match(href).catch(() => undefined);
-      if (!hit) {
-        const response = await plainFetch(href, { priority: "low" }).catch(
-          () => null,
-        );
-        if (response?.status === 200)
-          await kept.put(href, response).catch(() => undefined);
-        else await response?.body?.cancel().catch(() => undefined);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: lanes }, lane));
-}
-
-export function downloadsFromNow(): () => number {
-  const expected = expectedBytes;
-  const received = receivedBytes;
-  return () =>
-    expectedBytes > expected
-      ? (receivedBytes - received) / (expectedBytes - expected)
-      : 0;
-}
-
-export function expectDownloads(urls: string[]): void {
-  const phase = currentPhase();
-  phase.plans += 1;
-  for (const url of urls) {
-    const path = new URL(url, location.href).pathname;
-    const size = sizes[path];
-    if (size === undefined || declared.has(path)) continue;
-    declared.add(path);
-    expectedBytes += size * wireShare(path);
-    phase.expected += size * wireShare(path);
-  }
-}
-
-export function loaded(): Promise<void> {
+function loaded(): Promise<void> {
   if (loading <= 0) return Promise.resolve();
   return new Promise((resolve) => waiting.push(resolve));
 }
@@ -254,29 +86,97 @@ function slotTextures(scene: THREE.Scene): void {
   });
 }
 
+function release(texture: THREE.Texture, uploaded: UploadedTextures): boolean {
+  if (!uploaded.has(texture)) return false;
+  const record = uploaded.get(texture);
+  if (record.initialized !== true || record.isDefaultTexture === true)
+    return false;
+  if (record.version !== texture.version) return false;
+  const data: unknown = texture.source.data;
+  if (!freeable(data)) return false;
+  texture.source.data = { width: data.width, height: data.height };
+  if (data instanceof ImageBitmap) data.close();
+  if (drawnCanvas(data)) {
+    data.width = 0;
+    data.height = 0;
+  }
+  return true;
+}
+
+function uploadedBy(renderer: THREE.WebGPURenderer): UploadedTextures {
+  return (renderer as unknown as { _textures: UploadedTextures })._textures;
+}
+
 export function releaseUploadedImages(
   renderer: THREE.WebGPURenderer,
   scene: THREE.Scene,
 ): void {
   slotTextures(scene);
-  const uploaded = (renderer as unknown as { _textures: UploadedTextures })
-    ._textures;
-  for (const texture of releasable) {
-    if (!uploaded.has(texture)) continue;
-    const record = uploaded.get(texture);
-    if (record.initialized !== true || record.isDefaultTexture === true)
-      continue;
-    if (record.version !== texture.version) continue;
-    const data: unknown = texture.source.data;
-    if (!freeable(data)) continue;
-    texture.source.data = { width: data.width, height: data.height };
-    if (data instanceof ImageBitmap) data.close();
-    if (drawnCanvas(data)) {
-      data.width = 0;
-      data.height = 0;
-    }
-  }
+  const uploaded = uploadedBy(renderer);
+  for (const texture of releasable) release(texture, uploaded);
   releasable.clear();
+}
+
+let gpu: THREE.WebGPURenderer | null = null;
+const pictures = new Map<string, Promise<void>>();
+const ticker = new MessageChannel();
+ticker.port1.onmessage = uploadArrived;
+
+export function useRenderer(renderer: THREE.WebGPURenderer): void {
+  gpu = renderer;
+}
+
+function uploadArrived(): void {
+  if (!gpu) return;
+  const uploaded = uploadedBy(gpu);
+  for (const texture of releasable) {
+    if (!(texture.source.data instanceof ImageBitmap)) continue;
+    gpu.initTexture(texture);
+    if (release(texture, uploaded)) releasable.delete(texture);
+  }
+}
+
+export async function loadPicture(url: string): Promise<ImageBitmap> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`failed to load ${url}`);
+  return createImageBitmap(await response.blob(), {
+    premultiplyAlpha: "none",
+    colorSpaceConversion: "none",
+  });
+}
+
+THREE.ImageLoader.prototype.load = function (
+  this: THREE.ImageLoader,
+  url,
+  onLoad,
+  _onProgress,
+  onError,
+) {
+  const { manager } = this;
+  const resolved = manager.resolveURL(`${this.path}${url}`);
+  manager.itemStart(resolved);
+  const arriving = loadPicture(resolved).then(
+    (picture) => {
+      onLoad?.(picture as unknown as HTMLImageElement);
+      ticker.port2.postMessage(null);
+    },
+    (error: unknown) => {
+      onError?.(error);
+      manager.itemError(resolved);
+    },
+  );
+  void arriving.finally(() => {
+    if (pictures.get(resolved) === arriving) pictures.delete(resolved);
+    manager.itemEnd(resolved);
+  });
+  pictures.set(resolved, arriving);
+  return new Image();
+};
+
+export function picturesLoaded(urls: string[]): Promise<void> {
+  return Promise.all(
+    urls.map((url) => pictures.get(url) ?? Promise.resolve()),
+  ).then(() => undefined);
 }
 
 const laterKey = "warmLater";

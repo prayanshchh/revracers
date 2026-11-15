@@ -51,6 +51,8 @@ interface People {
   standing: number[];
 }
 
+export const venueFiles = [wrapsUrl, screensUrl];
+
 const boardMeshes = /^wall_(boards|tecpro)$/;
 const blockMesh = "wall_tecpro";
 const blockTile = 3;

@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
-import { releaseOnceUploaded } from "./preload.ts";
+import { loadPicture, releaseOnceUploaded } from "./preload.ts";
 
-type Apply = (image: HTMLImageElement) => void;
+type Apply = (image: ImageBitmap) => void;
 
 interface Upgrade {
   url: string;
@@ -33,11 +33,10 @@ export function upgradeFiles(): string[] {
 
 export async function upgradeAll(lanes = 2): Promise<number> {
   const due = waiting.splice(0);
-  const loader = new THREE.ImageLoader();
   let applied = 0;
   const lane = async (): Promise<void> => {
     for (let next = due.shift(); next; next = due.shift()) {
-      const image = await loader.loadAsync(next.url).catch(() => null);
+      const image = await loadPicture(next.url).catch(() => null);
       if (!image) continue;
       next.apply(image);
       applied++;

@@ -24,8 +24,8 @@ import {
 } from "three/tsl";
 import { type CarEnvironment, useEnvironment } from "./carpaint.ts";
 import { carFile } from "./teams.ts";
-import { swapLater } from "./upgrades.ts";
-import { releaseOnceUploaded } from "./preload.ts";
+import { replaceImage, swapLater } from "./upgrades.ts";
+import { loadPicture, releaseOnceUploaded } from "./preload.ts";
 import { screenBump } from "./track-surface.ts";
 import { compounds } from "./tyres.ts";
 
@@ -186,17 +186,28 @@ export function spinBlur(radiansPerSecond: number, seconds: number): number {
   return Math.min(Math.abs(radiansPerSecond) * seconds * shutter, turn) / turn;
 }
 
+function conditionMap(after: Promise<unknown> | null): THREE.Texture {
+  const full = carFile("shared", "tyre-condition.png");
+  const map = new THREE.Texture();
+  if (!after) swapLater(map, full);
+  else
+    void after
+      .then(() => loadPicture(full))
+      .then(
+        (image) => {
+          replaceImage(map, image);
+        },
+        () => undefined,
+      );
+  return map;
+}
+
 function tyreMap(
-  name: string,
+  map: THREE.Texture,
   anisotropy: number,
-  first?: string | null,
+  later?: string,
 ): THREE.Texture {
-  const full = carFile("shared", name);
-  const map =
-    first === null
-      ? new THREE.Texture()
-      : releaseOnceUploaded(new THREE.TextureLoader().load(first ?? full));
-  if (first !== undefined) swapLater(map, full);
+  if (later) swapLater(map, later);
   map.flipY = false;
   map.colorSpace = THREE.NoColorSpace;
   map.wrapS = THREE.RepeatWrapping;
@@ -240,7 +251,7 @@ export function markTyres(geometry: THREE.BufferGeometry, split: boolean) {
   geometry.setAttribute(tyreAttribute, new THREE.BufferAttribute(local, 4));
 }
 
-function lookUniforms() {
+function lookUniforms(condition: THREE.Texture) {
   const fallback = tyreLook();
   const lookOf = (object: THREE.Object3D | null | undefined) =>
     (object?.userData as { tyre?: TyreLook } | undefined)?.tyre ?? fallback;
@@ -251,11 +262,16 @@ function lookUniforms() {
   compound.onObjectUpdate(({ object }) => {
     const look = lookOf(object);
     const { r, g, b } = look.compound;
-    compound.value.set(r, g, b, detailed(look) ? 1 : 0);
+    compound.value.set(r, g, b, detailed(look) && condition.image ? 1 : 0);
   });
   surface.onObjectUpdate(({ object }) => {
     const look = lookOf(object);
-    surface.value.set(look.wear, look.flat, look.flatTurn, look.shred);
+    surface.value.set(
+      look.wear,
+      look.flat,
+      look.flatTurn,
+      condition.image ? look.shred : 0,
+    );
   });
   coat.onObjectUpdate(({ object }) => {
     const look = lookOf(object);
@@ -300,7 +316,7 @@ function buildMaterial(
   condition: THREE.Texture,
 ): THREE.MeshPhysicalNodeMaterial {
   const material = new THREE.MeshPhysicalNodeMaterial({ name: "tyre" });
-  const { compound, surface, coat, shape } = lookUniforms();
+  const { compound, surface, coat, shape } = lookUniforms(condition);
   const blur = shape.w;
   const wear = surface.x;
   const flat = surface.y;
@@ -630,13 +646,22 @@ export function tyreMaterial(
 ): THREE.Material {
   const known = shared.get(env);
   if (known) return known;
-  const material = buildMaterial(
-    tyreMap(
-      "tyre.png",
-      anisotropy,
-      lite ? carFile("shared", "lite/tyre.jpg") : undefined,
+  const full = carFile("shared", "tyre.png");
+  let settle: () => void = () => undefined;
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  const tread = releaseOnceUploaded(
+    new THREE.TextureLoader().load(
+      lite ? carFile("shared", "lite/tyre.jpg") : full,
+      settle,
+      undefined,
+      settle,
     ),
-    tyreMap("tyre-condition.png", anisotropy, lite ? null : undefined),
+  );
+  const material = buildMaterial(
+    tyreMap(tread, anisotropy, lite ? full : undefined),
+    tyreMap(conditionMap(lite ? null : settled), anisotropy),
   );
   useEnvironment(material, env, reflection);
   shared.set(env, material);

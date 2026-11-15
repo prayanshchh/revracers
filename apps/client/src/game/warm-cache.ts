@@ -1,49 +1,101 @@
-import crewUrl from "../../../../content/tracks/hill-country/crew.glb?url";
-import roadUrl from "../../../../content/tracks/hill-country/road.glb?url";
-import { circuitFiles, circuitOf, engineDownloads } from "./circuits.ts";
-import { crowdFiles } from "./crowd.ts";
-import { prefetch } from "./preload.ts";
-import { groundFiles } from "./road.ts";
-import { skyDownloads } from "./skybox.ts";
+import { warm } from "./asset-store.ts";
+import { circuitOf, engineDownloads, venues } from "./circuits.ts";
+import { startHour } from "./event-art.ts";
+import type { WebGPURenderer } from "three/webgpu";
+import { forgetPrimed } from "./prime.ts";
+import { raceFiles, sceneFiles } from "./race-files.ts";
+import { brokenCloud, groundPrimes, primeGround } from "./scene.ts";
+import { carOf, type Settings, tracks } from "./settings.ts";
+import {
+  primeSky,
+  skyDownloads,
+  skyFor,
+  skyNames,
+  skyPrimes,
+} from "./skybox.ts";
 import { musicFiles } from "./sound/music.ts";
-import { carFile, teams } from "./teams.ts";
 import { upgradeAll, upgradeFiles } from "./upgrades.ts";
 
-const raceSkies = ["circuit"];
-const playerParts = [
-  "car.glb",
-  "albedo.jpg",
-  "orm.jpg",
-  "bump.jpg",
-  "wheel-face.jpg",
-  "glove.jpg",
-  "crew.jpg",
-];
-const fieldParts = ["lod.glb", "albedo-lod.jpg", "orm-lod.jpg"];
+function skyOf(settings: Settings, trackHour: number, now: Date): string[] {
+  const hour = startHour(settings.timeOfDay, trackHour, now);
+  return hour === null
+    ? skyDownloads(["circuit"])
+    : skyFor(hour, brokenCloud(settings.clouds));
+}
 
-function gameFiles(team: string): string[] {
+export function eventFiles(settings: Settings, now = new Date()): string[] {
+  const track = tracks.find((each) => each.id === settings.track);
+  if (!track) return [];
   return [
-    ...upgradeFiles(),
-    ...musicFiles(),
-    ...teams.flatMap((t) => fieldParts.map((part) => carFile(t.id, part))),
-    ...playerParts.map((part) => carFile(team, part)),
-    carFile("shared", "tyre.png"),
-    ...engineDownloads(circuitOf("hill-country")),
-    ...circuitFiles(circuitOf("hill-country")),
-    ...groundFiles,
-    ...crowdFiles,
-    crewUrl,
-    roadUrl,
-    ...skyDownloads(raceSkies),
+    ...raceFiles(circuitOf(track.id), carOf(settings).id, []),
+    ...skyOf(settings, track.hour, now),
   ];
 }
 
+export function loadingFiles(settings: Settings, now = new Date()): string[] {
+  const track = tracks.find((each) => each.id === settings.track);
+  if (!track) return [];
+  const circuit = circuitOf(track.id);
+  const hour = startHour(settings.timeOfDay, track.hour, now);
+  const skyKnown =
+    hour !== null &&
+    settings.timeOfDay !== "now" &&
+    settings.clouds !== "random";
+  return [
+    ...engineDownloads(circuit),
+    ...sceneFiles(circuit, carOf(settings).id, []),
+    ...(skyKnown ? skyFor(hour, brokenCloud(settings.clouds)) : []),
+  ];
+}
+
+function everyRace(team: string): string[] {
+  return [
+    ...venues().flatMap((circuit) => raceFiles(circuit, team, [])),
+    ...skyDownloads(["circuit"]),
+    ...musicFiles(),
+    ...skyDownloads([...skyNames]),
+  ];
+}
+
+export type EventStep = "hub" | "circuits" | "conditions" | "settings";
+
+export function warmEvent(settings: Settings): void {
+  warm(eventFiles(settings), true);
+}
+
+export function dropPrimes(): void {
+  forgetPrimed(() => false);
+}
+
+export function primeEvent(
+  renderer: WebGPURenderer,
+  settings: Settings,
+  step: EventStep,
+): void {
+  const track = tracks.find((each) => each.id === settings.track);
+  if (!track || step === "hub" || step === "circuits") return;
+  const circuit = circuitOf(track.id);
+  const hour = startHour(settings.timeOfDay, track.hour, new Date());
+  const clouded = brokenCloud(settings.clouds);
+  const sky = step === "settings" && hour !== null;
+  const wanted = new Set([
+    ...groundPrimes(circuit),
+    ...(sky ? skyPrimes(hour, clouded) : []),
+  ]);
+  forgetPrimed((key) => wanted.has(key));
+  primeGround(renderer, circuit);
+  if (sky) primeSky(hour, clouded);
+}
+
 export async function warmGame(
-  team: string,
+  settings: Settings,
   upgraded: () => void,
-  saveRace: boolean,
 ): Promise<void> {
-  const files = gameFiles(team);
+  const files = [
+    ...upgradeFiles(),
+    ...eventFiles(settings),
+    ...everyRace(carOf(settings).id),
+  ];
   if ((await upgradeAll()) > 0) upgraded();
-  if (saveRace) await prefetch(files);
+  warm(files);
 }

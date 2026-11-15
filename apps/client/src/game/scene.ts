@@ -1,17 +1,14 @@
 import * as THREE from "three/webgpu";
-import crewUrl from "../../../../content/tracks/hill-country/crew.glb?url";
-import roadUrl from "../../../../content/tracks/hill-country/road.glb?url";
 import { type Circuit, circuitFiles, type NightLook } from "./circuits.ts";
-import { carFile, liteCarFiles, teams } from "./teams.ts";
+import { liteCarFiles } from "./teams.ts";
 import { buildTrainingGround } from "./training-ground.ts";
-import { buildDesertCircuit, desertFiles } from "./desert-ground.ts";
+import { buildDesertCircuit } from "./desert-ground.ts";
 import type { DesertVenue } from "./desert-layout.ts";
 import {
   buildStreetCircuit,
   crewOf,
   garageCarsOf,
   polesOf,
-  streetFiles,
 } from "./street-ground.ts";
 import {
   type CityData,
@@ -52,10 +49,13 @@ import { DamageLog } from "./damage-log.ts";
 import { carField, carStride, carWheel } from "./frame-layout.ts";
 import { GltfCar, placeOnTrack, type TrackFrame } from "./gltf.ts";
 import { GridCars, type GridSlot } from "./grid.ts";
+import { crewFile, roadFile, sceneFiles, treeKinds } from "./race-files.ts";
 import {
   cascadeLayers,
   loadRoad,
+  primeRoad,
   releaseCpuCopies,
+  roadPrimes,
   setCarContact,
   setStartLights,
   setWetness,
@@ -71,8 +71,8 @@ import { FieldCrews } from "./field-crews.ts";
 import { paddockCrew } from "./paddock-crew.ts";
 import { PitCrew } from "./pit-crew.ts";
 import { ParkedBoxes } from "./pit-props.ts";
+import { expectDownloads } from "./asset-store.ts";
 import {
-  expectDownloads,
   releaseUploadedImages,
   uploadEverything,
   uploadLater,
@@ -99,21 +99,8 @@ import {
 } from "./floodlights.ts";
 import type { LampSpot } from "./desert-lamps.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
-import {
-  Crowd,
-  crowdAtlas,
-  crowdData,
-  crowdLamps,
-  placedCrowd,
-} from "./crowd.ts";
-import {
-  boulevard,
-  type Species,
-  treeDownloads,
-  Trees,
-  woodland,
-  treeStride,
-} from "./scenery-trees.ts";
+import { Crowd, crowdLamps, placedCrowd } from "./crowd.ts";
+import { Trees, treeStride } from "./scenery-trees.ts";
 import { setCloudShadows } from "./scenery-look.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
 import { TyreStones } from "./tyre-stones.ts";
@@ -194,6 +181,15 @@ function coverOf(clouds: string): number {
   if (known !== undefined) return known;
   const all = Object.values(cloudCover);
   return all[Math.floor(Math.random() * all.length)] ?? 0;
+}
+
+function brokenCover(cover: number): boolean {
+  return cover > 0 && cover < overcastFrom;
+}
+
+export function brokenCloud(clouds: string): boolean {
+  const cover = cloudCover[clouds];
+  return cover === undefined || brokenCover(cover);
 }
 
 interface TrackData {
@@ -379,29 +375,6 @@ function presentRoots(
   return items.flatMap((item) => (item ? [item.root] : []));
 }
 
-function venueDownloads(
-  circuit: Circuit,
-  team: string,
-  rivals: string[],
-): string[] {
-  const fleet =
-    rivals.length > 0 ? [team, ...rivals] : teams.map((each) => each.id);
-  const ground =
-    circuit.ground === "street"
-      ? [...trainingTextures, ...streetFiles, ...crowdAtlas, crewUrl]
-      : circuit.ground === "desert"
-        ? [...trainingTextures, ...desertFiles, ...crowdAtlas, crewUrl]
-        : [roadUrl, crewUrl, crowdData];
-  return [
-    ...ground,
-    ...(circuit.trees ? [circuit.trees] : []),
-    ...treeDownloads(treeKinds(circuit)),
-    ...circuitFiles(circuit),
-    carFile(team, "car.glb"),
-    ...[...new Set(fleet)].map((each) => carFile(each, "lod.glb")),
-  ];
-}
-
 function lightFiles(circuit: Circuit, team: string): string[] {
   return [...circuitFiles(circuit), ...trainingTextures, ...liteCarFiles(team)];
 }
@@ -431,6 +404,7 @@ function sharedLoads(
   renderer: THREE.WebGPURenderer,
   light: SessionLight,
   circuit: Circuit,
+  clouded: boolean,
 ): SharedLoads {
   const sky = SkyBox.load(
     light.elevation,
@@ -438,6 +412,7 @@ function sharedLoads(
     light.night,
     circuit.sky,
     circuit.night,
+    clouded,
   ).then((loaded) => {
     loaded.refreshEnvironment(renderer, 0, 1);
     return loaded;
@@ -506,18 +481,14 @@ function groundOf(
         ),
     );
   }
-  if (circuit.ground === "glb") {
-    const limit =
-      (renderer.backend as { device?: GPUDevice }).device?.limits
-        .maxTextureDimension2D ?? defaultTextureLimit;
+  if (circuit.ground === "glb")
     return loadRoad(
-      roadUrl,
+      roadFile,
       anisotropy,
-      limit,
+      textureLimit(renderer),
       loads.radiance,
       framesOf(loads),
     );
-  }
   return Promise.all([loads.track, loads.line]).then(([data, line]) =>
     buildTrainingGround(
       data as unknown as TrainingTrack,
@@ -533,11 +504,6 @@ function clearOf(frames: Frames): Clear {
   const zones = terraced(frames.list, frames.length);
   return (values, stride) =>
     outside(values, stride, zones, frames.list, frames.length);
-}
-
-function treeKinds(circuit: Circuit): Species[] {
-  if (circuit.trees) return circuit.flora ?? woodland;
-  return circuit.city ? boulevard : [];
 }
 
 function plantTrees(
@@ -609,7 +575,7 @@ async function venueExtras(
         : circuit.ground === "glb"
           ? Crowd.load(venuePeople(road))
           : null,
-    PitCrew.load(crewUrl, anisotropy, team, others),
+    PitCrew.load(crewFile, anisotropy, team, others),
   ]);
   return { people, crews };
 }
@@ -643,6 +609,25 @@ async function parkedGrid(
     engine.trackPoint.bind(engine),
     env,
   );
+}
+
+function textureLimit(renderer: THREE.WebGPURenderer): number {
+  return (
+    (renderer.backend as { device?: GPUDevice }).device?.limits
+      .maxTextureDimension2D ?? defaultTextureLimit
+  );
+}
+
+export function groundPrimes(circuit: Circuit): string[] {
+  return circuit.ground === "glb" ? roadPrimes(roadFile) : [];
+}
+
+export function primeGround(
+  renderer: THREE.WebGPURenderer,
+  circuit: Circuit,
+): void {
+  if (circuit.ground !== "glb") return;
+  primeRoad(roadFile, renderer.getMaxAnisotropy(), textureLimit(renderer));
 }
 
 interface PitFrame extends TrackFrame {
@@ -931,7 +916,8 @@ export class Scene {
     const anisotropy = renderer.getMaxAnisotropy();
     const local = engine.trackLocal();
     const light = sessionLight(local.timeOfDay / 3600);
-    const loads = sharedLoads(renderer, light, circuit);
+    const cover = coverOf(clouds);
+    const loads = sharedLoads(renderer, light, circuit, brokenCover(cover));
     const carLoad = loads.env.then((env) =>
       GltfCar.load(team, renderer, env, !venue),
     );
@@ -1010,7 +996,7 @@ export class Scene {
       lights,
       light,
       floodlights,
-      coverOf(clouds),
+      cover,
       circuit.night,
     );
     scene.atmosphere.layerBase = start[2];
@@ -1032,7 +1018,7 @@ export class Scene {
 
   static downloads(circuit: Circuit, team: string, rivals: string[]): string[] {
     return circuit.venue
-      ? venueDownloads(circuit, team, rivals)
+      ? sceneFiles(circuit, team, rivals)
       : lightFiles(circuit, team);
   }
 
@@ -1534,7 +1520,7 @@ export class Scene {
       return !spot.garage || Math.min(gap, length - gap) > playerBayClear;
     });
     if (kept.length === 0) return;
-    const group = await paddockCrew(crewUrl, kept, anisotropy);
+    const group = await paddockCrew(crewFile, kept, anisotropy);
     this.road.add(group);
     group.updateMatrixWorld(true);
   }

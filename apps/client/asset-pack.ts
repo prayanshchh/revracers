@@ -12,9 +12,10 @@ import { promisify } from "node:util";
 import { brotliCompress, constants } from "node:zlib";
 import type { Plugin, Rolldown } from "vite";
 import { losslessWebp, packGlb, pngInfo } from "./asset-codec.ts";
+import { packSky } from "./sky-codec.ts";
 
 const packVersion = "1";
-const packable = /\.(?:glb|png)\?url$/;
+const packable = /\.(?:glb|png|hdr)\?url$/;
 const compressible = /\.(?:glb|hdr|bin)$/;
 const unchanged = "unchanged";
 const brotliShare = 0.95;
@@ -40,9 +41,9 @@ async function store(file: string, bytes: Uint8Array): Promise<void> {
 
 function pack(source: Buffer): Promise<Uint8Array | null> {
   if (pngInfo(source)) return losslessWebp(source, true);
-  if (source.subarray(0, 4).toString("latin1") !== "glTF")
-    return Promise.resolve(null);
-  return packGlb(source);
+  const magic = source.subarray(0, 4).toString("latin1");
+  if (magic.startsWith("#?")) return packSky(source);
+  return magic === "glTF" ? packGlb(source) : Promise.resolve(null);
 }
 
 class AssetCache {
@@ -60,7 +61,10 @@ class AssetCache {
     const source = await readFile(file);
     const folder = this.entry("packed", digest(path.extname(file), source));
     if (await stored(path.join(folder, unchanged))) return null;
-    const name = path.basename(file).replace(/\.png$/, ".webp");
+    const name = path
+      .basename(file)
+      .replace(/\.png$/, ".webp")
+      .replace(/\.hdr$/, "-sky.webp");
     const target = path.join(folder, name);
     if (await stored(target)) return target;
     const bytes = await pack(source);

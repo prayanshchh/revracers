@@ -66,6 +66,19 @@ class CellSet {
   readonly cells: Cell[] = [];
   private readonly lookup = new Map<number, number>();
 
+  twin(): CellSet {
+    const twin = new CellSet();
+    for (const cell of this.cells)
+      twin.cells.push({
+        ...cell,
+        sphere: cell.sphere.clone(),
+        visible: true,
+        shown: true,
+        seen: 0,
+      });
+    return twin;
+  }
+
   slot(key: number): Cell {
     let at = this.lookup.get(key);
     if (at === undefined) {
@@ -263,28 +276,70 @@ function addRun(cell: Cell, start: number, count: number): void {
   cell.size += count;
 }
 
+interface Points {
+  array: ArrayLike<number>;
+  stride: number;
+  offset: number;
+}
+
+type Position = THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+
+function pointsOf(position: Position): Points {
+  if (position.normalized) {
+    const array = new Float64Array(position.count * 3);
+    for (let i = 0; i < position.count; i++) {
+      array[i * 3] = position.getX(i);
+      array[i * 3 + 1] = position.getY(i);
+      array[i * 3 + 2] = position.getZ(i);
+    }
+    return { array, stride: 3, offset: 0 };
+  }
+  if (position instanceof THREE.InterleavedBufferAttribute)
+    return {
+      array: position.data.array,
+      stride: position.data.stride,
+      offset: position.offset,
+    };
+  return { array: position.array, stride: position.itemSize, offset: 0 };
+}
+
+function eachCorner(
+  cell: Cell,
+  points: Points,
+  corners: ArrayLike<number>,
+  use: (x: number, y: number, z: number) => void,
+): void {
+  const { array, stride, offset } = points;
+  for (let r = 0; r < cell.runs.length; r += 2) {
+    const start = cell.runs[r] ?? 0;
+    const end = start + (cell.runs[r + 1] ?? 0);
+    for (let i = start; i < end; i++) {
+      const at = (corners[i] ?? 0) * stride + offset;
+      use(array[at] ?? 0, array[at + 1] ?? 0, array[at + 2] ?? 0);
+    }
+  }
+}
+
+const cellBox = new THREE.Box3();
+
 function boundCell(
   cell: Cell,
-  position: THREE.BufferAttribute,
+  points: Points,
   corners: ArrayLike<number>,
 ): void {
-  const box = new THREE.Box3();
-  const point = new THREE.Vector3();
-  const visit = (use: () => void) => {
-    for (let r = 0; r < cell.runs.length; r += 2) {
-      const start = cell.runs[r] ?? 0;
-      const end = start + (cell.runs[r + 1] ?? 0);
-      for (let i = start; i < end; i++) {
-        point.fromBufferAttribute(position, corners[i] ?? 0);
-        use();
-      }
-    }
-  };
-  visit(() => box.expandByPoint(point));
-  box.getBoundingSphere(cell.sphere);
+  const { min, max } = cellBox.makeEmpty();
+  eachCorner(cell, points, corners, (x, y, z) => {
+    min.set(Math.min(min.x, x), Math.min(min.y, y), Math.min(min.z, z));
+    max.set(Math.max(max.x, x), Math.max(max.y, y), Math.max(max.z, z));
+  });
+  cellBox.getBoundingSphere(cell.sphere);
+  const { center } = cell.sphere;
   let furthest = 0;
-  visit(() => {
-    furthest = Math.max(furthest, point.distanceToSquared(cell.sphere.center));
+  eachCorner(cell, points, corners, (x, y, z) => {
+    const dx = x - center.x;
+    const dy = y - center.y;
+    const dz = z - center.z;
+    furthest = Math.max(furthest, dx * dx + dy * dy + dz * dz);
   });
   cell.sphere.radius = Math.sqrt(furthest);
 }
@@ -360,11 +415,54 @@ function flipCells(
   return end;
 }
 
+function meanOf(
+  array: ArrayLike<number>,
+  corners: [number, number, number],
+  axis: number,
+): number {
+  const [a, b, c] = corners;
+  return (
+    ((array[a + axis] ?? 0) + (array[b + axis] ?? 0) + (array[c + axis] ?? 0)) /
+    3
+  );
+}
+
+function binned(
+  position: Position,
+  source: Uint16Array | Uint32Array,
+  cellSize: number,
+): CellSet {
+  const points = pointsOf(position);
+  const { array, stride, offset } = points;
+  const at = (i: number) => (source[i] ?? 0) * stride + offset;
+  const set = new CellSet();
+  for (let i = 0; i < source.length; i += 3) {
+    const corners: [number, number, number] = [at(i), at(i + 1), at(i + 2)];
+    const cell = set.slot(
+      cellKey(meanOf(array, corners, 0), meanOf(array, corners, 2), cellSize),
+    );
+    addRun(cell, i, 3);
+  }
+  for (const cell of set.cells) boundCell(cell, points, source);
+  return set;
+}
+
+function cellOrder(set: CellSet, triangles: number): Cell[] {
+  const order = new Array<Cell>(triangles);
+  for (const cell of set.cells)
+    for (let r = 0; r < cell.runs.length; r += 2) {
+      const first = (cell.runs[r] ?? 0) / 3;
+      const count = (cell.runs[r + 1] ?? 0) / 3;
+      for (let i = 0; i < count; i++) order[first + i] = cell;
+    }
+  return order;
+}
+
 export class CulledMesh {
-  private readonly set = new CellSet();
+  private readonly set: CellSet;
   private readonly source: Uint16Array | Uint32Array;
   private readonly index: THREE.BufferAttribute;
-  private readonly order: Cell[] = [];
+  private readonly order: Cell[];
   private narrow: THREE.Mesh | null = null;
   private runOrder: RunOrder | null = null;
   private stamp = 0;
@@ -372,32 +470,18 @@ export class CulledMesh {
 
   constructor(
     private readonly mesh: THREE.Mesh,
-    cellSize: number,
+    private readonly cellSize: number,
     private readonly inPlace: boolean,
-    shared: Uint16Array | Uint32Array | null = null,
+    like: CulledMesh | null = null,
   ) {
-    const position = mesh.geometry.getAttribute(
-      "position",
-    ) as THREE.BufferAttribute;
     this.index = mesh.geometry.index as THREE.BufferAttribute;
     this.source =
-      shared ?? (this.index.array as Uint16Array | Uint32Array).slice();
-    const { source } = this;
-    for (let i = 0; i < source.length; i += 3) {
-      const a = source[i] ?? 0;
-      const b = source[i + 1] ?? 0;
-      const c = source[i + 2] ?? 0;
-      const cell = this.set.slot(
-        cellKey(
-          (position.getX(a) + position.getX(b) + position.getX(c)) / 3,
-          (position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3,
-          cellSize,
-        ),
-      );
-      addRun(cell, i, 3);
-      if (!inPlace) this.order.push(cell);
-    }
-    for (const cell of this.set.cells) boundCell(cell, position, source);
+      like?.source ?? (this.index.array as Uint16Array | Uint32Array).slice();
+    this.set =
+      like?.cellSize === cellSize
+        ? like.set.twin()
+        : binned(mesh.geometry.getAttribute("position"), this.source, cellSize);
+    this.order = inPlace ? [] : cellOrder(this.set, this.source.length / 3);
     mesh.frustumCulled = false;
   }
 
@@ -407,10 +491,6 @@ export class CulledMesh {
 
   keep(kept: Set<unknown>): void {
     kept.add(this.index);
-  }
-
-  get original(): Uint16Array | Uint32Array {
-    return this.source;
   }
 
   addNarrowView(): void {
@@ -596,15 +676,10 @@ export class WorldCuller {
     if (radius < cell) return;
     const seen = new CulledMesh(mesh, cell, true);
     if (mesh.castShadow) {
+      let like = seen;
       this.casterLayers.forEach((layer, cascade) => {
-        this.cast[cascade]?.push(
-          new CulledMesh(
-            casterCopy(mesh, layer),
-            smallCell,
-            false,
-            seen.original,
-          ),
-        );
+        like = new CulledMesh(casterCopy(mesh, layer), smallCell, false, like);
+        this.cast[cascade]?.push(like);
       });
       mesh.castShadow = false;
     }

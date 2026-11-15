@@ -685,7 +685,7 @@ function flutter(
     .mul(clamp(state, 0.25, 1));
 }
 
-export function damageable(material: THREE.NodeMaterial): void {
+function bentPosition() {
   const { z0, z1, z2, arms, motion } = looks();
   const tag = attribute<"float">("damageZone", "float");
   const zone = floor(tag);
@@ -716,11 +716,18 @@ export function damageable(material: THREE.NodeMaterial): void {
     .add(cross(k, v).mul(sin(angle)))
     .add(k.mul(dot(k, v)).mul(float(1).sub(cos(angle))))
     .add(hinge.xyz);
-  material.positionNode = mix(
+  return mix(
     mix(turned, hinge.xyz, broken),
     stretchedArm(p, hinge.xyz, axis, bend),
     arm,
   );
+}
+
+let bent: ReturnType<typeof bentPosition> | null = null;
+
+export function damageable(material: THREE.NodeMaterial): void {
+  bent ??= bentPosition();
+  material.positionNode = bent;
 }
 
 export interface ScrapeInput {

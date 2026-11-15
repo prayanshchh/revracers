@@ -31,9 +31,13 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { expectDownloads, releaseOnceUploaded } from "./preload.ts";
+import { expectDownloads } from "./asset-store.ts";
+import { releaseOnceUploaded } from "./preload.ts";
 import { alphaTestedOrder } from "./road.ts";
 import type { NightLook } from "./circuits.ts";
+import { sessionLight } from "./daylight.ts";
+import { prime, primed } from "./prime.ts";
+import { picturePixels, type SkyTexels } from "./sky-pack.ts";
 
 const skyFiles = import.meta.glob<string>(
   "../../../../content/tracks/hill-country/sky/*.hdr",
@@ -52,7 +56,7 @@ const sunShare = 3.5;
 const lowSunSine = 0.49;
 const targetMidtone = 1.24;
 const maxExposure = 6;
-const skyNames = [
+export const skyNames = [
   "circuit",
   "dawn",
   "morning",
@@ -150,17 +154,7 @@ async function decodedSky(
 ): Promise<THREE.DataTexture> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`failed to load ${url}`);
-  const bitmap = await createImageBitmap(await response.blob(), {
-    colorSpaceConversion: "none",
-    premultiplyAlpha: "none",
-  });
-  const { width, height } = bitmap;
-  const canvas = new OffscreenCanvas(width, height);
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("no 2d canvas to decode the sky");
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  const pixels = context.getImageData(0, 0, width, height).data;
+  const { pixels, width, height } = await picturePixels(await response.blob());
   const table = Uint16Array.from({ length: 256 }, (_, level) =>
     THREE.DataUtils.toHalfFloat(
       Math.min(encodedRadiance(level, encoding), 65504),
@@ -174,6 +168,14 @@ async function decodedSky(
     data[i + 2] = table[pixels[i + 2] ?? 0] ?? 0;
     data[i + 3] = one;
   }
+  return radianceMap(data, width, height);
+}
+
+function radianceMap(
+  data: Uint16Array,
+  width: number,
+  height: number,
+): THREE.DataTexture {
   const map = new THREE.DataTexture(
     data,
     width,
@@ -190,11 +192,92 @@ async function decodedSky(
   return map;
 }
 
+function skyTexelsOf(picture: Blob): Promise<SkyTexels> {
+  const worker = new Worker(new URL("./sky-worker.ts", import.meta.url), {
+    type: "module",
+  });
+  return new Promise<SkyTexels>((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<SkyTexels | null>) => {
+      if (event.data) resolve(event.data);
+      else reject(new Error("the sky picture could not be decoded"));
+    };
+    worker.onerror = () => {
+      reject(new Error("the sky decoder could not start"));
+    };
+    worker.postMessage(picture);
+  }).finally(() => {
+    worker.terminate();
+  });
+}
+
+async function packedDome(url: string): Promise<THREE.DataTexture> {
+  const manager = THREE.DefaultLoadingManager;
+  manager.itemStart(url);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`failed to load ${url}`);
+    const { data, width, height } = await skyTexelsOf(await response.blob());
+    return radianceMap(data, width, height);
+  } finally {
+    manager.itemEnd(url);
+  }
+}
+
+function unseenDome(): THREE.DataTexture {
+  const map = new THREE.DataTexture(
+    new Uint16Array(4),
+    1,
+    1,
+    THREE.RGBAFormat,
+    THREE.HalfFloatType,
+  );
+  map.colorSpace = THREE.LinearSRGBColorSpace;
+  map.needsUpdate = true;
+  return map;
+}
+
+function domeSeen(name: string, night: number, clouded: boolean): boolean {
+  if (night >= 1) return true;
+  return clouded || (metaOf(name).clouds ?? 0) <= photoCloudy;
+}
+
+function domeOf(url: string, loader: HDRLoader): Promise<THREE.DataTexture> {
+  return url.endsWith(".webp") ? packedDome(url) : loader.loadAsync(url);
+}
+
+function skyKey(url: string): string {
+  return `sky:${url}`;
+}
+
+function skyPicture(
+  url: string,
+  loader: HDRLoader,
+): Promise<THREE.DataTexture> {
+  return primed(skyKey(url), () => domeOf(url, loader));
+}
+
+export function skyPrimes(hours: number, clouded: boolean): string[] {
+  return skyFor(hours, clouded).map(skyKey);
+}
+
+export function primeSky(hours: number, clouded: boolean): void {
+  const loader = new HDRLoader();
+  for (const url of skyFor(hours, clouded))
+    prime(
+      skyKey(url),
+      () => domeOf(url, loader),
+      (map) => {
+        map.dispose();
+      },
+    );
+}
+
 async function skyTextures(
   compact: CompactSky | null,
   elevation: number,
   afternoon: boolean,
   night: number,
+  clouded: boolean,
 ): Promise<{
   name: string;
   meta: SkyMeta;
@@ -219,11 +302,12 @@ async function skyTextures(
     fileUrl(`${name}-clear.hdr`),
     fileUrl(`${name}-env.hdr`),
   ];
-  expectDownloads([domeUrl, clearUrl, envUrl]);
+  const seen = domeSeen(name, night, clouded);
+  expectDownloads(seen ? [domeUrl, clearUrl, envUrl] : [clearUrl, envUrl]);
   const [sky, clearSky, environment] = await Promise.all([
-    loader.loadAsync(domeUrl),
-    loader.loadAsync(clearUrl),
-    loader.loadAsync(envUrl),
+    seen ? skyPicture(domeUrl, loader) : unseenDome(),
+    skyPicture(clearUrl, loader),
+    skyPicture(envUrl, loader),
   ]);
   return { name, meta, sky, clearSky, environment };
 }
@@ -254,6 +338,15 @@ export function skyDownloads(names: string[]): string[] {
     fileUrl(`${name}-clear.hdr`),
     fileUrl(`${name}-env.hdr`),
   ]);
+}
+
+export function skyFor(hours: number, clouded: boolean): string[] {
+  const light = sessionLight(hours);
+  const { name } = chooseSky(light.elevation, light.afternoon);
+  const lights = [fileUrl(`${name}-clear.hdr`), fileUrl(`${name}-env.hdr`)];
+  return light.night < 1 && domeSeen(name, light.night, clouded)
+    ? [fileUrl(`${name}.hdr`), ...lights]
+    : lights;
 }
 
 function metaOf(name: string): SkyMeta {
@@ -639,12 +732,14 @@ export class SkyBox {
     night: number,
     compact: CompactSky | null = null,
     look: NightLook | null = null,
+    clouded = true,
   ): Promise<SkyBox> {
     const { name, meta, sky, clearSky, environment } = await skyTextures(
       compact,
       elevation,
       afternoon,
       night,
+      clouded,
     );
     releaseOnceUploaded(sky);
     releaseOnceUploaded(clearSky);

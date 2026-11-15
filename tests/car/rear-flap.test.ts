@@ -159,7 +159,7 @@ describe("distant rival flaps", () => {
   test("every simpler rival model keeps its flap apart from the body so it still opens", async () => {
     await MeshoptSimplifier.ready;
     for (const { error } of detailLevels) {
-      const level = simplifiedBody(rivalModel(), error);
+      const level = await simplifiedBody(rivalModel(), error);
       const flap = RearFlap.find(level);
       const node = level.getObjectByName(flapName);
       if (!flap || !node) throw new Error("a simpler model lost its flap");

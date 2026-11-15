@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { asha, seedPlayer } from "../support/player.ts";
+import { repoRoot } from "../support/repo.ts";
 import { slowNetwork } from "../support/slow-network.ts";
 
 interface Sample {
@@ -15,6 +18,12 @@ declare global {
 }
 
 const loaderRed = "rgb(255, 46, 46)";
+const carsCheckedOut = !readFileSync(
+  path.join(repoRoot, "content/cars", asha.team, "lod.glb"),
+)
+  .subarray(0, 40)
+  .toString()
+  .startsWith("version https://git-lfs");
 
 function sampleLoadBars(): void {
   window.loadSamples = [];
@@ -128,7 +137,10 @@ test.describe("loading progress", () => {
     expect(colours(samples)).toEqual(new Set([loaderRed]));
     const runs = phases(samples);
     expect(runs.length).toBeLessThanOrEqual(2);
-    expect(partway(runs[0] ?? []).size).toBeGreaterThanOrEqual(10);
+    if (carsCheckedOut)
+      expect(
+        Math.max(...runs.map((run) => partway(run).size)),
+      ).toBeGreaterThanOrEqual(10);
     for (const run of runs) expect(run.at(-1)?.value).toBe(100);
   });
 

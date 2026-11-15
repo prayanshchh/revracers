@@ -20,7 +20,7 @@ import { type CarEnvironment, carEnvironment } from "./carpaint.ts";
 import { finishAll, renderDisplay } from "./display.ts";
 import { GltfCar, gltfToSdCar } from "./gltf.ts";
 import { teamModel } from "./grid.ts";
-import { downloadsFromNow } from "./preload.ts";
+import { downloadsFromNow } from "./asset-store.ts";
 import { teams } from "./teams.ts";
 
 const hiResDelayMs = 350;
@@ -164,8 +164,8 @@ export class Studio {
   private slide = 0;
   private lastFrame = 0;
   private mirrorTick = 0;
-  private lodsReady: Promise<void> | null = null;
-  private teamsShare: () => number = () => 0;
+  private readonly arriving = new Map<string, Promise<void>>();
+  private teamsShare: (() => number) | null = null;
   private showCar = false;
 
   constructor(private readonly renderer: THREE.WebGPURenderer) {
@@ -205,22 +205,28 @@ export class Studio {
     return [sky, key, fill, rim];
   }
 
-  preloadTeams(): Promise<void> {
-    if (!this.lodsReady) this.teamsShare = downloadsFromNow();
-    this.lodsReady ??= Promise.all(
-      teams.map(async (team) => {
-        const model = await teamModel(team.id, this.env).catch(() => null);
-        if (!model) return;
+  private teamReady(team: string): Promise<void> {
+    this.teamsShare ??= downloadsFromNow();
+    const known = this.arriving.get(team);
+    if (known) return known;
+    const arriving = teamModel(team, this.env).then(
+      (model) => {
         finishAll(model);
-        this.lods.set(team.id, this.placed(model, 1));
-        this.mirrored.set(team.id, this.placed(model.clone(), -1));
-      }),
-    ).then(() => undefined);
-    return this.lodsReady;
+        this.lods.set(team, this.placed(model, 1));
+        this.mirrored.set(team, this.placed(model.clone(), -1));
+      },
+      () => undefined,
+    );
+    this.arriving.set(team, arriving);
+    return arriving;
+  }
+
+  private preloadTeams(): void {
+    for (const team of teams) void this.teamReady(team.id);
   }
 
   teamsLoaded(): number {
-    return this.teamsShare();
+    return this.teamsShare?.() ?? 0;
   }
 
   private placed(model: THREE.Object3D, scaleZ: number): THREE.Object3D {
@@ -239,7 +245,8 @@ export class Studio {
   }
 
   async select(team: string, enter = true): Promise<void> {
-    await this.preloadTeams();
+    await this.teamReady(team);
+    this.preloadTeams();
     this.showCar = true;
     if (team === this.selected) return;
     this.selected = team;

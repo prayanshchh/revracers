@@ -1,11 +1,12 @@
 import * as THREE from "three/webgpu";
-import { texture, uv } from "three/tsl";
+import { materialReference } from "three/tsl";
+import { fetchAhead } from "./asset-store.ts";
 import { frameIndex } from "./frame-layout.ts";
 import { type CarEnvironment, lampGlow, useEnvironment } from "./carpaint.ts";
 import { contactShadow, gltfToSdCar, wheelRest } from "./gltf.ts";
 import { gltfLoader } from "./gltf-loader.ts";
 import { mergedMesh, placedCopy } from "./merge.ts";
-import { loaded, releaseOnceUploaded } from "./preload.ts";
+import { picturesLoaded, releaseOnceUploaded } from "./preload.ts";
 import { lampMaterial, lampMaterials } from "./lamps.ts";
 import { flapName } from "./rear-flap.ts";
 import { carFile, gridTeamOrder, teams } from "./teams.ts";
@@ -62,19 +63,30 @@ function flatMaterial(
   return material;
 }
 
+function surfaceOf() {
+  const orm = materialReference(
+    "roughnessMap",
+    "texture",
+  ) as unknown as THREE.Node<"vec4">;
+  return { roughness: orm.g, metalness: orm.b.mul(0), occlusion: orm.r };
+}
+
+let atlasSurface: ReturnType<typeof surfaceOf> | null = null;
+
 function atlasMaterial(
   team: string,
   env: CarEnvironment,
 ): THREE.MeshStandardNodeMaterial {
-  const orm = textureOf(carFile(team, "orm-lod.jpg"), false);
   const material = new THREE.MeshStandardNodeMaterial({
     name: `${team} atlas`,
     map: textureOf(carFile(team, "albedo-lod.jpg"), true),
+    roughnessMap: textureOf(carFile(team, "orm-lod.jpg"), false),
   });
   useEnvironment(material, env, envStrength);
-  material.roughnessNode = texture(orm, uv()).g;
-  material.metalnessNode = texture(orm, uv()).b.mul(0);
-  material.aoNode = texture(orm, uv()).r;
+  atlasSurface ??= surfaceOf();
+  material.roughnessNode = atlasSurface.roughness;
+  material.metalnessNode = atlasSurface.metalness;
+  material.aoNode = atlasSurface.occlusion;
   return material;
 }
 
@@ -164,10 +176,19 @@ function addParts(
   }
 }
 
+function teamPictures(team: string): string[] {
+  return [
+    carFile(team, "albedo-lod.jpg"),
+    carFile(team, "orm-lod.jpg"),
+    carFile("shared", "tyre.png"),
+  ];
+}
+
 export async function teamModel(
   team: string,
   env: CarEnvironment,
 ): Promise<THREE.Object3D> {
+  fetchAhead(teamPictures(team));
   const parts = await teamParts(team);
   const materials = new Map<string, THREE.Material>();
   const batches = new Batches(materials);
@@ -194,7 +215,7 @@ export async function teamModel(
   const flapMeshes = flapBatches.meshes();
   if (flapMeshes.length > 0) flap.add(...flapMeshes);
   model.add(flap);
-  await loaded();
+  await picturesLoaded(teamPictures(team));
   return model;
 }
 
