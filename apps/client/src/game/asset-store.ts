@@ -12,6 +12,12 @@ interface Transfer {
 
 type Phase = ReturnType<typeof currentPhase>;
 
+interface Meter {
+  paths: Set<string>;
+  expected: number;
+  received: number;
+}
+
 const laneCount = 3;
 const laneTries = 3;
 const sizes = JSON.parse(
@@ -20,8 +26,7 @@ const sizes = JSON.parse(
 const wire = JSON.parse(
   document.querySelector("[data-asset-wire]")?.textContent ?? "{}",
 ) as Record<string, number>;
-let expectedBytes = 0;
-let receivedBytes = 0;
+const meters = new Set<WeakRef<Meter>>();
 const expectedPaths = new WeakMap<Phase, Set<string>>();
 const readPaths = new WeakMap<Phase, Set<string>>();
 const plainFetch = globalThis.fetch.bind(globalThis);
@@ -89,9 +94,19 @@ async function forgetOldAssets(): Promise<void> {
       await kept.delete(request);
 }
 
-function credit(phase: Phase, bytes: number): void {
-  receivedBytes += bytes;
+function eachMeter(visit: (meter: Meter) => void): void {
+  for (const reference of meters) {
+    const meter = reference.deref();
+    if (meter) visit(meter);
+    else meters.delete(reference);
+  }
+}
+
+function credit(phase: Phase, path: string, bytes: number): void {
   phase.received += bytes;
+  eachMeter((meter) => {
+    if (meter.paths.has(path)) meter.received += bytes;
+  });
 }
 
 function pathsOf(sets: WeakMap<Phase, Set<string>>, phase: Phase): Set<string> {
@@ -106,8 +121,12 @@ function expect(phase: Phase, path: string, bytes: number): void {
   const paths = pathsOf(expectedPaths, phase);
   if (paths.has(path)) return;
   paths.add(path);
-  expectedBytes += bytes;
   phase.expected += bytes;
+  eachMeter((meter) => {
+    if (meter.paths.has(path)) return;
+    meter.paths.add(path);
+    meter.expected += bytes;
+  });
 }
 
 function firstRead(phase: Phase, path: string): boolean {
@@ -207,14 +226,14 @@ async function followed(
   let credited = 0;
   const follow = (bytes: number) => {
     credited += bytes * share;
-    credit(phase, bytes * share);
+    credit(phase, url.pathname, bytes * share);
   };
   follow(transfer.received);
   transfer.followers.add(follow);
   const stored = await transfer.stored;
   transfer.followers.delete(follow);
   if (stored) return true;
-  credit(phase, -credited);
+  credit(phase, url.pathname, -credited);
   pathsOf(readPaths, phase).delete(url.pathname);
   return false;
 }
@@ -239,7 +258,7 @@ function counted(response: Response, url: URL, phase: Phase): Response {
   expect(phase, url.pathname, size * share);
   const meter = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      credit(phase, chunk.byteLength * share);
+      credit(phase, url.pathname, chunk.byteLength * share);
       controller.enqueue(chunk);
     },
   });
@@ -369,12 +388,9 @@ export function settle(): void {
 }
 
 export function downloadsFromNow(): () => number {
-  const expected = expectedBytes;
-  const received = receivedBytes;
-  return () =>
-    expectedBytes > expected
-      ? (receivedBytes - received) / (expectedBytes - expected)
-      : 0;
+  const meter: Meter = { paths: new Set(), expected: 0, received: 0 };
+  meters.add(new WeakRef(meter));
+  return () => (meter.expected > 0 ? meter.received / meter.expected : 0);
 }
 
 export function claimDownloads(urls: string[]): void {
@@ -390,7 +406,12 @@ export function claimDownloads(urls: string[]): void {
       if (!running && !saved.has(href)) continue;
       if (!firstRead(phase, url.pathname)) continue;
       if (running) void followed(url, running, phase);
-      else credit(phase, (sizes[url.pathname] ?? 0) * wireShare(url.pathname));
+      else
+        credit(
+          phase,
+          url.pathname,
+          (sizes[url.pathname] ?? 0) * wireShare(url.pathname),
+        );
     }
   });
 }
