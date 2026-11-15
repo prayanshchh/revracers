@@ -9,7 +9,7 @@
 
 [Speed Dreams](https://www.speed-dreams.net/) physics compiled to WebAssembly · three.js WebGPU graphics · 22-car AI field · weather · strategy · race control
 
-![On the grid at Hill Country, waiting for lights out](docs/readme/hero.jpg)
+![Side by side through Turn 2 at night on Neon Boulevard](docs/readme/hero.jpg)
 
 ### Watch the trailer
 
@@ -39,26 +39,26 @@ RevRacers is an independent project and is not endorsed by the Speed Dreams team
 - **Flashback and replays.** Rewind a mistake, watch an instant replay, and get a reel of your overtakes when you win.
 - **Your phone as a wheel.** Press <kbd>P</kbd>, scan the QR code and tilt to steer. No app, no install; it connects over WebRTC on your local network with about one frame of delay.
 - **Driver profiles.** No sign-in: each browser keeps its own driver. Team choice, personal bests, sector times and lap history.
-- **Eleven fictional teams** with their own cars, liveries and drivers, on a full-scale circuit built from OpenStreetMap and USGS lidar.
+- **Eleven fictional teams** with their own cars, liveries and drivers, on three full-scale circuits built from OpenStreetMap and elevation data: Hill Country, Neon Boulevard and Dune Bay.
 
 ## Gallery
 
 <table>
   <tr>
-    <td><img src="docs/readme/racing.jpg" alt="Wheel to wheel with the race HUD"></td>
-    <td><img src="docs/readme/onboard.jpg" alt="Onboard T-cam with the 2026 dash"></td>
+    <td><img src="docs/readme/racing.jpg" alt="Racing at night on Neon Boulevard with the race HUD"></td>
+    <td><img src="docs/readme/onboard.jpg" alt="Onboard under the floodlights at Dune Bay"></td>
   </tr>
   <tr>
-    <td><img src="docs/readme/rain.jpg" alt="Heavy rain and spray"></td>
-    <td><img src="docs/readme/start.jpg" alt="Lights out, 22 cars heading for Turn 1"></td>
+    <td><img src="docs/readme/overtake.jpg" alt="Wheel to wheel at 235 km/h through the fast left-hander on Neon Boulevard"></td>
+    <td><img src="docs/readme/start.jpg" alt="Lights out, the field streams down the main straight at Neon Boulevard"></td>
   </tr>
   <tr>
-    <td><img src="docs/readme/team-select.jpg" alt="Team select"></td>
-    <td><img src="docs/readme/grid.jpg" alt="Pre-race build-up on the starting grid"></td>
+    <td><img src="docs/readme/rain.jpg" alt="Heavy rain and spray as the field climbs to Turn 1 at Hill Country"></td>
+    <td><img src="docs/readme/pitstop.jpg" alt="A full pit crew changes tyres at Hill Country"></td>
   </tr>
   <tr>
-    <td><img src="docs/readme/circuit.jpg" alt="Circuit guide in the build-up"></td>
-    <td><img src="docs/readme/turn-one.jpg" alt="The climb to Turn 1"></td>
+    <td><img src="docs/readme/dune.jpg" alt="The first lap into Turn 1 at Dune Bay"></td>
+    <td><img src="docs/readme/circuits.jpg" alt="Choosing between Hill Country, Neon Boulevard and Dune Bay"></td>
   </tr>
 </table>
 
