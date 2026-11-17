@@ -22,19 +22,17 @@ import { type Sign, signMesh } from "./street-screens.ts";
 import { boardNameAt, boardRow } from "./trackside-plan.ts";
 import {
   bankSpots,
-  craneParts,
   type Height,
   heightField,
-  carPark,
   inSector,
   inZone,
   locate,
   type Marker,
   markerParts,
-  postParts,
-  pylonParts,
   rebranded,
-  tentRows,
+  rewrapped,
+  strippedBaked,
+  venueProps,
   without,
 } from "./trackside-props.ts";
 
@@ -54,10 +52,10 @@ interface People {
 export const venueFiles = [wrapsUrl, screensUrl];
 
 const boardMeshes = /^wall_(boards|tecpro)$/;
+const bannerMeshes = /^(paddock_banner|pit_strip|gantry_boards)$/;
 const blockMesh = "wall_tecpro";
 const blockTile = 3;
 const boardTile = 8;
-const replaced = /^(billboard_|prop_crane|stand_|columns$|roofs$|distance_)/;
 const fenceMeshes = /^(debris_fence|fence_steel)$/;
 const markerMesh = /^distance_boards$/;
 const markerSteps = [150, 100, 50];
@@ -300,30 +298,13 @@ function props(
   height: Height,
   mesh: Cast,
 ): { meshes: THREE.Mesh[]; marshals: number[] } {
-  const { list, length } = frames;
-  const cars = carPark(list, length, dressing.lots, height);
-  const tents = tentRows(list, length, dressing.tents, height);
-  const pylons = pylonParts(dressing.pylons, height);
-  const posts = postParts(list, length, dressing.posts, height);
-  const cranes = craneParts(list, length, dressing.cranes, height);
-  const meshes = [
-    mesh(cranes.body.part("crane body", "track prop crane"), "crane"),
-    mesh(cranes.dark.part("crane dark", "track prop dark"), "dark"),
-    ...cars.paint.map((paint, k) =>
-      mesh(
-        paint.part("parked cars", "track stand canopy"),
-        ["roof", "frame", "dark"][k] ?? "roof",
-      ),
-    ),
-    mesh(cars.glass.part("parked glass", "track prop dark"), "dark"),
-    mesh(tents.cloth.part("tent cloth", "track stand canopy"), "roof"),
-    mesh(tents.band.part("tent band", "track stand skirt"), "skirt"),
-    mesh(pylons.body.part("pylon body", "track prop dark"), "dark"),
-    mesh(pylons.lamps.part("pylon lamps", "track stand canopy"), "roof"),
-    mesh(posts.dark.part("marshal posts", "track prop dark"), "dark"),
-    mesh(posts.plate.part("marshal plates", "track stand canopy"), "roof"),
-  ];
-  return { meshes, marshals: posts.marshals };
+  const { parts, marshals } = venueProps(
+    frames.list,
+    frames.length,
+    dressing,
+    height,
+  );
+  return { meshes: parts.map(({ part, look }) => mesh(part, look)), marshals };
 }
 
 export function dressVenue(
@@ -357,6 +338,10 @@ export function dressVenue(
     );
     object.material = material("boards");
   }
+  for (const object of meshesOf(scene, bannerMeshes)) {
+    rewrapped(object.geometry);
+    object.material = material("boards");
+  }
   const open = (x: number, z: number) =>
     inSector(dressing.fenceless, list, length, x, z);
   for (const object of meshesOf(scene, fenceMeshes))
@@ -376,7 +361,7 @@ export function dressVenue(
     boardRow("distance"),
   );
   movedWheel(scene, frames, height);
-  for (const object of meshesOf(scene, replaced)) object.removeFromParent();
+  strippedBaked(scene, height);
   const built = gantryParts(list, length, dressing.gantries);
   const placed = props(frames, height, mesh);
   const screens = signMesh(

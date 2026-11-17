@@ -40,74 +40,89 @@ def text_at(draw, text, face, fill, centre, tracking=0):
     return total
 
 
+NAME = "REVRACERS"
+NAME_GAP = 100
+
+
+def measure(draw, text, face, tracking=0):
+    if tracking == 0:
+        box = draw.textbbox((0, 0), text, font=face)
+        return box[2] - box[0]
+    widths = [draw.textbbox((0, 0), c, font=face)[2] for c in text]
+    return sum(widths) + tracking * (len(text) - 1)
+
+
+def name_after(draw, face, fill, left, height, tracking):
+    width = measure(draw, NAME, face, tracking)
+    text_at(draw, NAME, face, fill, (left + NAME_GAP + width / 2, height), tracking)
+
+
 def northwind(draw, fonts):
-    text_at(draw, "NORTHWIND", font(fonts, "montserrat", 200, 800), "#ffffff", (2130, 250), 14)
     draw.ellipse([1040, 150, 1240, 350], outline="#58b4f2", width=30)
+    name_after(draw, font(fonts, "montserrat", 200, 800), "#ffffff", 1240, 250, 14)
 
 
 def voltara(draw, fonts):
-    text_at(draw, "VOLTARA", font(fonts, "anton", 300), "#ffd400", (2130, 245), 18)
     draw.polygon([(1290, 110), (1230, 270), (1290, 270), (1250, 400), (1370, 220), (1310, 220), (1360, 110)], fill="#ffd400")
+    name_after(draw, font(fonts, "anton", 300), "#ffd400", 1370, 245, 18)
 
 
 def aurenne(draw, fonts):
-    text_at(draw, "AURENNE", font(fonts, "cinzel", 230, 700), "#ffffff", (2048, 245), 20)
-    draw.rectangle([1450, 390, 2650, 400], fill="#9be3d6")
+    width = text_at(draw, NAME, font(fonts, "cinzel", 230, 700), "#ffffff", (2048, 245), 20)
+    draw.rectangle([2048 - width * 0.45, 390, 2048 + width * 0.45, 400], fill="#9be3d6")
 
 
 def kestrel(draw, fonts):
-    text_at(draw, "KESTREL", font(fonts, "barlow", 340), "#ffffff", (2130, 240), 8)
     draw.polygon([(1250, 150), (1490, 240), (1340, 240), (1290, 370), (1250, 240), (1130, 210)], fill="#ffffff")
+    name_after(draw, font(fonts, "barlow", 340), "#ffffff", 1490, 240, 8)
 
 
 def marlowe(draw, fonts):
-    text_at(draw, "MARLOWE", font(fonts, "oswald", 290, 700), "#efe6cf", (2080, 238), 22)
     draw.polygon([(1000, 380), (1140, 130), (1210, 250), (1260, 190), (1380, 380)], fill="#efe6cf")
-    text_at(draw, "OUTFITTERS", font(fonts, "oswald", 70, 500), "#c9b98f", (3150, 310), 8)
+    name_after(draw, font(fonts, "oswald", 290, 700), "#efe6cf", 1380, 238, 22)
 
 
 def torqua(draw, fonts):
-    text_at(draw, "TORQUA", font(fonts, "barlow", 360), "#ffffff", (2130, 236), 12)
     for x in (1040, 1150, 1260):
         draw.polygon([(x, 130), (x + 70, 130), (x + 150, 256), (x + 70, 382), (x, 382), (x + 80, 256)], fill="#9be03a")
+    name_after(draw, font(fonts, "barlow", 360), "#ffffff", 1410, 236, 12)
 
 
 def cordave(draw, fonts):
-    text_at(draw, "CORDAVE RAIL", font(fonts, "anton", 260), "#ffffff", (2048, 230), 14)
-    draw.rectangle([1150, 400, 2950, 414], fill="#e23b3b")
-    draw.rectangle([1150, 432, 2950, 446], fill="#e23b3b")
+    width = text_at(draw, NAME, font(fonts, "anton", 260), "#ffffff", (2048, 230), 14)
+    for top in (400, 432):
+        draw.rectangle([2048 - width / 2, top, 2048 + width / 2, top + 14], fill="#e23b3b")
 
 
 def verdale(draw, fonts):
-    text_at(draw, "VERDALE", font(fonts, "oswald", 300, 600), "#f4f1e4", (2150, 240), 26)
     draw.ellipse([1020, 130, 1260, 370], fill="#f4f1e4")
     draw.polygon([(1140, 160), (1220, 250), (1140, 340), (1060, 250)], fill="#3d6b2a")
+    name_after(draw, font(fonts, "oswald", 300, 600), "#f4f1e4", 1260, 240, 26)
 
 
 def albaren(draw, fonts):
-    text_at(draw, "ALBAREN AIR", font(fonts, "montserrat", 220, 800), "#ffffff", (2200, 245), 6)
     draw.ellipse([820, 116, 1100, 396], fill="#ffb347")
     draw.rectangle([760, 290, 1160, 306], fill="#2a8fd6")
     draw.rectangle([760, 330, 1160, 346], fill="#2a8fd6")
+    name_after(draw, font(fonts, "montserrat", 220, 800), "#ffffff", 1160, 245, 6)
 
 
 def nimbara(draw, fonts):
-    text_at(draw, "NIMBARA CLOUD", font(fonts, "montserrat", 190, 700), "#14213d", (2300, 240), 4)
     for row, width in enumerate((260, 200, 140)):
         top = 150 + row * 80
         draw.rounded_rectangle([860, top, 860 + width, top + 52], radius=26, fill="#2f6fe0")
+    name_after(draw, font(fonts, "montserrat", 190, 700), "#14213d", 1120, 240, 4)
 
 
 def maison(draw, fonts):
-    width = text_at(draw, "MAISON LUCE", font(fonts, "cinzel", 220, 600), "#f2f2f2", (2048, 245), 22)
+    width = text_at(draw, NAME, font(fonts, "cinzel", 220, 600), "#f2f2f2", (2048, 245), 22)
     for sign in (-1, 1):
         edge = 2048 + sign * (width / 2 + 90)
         draw.rectangle([min(edge, edge + sign * 420), 252, max(edge, edge + sign * 420), 258], fill="#f2f2f2")
 
 
 def halden(draw, fonts):
-    text_at(draw, "HALDEN", font(fonts, "oswald", 300, 700), "#ffffff", (1880, 238), 16)
-    text_at(draw, "LOGISTICS", font(fonts, "oswald", 88, 400), "#ffe2cc", (2830, 300), 6)
+    text_at(draw, NAME, font(fonts, "oswald", 300, 700), "#ffffff", (2048, 238), 16)
 
 
 BRANDS = [
@@ -125,18 +140,18 @@ BRANDS = [
     ("HALDEN", "#de5410", "#ffe2cc", halden),
 ]
 STYLES = {
-    "NORTHWIND": ("waves", "CLEAN ENERGY FOR EVERY MILE"),
-    "VOLTARA": ("chevrons", "CHARGED FOR SPEED"),
-    "AURENNE": ("guilloche", "CRAFTED TIME SINCE 1884"),
-    "KESTREL": ("slashes", "OFFICIAL TYRE PARTNER"),
-    "MARLOWE": ("contours", "BUILT FOR THE WILD"),
-    "TORQUA": ("chevrons", "FUEL YOUR LAP"),
-    "CORDAVE": ("rails", "CONNECTING CITIES COAST TO COAST"),
-    "VERDALE": ("dots", "FRESH FROM THE FIELD"),
-    "ALBAREN": ("slashes", "FLY FURTHER, ARRIVE FASTER"),
-    "NIMBARA": ("grid", "DATA AT RACE PACE"),
-    "MAISON": ("guilloche", "PARFUMS DE LUMIERE"),
-    "HALDEN": ("rails", "DELIVERING SINCE 1962"),
+    "NORTHWIND": "waves",
+    "VOLTARA": "chevrons",
+    "AURENNE": "guilloche",
+    "KESTREL": "slashes",
+    "MARLOWE": "contours",
+    "TORQUA": "chevrons",
+    "CORDAVE": "rails",
+    "VERDALE": "dots",
+    "ALBAREN": "slashes",
+    "NIMBARA": "grid",
+    "MAISON": "guilloche",
+    "HALDEN": "rails",
 }
 LOCKUP_CENTRES = (1024, 3072)
 LOCKUP_HEIGHT = 290
@@ -195,7 +210,7 @@ def lockup(art, fonts):
 
 def compose(name, background, accent, art, fonts):
     width, height = TILE
-    style, tagline = STYLES[name]
+    style = STYLES[name]
     base = rgb(background)
     shade = np.linspace(1.08, 0.9, height, dtype=np.float32)[:, None, None]
     luminance = base @ np.array([0.2126, 0.7152, 0.0722], np.float32)
@@ -207,10 +222,7 @@ def compose(name, background, accent, art, fonts):
     for centre in LOCKUP_CENTRES:
         panel.paste(mark, (centre - mark.width // 2, (height - mark.height) // 2 - 18), mark)
     draw = ImageDraw.Draw(panel)
-    small = font(fonts, "montserrat", 34, 600)
-    tone = tuple(int(c * 255) for c in (ink * 0.85 + base * 0.15))
     for centre in LOCKUP_CENTRES:
-        text_at(draw, tagline, small, tone, (centre, height - 70), 6)
         divider = centre + 1024
         if divider < width:
             draw.rectangle([divider - 3, 70, divider + 3, height - 70], fill=accent)

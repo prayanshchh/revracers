@@ -2,6 +2,7 @@ import * as THREE from "three/webgpu";
 import {
   box,
   Builder,
+  type Part,
   place,
   type Station,
   stationAt,
@@ -51,6 +52,11 @@ const bankSpacing = 0.62;
 const bankJitter = 0.3;
 const coarse = 6;
 const bucketSize = 64;
+const replacedBaked =
+  /^(billboard_|prop_crane|stand_|columns$|roofs$|distance_)/;
+const loftedBaked = /^prop_(dark|steel)$/;
+const bakedCeiling = 8;
+const bakedRows = 12;
 
 function keyOf(x: number, z: number): number {
   return Math.floor(x / cell) * 65536 + Math.floor(z / cell);
@@ -344,6 +350,18 @@ export function rebranded(
   uv.needsUpdate = true;
 }
 
+export function rewrapped(geometry: THREE.BufferGeometry): void {
+  const uv = geometry.getAttribute("uv");
+  for (let first = 0; first + 3 < uv.count; first += 4) {
+    const corners = [first, first + 1, first + 2, first + 3];
+    const middle = corners.reduce((sum, i) => sum + uv.getY(i), 0) / 4;
+    const row = Math.floor(middle * bakedRows);
+    for (const i of corners)
+      uv.setY(i, wrapV(row, 1 - (uv.getY(i) * bakedRows - row)));
+  }
+  uv.needsUpdate = true;
+}
+
 export interface Sector {
   from: number;
   to: number;
@@ -370,7 +388,7 @@ export function inSector(
 
 export function without(
   geometry: THREE.BufferGeometry,
-  gone: (x: number, z: number) => boolean,
+  gone: (x: number, z: number, top: number) => boolean,
 ): void {
   const index = geometry.getIndex();
   const position = geometry.getAttribute("position");
@@ -382,9 +400,25 @@ export function without(
     const c = index.getX(i + 2);
     const x = (position.getX(a) + position.getX(b) + position.getX(c)) / 3;
     const z = (position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3;
-    if (!gone(x, z)) kept.push(a, b, c);
+    const top = Math.max(position.getY(a), position.getY(b), position.getY(c));
+    if (!gone(x, z, top)) kept.push(a, b, c);
   }
   geometry.setIndex(kept);
+}
+
+export function strippedBaked(scene: THREE.Object3D, ground: Height): void {
+  const gone: THREE.Object3D[] = [];
+  scene.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const mesh = object as THREE.Mesh;
+    if (replacedBaked.test(mesh.name)) gone.push(mesh);
+    else if (loftedBaked.test(mesh.name))
+      without(
+        mesh.geometry,
+        (x, z, top) => top - (ground(x, z) ?? top) > bakedCeiling,
+      );
+  });
+  for (const object of gone) object.removeFromParent();
 }
 
 export interface Marker {
@@ -707,4 +741,50 @@ export function postParts(
       marshals.push(...spot(ahead, postBack - 0.5).at(0));
   }
   return { dark, plate, marshals };
+}
+
+export interface PropPlan {
+  lots: Lot[];
+  tents: TentRow[];
+  pylons: Pylon[];
+  posts: Post[];
+  cranes: CraneSpec[];
+}
+
+export function venueProps(
+  list: Station[],
+  length: number,
+  plan: PropPlan,
+  height: Height,
+): { parts: { part: Part; look: string }[]; marshals: number[] } {
+  const cars = carPark(list, length, plan.lots, height);
+  const tents = tentRows(list, length, plan.tents, height);
+  const pylons = pylonParts(plan.pylons, height);
+  const posts = postParts(list, length, plan.posts, height);
+  const cranes = craneParts(list, length, plan.cranes, height);
+  const parts = [
+    { part: cranes.body.part("crane body", "track prop crane"), look: "crane" },
+    { part: cranes.dark.part("crane dark", "track prop dark"), look: "dark" },
+    ...cars.paint.map((paint, k) => ({
+      part: paint.part("parked cars", "track stand canopy"),
+      look: ["roof", "frame", "dark"][k] ?? "roof",
+    })),
+    { part: cars.glass.part("parked glass", "track prop dark"), look: "dark" },
+    {
+      part: tents.cloth.part("tent cloth", "track stand canopy"),
+      look: "roof",
+    },
+    { part: tents.band.part("tent band", "track stand skirt"), look: "skirt" },
+    { part: pylons.body.part("pylon body", "track prop dark"), look: "dark" },
+    {
+      part: pylons.lamps.part("pylon lamps", "track stand canopy"),
+      look: "roof",
+    },
+    { part: posts.dark.part("marshal posts", "track prop dark"), look: "dark" },
+    {
+      part: posts.plate.part("marshal plates", "track stand canopy"),
+      look: "roof",
+    },
+  ];
+  return { parts, marshals: posts.marshals };
 }

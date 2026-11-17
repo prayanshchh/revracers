@@ -1,8 +1,22 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { Accessor } from "@gltf-transform/core";
+import type { Accessor, Document } from "@gltf-transform/core";
 import { PNG } from "pngjs";
+import * as THREE from "three/webgpu";
 import { describe, expect, test } from "vitest";
+import { gantryParts } from "../../apps/client/src/game/trackside-gantry.ts";
+import {
+  heightField,
+  type PropPlan,
+  strippedBaked,
+  venueProps,
+} from "../../apps/client/src/game/trackside-props.ts";
+import type { GantrySpec } from "../../apps/client/src/game/trackside-plan.ts";
+import {
+  stations,
+  type TrainingTrack,
+} from "../../apps/client/src/game/training-layout.ts";
+import { floating, type Shape } from "../support/floating.ts";
 import { readModel } from "../support/gltf.ts";
 import { repoRoot } from "../support/repo.ts";
 
@@ -138,6 +152,36 @@ function standsInside(position: Accessor | null): boolean {
 
 const spriteCells = 64;
 const standingFrom = 32;
+const groundMeshes = /^(terrain|verges)$/;
+
+function sceneOf(document: Document): THREE.Group {
+  const scene = new THREE.Group();
+  const corner = [0, 0, 0];
+  for (const node of document.getRoot().listNodes()) {
+    const primitive = node.getMesh()?.listPrimitives()[0];
+    const position = primitive?.getAttribute("POSITION");
+    if (!primitive || !position) continue;
+    const values = new Float32Array(position.getCount() * 3);
+    for (let i = 0; i < position.getCount(); i++)
+      values.set(position.getElement(i, corner), i * 3);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(values, 3));
+    geometry.setIndex(Array.from(primitive.getIndices()?.getArray() ?? []));
+    geometry.applyMatrix4(new THREE.Matrix4().fromArray(node.getWorldMatrix()));
+    const mesh = new THREE.Mesh(geometry);
+    mesh.name = THREE.PropertyBinding.sanitizeNodeName(node.getName());
+    scene.add(mesh);
+  }
+  return scene;
+}
+
+function shapeOf(mesh: THREE.Mesh): Shape {
+  return {
+    name: mesh.name,
+    position: mesh.geometry.getAttribute("position").array,
+    index: mesh.geometry.getIndex()?.array ?? [],
+  };
+}
 
 describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
   test("spectators stay behind the barriers or on the pit building balconies, sit in the stands and stand on the balconies", () => {
@@ -236,4 +280,35 @@ describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
       }
     },
   );
+
+  test("nothing baked into the circuit or added around it is left hanging in the air", async () => {
+    const scene = sceneOf(await readModel(path.join(directory, "road.glb")));
+    const meshes = scene.children.filter(
+      (child): child is THREE.Mesh => child instanceof THREE.Mesh,
+    );
+    const ground = heightField(
+      meshes.filter((mesh) => groundMeshes.test(mesh.name)),
+    );
+    strippedBaked(scene, ground);
+    const dressing = JSON.parse(
+      readFileSync(path.join(directory, "dressing.json"), "utf8"),
+    ) as PropPlan & { gantries: GantrySpec[] };
+    const list = stations(track as unknown as TrainingTrack, null);
+    const added = venueProps(list, track.length, dressing, ground).parts;
+    const gantries = gantryParts(list, track.length, dressing.gantries);
+    const shapes = [
+      ...scene.children
+        .filter(
+          (child): child is THREE.Mesh =>
+            child instanceof THREE.Mesh && child.name.startsWith("prop_"),
+        )
+        .map(shapeOf),
+      ...added.map(({ part }) => part),
+      gantries.steel.part("banner steel", "steel"),
+      gantries.faces.part("banner faces", "boards"),
+      gantries.deck.part("banner deck", "deck"),
+    ];
+    expect(shapes.length).toBeGreaterThan(10);
+    expect(floating(shapes, ground)).toEqual([]);
+  });
 });

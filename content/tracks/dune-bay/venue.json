@@ -135,6 +135,14 @@
    "right": -18.0
   },
   {
+   "at": 2050,
+   "board": "kestrel",
+   "kind": "sign",
+   "height": 3.4,
+   "left": 34.0,
+   "right": -18.0
+  },
+  {
    "at": 2380,
    "board": "verdale",
    "kind": "sign",
@@ -151,8 +159,24 @@
    "right": -18.0
   },
   {
+   "at": 3200,
+   "board": "halden",
+   "kind": "sign",
+   "height": 3.4,
+   "left": -18.0,
+   "right": 34.0
+  },
+  {
    "at": 3690,
    "board": "aurenne",
+   "kind": "sign",
+   "height": 3.4,
+   "left": 34.0,
+   "right": -18.0
+  },
+  {
+   "at": 4200,
+   "board": "torqua",
    "kind": "sign",
    "height": 3.4,
    "left": 34.0,

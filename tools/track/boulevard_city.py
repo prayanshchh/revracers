@@ -48,6 +48,7 @@ ROUND = 1
 GROUND_STEP = 25.0
 GROUND_MARGIN = 1500.0
 GROUND_SINK = 0.35
+GROUND_SAMPLE = 0.5
 GLOBE = (976405284, 78.5, 112.0)
 PLAZA = (1198427833, 19.5)
 PLAZA_EDGE = 3.0
@@ -479,6 +480,55 @@ def side_frame(track):
     left = np.stack([-forward[:, 1], forward[:, 0]], 1)
     walls = np.array([[p["wallLeft"], p["wallRight"]] for p in track["centerline"]])
     return centre, left, walls
+
+
+def track_samples(track):
+    centre, left, walls = side_frame(track)
+    road = np.array([p["y"] for p in track["centerline"]])
+    ahead = np.roll(centre, -1, 0)
+    lateral = np.arange(-walls[:, 1].max(), walls[:, 0].max() + GROUND_SAMPLE, GROUND_SAMPLE)
+    points, heights = [], []
+    for t in np.arange(0.0, 1.0, GROUND_SAMPLE):
+        along = centre + (ahead - centre) * t
+        height = road + (np.roll(road, -1) - road) * t
+        for offset in lateral:
+            inside = (offset <= walls[:, 0]) & (-offset <= walls[:, 1])
+            points.append(along[inside] + left[inside] * offset)
+            heights.append(height[inside])
+    return np.concatenate(points), np.concatenate(heights)
+
+
+def ground_corners(points, low, columns):
+    column = (points[:, 0] - low[0]) / GROUND_STEP
+    row = (points[:, 1] - low[1]) / GROUND_STEP
+    c = np.floor(column).astype(int)
+    r = np.floor(row).astype(int)
+    fc, fr = column - c, row - r
+    upper = fr >= fc
+    first = r * columns + c
+    corners = np.stack([first, np.where(upper, first + columns, first + 1), first + columns + 1], 1)
+    weights = np.stack([np.where(upper, 1 - fr, 1 - fc), np.where(upper, fr - fc, fc - fr), np.where(upper, fc, fr)], 1)
+    return corners, weights
+
+
+def below_track(heights, low, columns, track):
+    points, road = track_samples(track)
+    corners, weights = ground_corners(points, low, columns)
+    excess = (heights[corners] * weights).sum(1) - (road - GROUND_SINK)
+    rising = excess > 0
+    drop = np.zeros_like(heights)
+    for k in range(3):
+        np.maximum.at(drop, corners[rising, k], excess[rising])
+    return drop
+
+
+def settled(people, drop, low, columns):
+    if not people:
+        return people
+    rows = np.array(people, float).reshape(-1, 3)
+    corners, weights = ground_corners(np.stack([rows[:, 0], -rows[:, 2]], 1), low, columns)
+    rows[:, 1] -= (drop[corners] * weights).sum(1)
+    return [round(float(v), 2) if k % 3 == 1 else float(people[k]) for k, v in enumerate(rows.ravel())]
 
 
 def track_lookup(track):
@@ -994,6 +1044,9 @@ def build(root):
         d = Point(point).distance(Point(centre[nearest * 4]))
         if d < walls[nearest * 4] + GROUND_STEP:
             heights[k] = min(heights[k], track_heights[nearest * 4] - GROUND_SINK)
+    drop = below_track(heights, low, columns, track)
+    heights -= drop
+    watchers = settled(watchers, drop, low, columns)
     city = {
         "ground": {
             "x": round(float(low[0]), 1),
