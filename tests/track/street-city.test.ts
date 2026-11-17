@@ -11,10 +11,16 @@ import {
 } from "../../apps/client/src/game/street-roads.ts";
 import { standSeats } from "../../apps/client/src/game/grandstand.ts";
 import {
+  type StreetTrack,
+  streetParts,
+} from "../../apps/client/src/game/street-layout.ts";
+import {
   dressed,
   type Venue,
 } from "../../apps/client/src/game/street-venue.ts";
 import {
+  place,
+  type Station,
   stations,
   type TrainingTrack,
 } from "../../apps/client/src/game/training-layout.ts";
@@ -26,6 +32,7 @@ import {
   terraceZones,
 } from "../../apps/client/src/game/trackside-terrace.ts";
 import { inZone, outside } from "../../apps/client/src/game/trackside-props.ts";
+import { floating } from "../support/floating.ts";
 import { repoRoot } from "../support/repo.ts";
 
 interface Point {
@@ -48,6 +55,7 @@ const city = read("city.json") as {
   monorailColumns: number[];
   spectators: number[];
   buildings: { ring: number[] }[];
+  bridges: { distance: number }[];
   venue: Venue;
   entrances: {
     x: number;
@@ -68,6 +76,9 @@ const personHalf = 0.5;
 const streetLift = 0.08;
 const waterLift = 0.05;
 const liftSlack = 0.005;
+const groundProbe = 0.5;
+const groundClear = 0.1;
+const roadCell = 20;
 
 function groundAt(x: number, z: number): number {
   const g = city.ground;
@@ -85,6 +96,26 @@ function groundAt(x: number, z: number): number {
   return fr >= fc
     ? a + fr * (b - a) + fc * (d - b)
     : a + fc * (e - a) + fr * (d - e);
+}
+
+function streetLevel(list: Station[]): (x: number, z: number) => number {
+  const cells = new Map<number, Station[]>();
+  const key = (x: number, z: number) =>
+    Math.floor(x / roadCell) * 100003 + Math.floor(z / roadCell);
+  for (const station of list) {
+    const k = key(station.x, station.z);
+    cells.set(k, [...(cells.get(k) ?? []), station]);
+  }
+  return (x, z) => {
+    let level = groundAt(x, z);
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++)
+        for (const station of cells.get(
+          key(x + dx * roadCell, z + dz * roadCell),
+        ) ?? [])
+          level = Math.max(level, station.y);
+    return level;
+  };
 }
 
 function sunk(positions: ArrayLike<number>, lift: number): number[][] {
@@ -319,6 +350,34 @@ describe("street city around the circuit", () => {
     expect(
       sunk(ponds.geometry.attributes["position"]?.array ?? [], waterLift),
     ).toEqual([]);
+  });
+
+  test("the city ground never rises through the road or the run-off between the walls", () => {
+    const layout = read("track.json") as TrainingTrack;
+    const above: number[][] = [];
+    for (const station of stations(layout, null))
+      for (
+        let lateral = -station.wallRight;
+        lateral <= station.wallLeft;
+        lateral += groundProbe
+      ) {
+        const [x = 0, y = 0, z = 0] = place(station, lateral);
+        const rise = groundAt(x, z) - y;
+        if (rise > -groundClear) above.push([station.s, lateral, rise]);
+      }
+    expect(above).toEqual([]);
+  });
+
+  test("nothing built around the circuit hangs in the air", () => {
+    const layout = read("track.json") as StreetTrack;
+    const { parts } = streetParts(
+      layout,
+      null,
+      city.bridges.map((bridge) => bridge.distance),
+      city.venue,
+    );
+    expect(parts.length).toBeGreaterThan(20);
+    expect(floating(parts, streetLevel(stations(layout, null)))).toEqual([]);
   });
 
   test("the monorail beam clears the cars where it passes over the track", () => {

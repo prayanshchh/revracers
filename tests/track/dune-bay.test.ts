@@ -18,6 +18,7 @@ import {
   type Pole,
   sampleFlood,
 } from "../../apps/client/src/game/floodlights.ts";
+import { floating } from "../support/floating.ts";
 import { repoRoot, run } from "../support/repo.ts";
 
 const directory = path.join(repoRoot, "content/tracks/dune-bay");
@@ -142,6 +143,12 @@ describe("dune bay circuit", () => {
           part.name,
         );
     }
+  });
+
+  test("nothing built around the circuit hangs in the air", () => {
+    const { parts } = desertParts(track, null, venue);
+    expect(parts.length).toBeGreaterThan(20);
+    expect(floating(parts, () => 0)).toEqual([]);
   });
 
   test("the pit lane, its cushions and bollards stay off the racing surface on the right", () => {

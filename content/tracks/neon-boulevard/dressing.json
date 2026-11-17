@@ -95,8 +95,43 @@
       "height": 4.2
     },
     {
+      "at": 1150,
+      "board": "kestrel",
+      "kind": "truss",
+      "margin": 7.5,
+      "height": 4.2
+    },
+    {
       "at": 1750,
       "board": "torqua",
+      "kind": "truss",
+      "margin": 7.5,
+      "height": 4.2
+    },
+    {
+      "at": 3420,
+      "board": "revracers 26",
+      "kind": "truss",
+      "margin": 7.5,
+      "height": 4.2
+    },
+    {
+      "at": 4000,
+      "board": "cordave",
+      "kind": "truss",
+      "margin": 7.5,
+      "height": 4.2
+    },
+    {
+      "at": 4800,
+      "board": "halden",
+      "kind": "truss",
+      "margin": 7.5,
+      "height": 4.2
+    },
+    {
+      "at": 5650,
+      "board": "albaren",
       "kind": "truss",
       "margin": 7.5,
       "height": 4.2

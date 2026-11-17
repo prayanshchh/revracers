@@ -121,6 +121,20 @@
       "height": 3.4
     },
     {
+      "at": 2950,
+      "board": "kestrel",
+      "kind": "truss",
+      "reach": 9,
+      "height": 2.6
+    },
+    {
+      "at": 3400,
+      "board": "revracers 26",
+      "kind": "truss",
+      "reach": 9,
+      "height": 2.6
+    },
+    {
       "at": 4425,
       "board": "torqua",
       "kind": "bridge",

@@ -76,10 +76,10 @@ PAINT_PANEL_PITCH = 2.4
 PAINT_WORD_SIZE = 240
 PAINT_WORD_WEIGHT = 800
 PAINT_PANELS = (
-    ("AURENNE", 140.0, -1, 7.6, 12.6, 400.0, "navy"),
-    ("MARLOWE", 2053.0, -1, 10.2, 27.0, 106.0, "burgundy"),
-    ("NIMBARA", 2684.0, -1, 9.6, 17.6, 68.0, "sky"),
-    ("NORTHWIND", 2915.0, -1, 10.5, 18.5, 60.0, "blue"),
+    ("REVRACERS", 140.0, -1, 7.6, 12.6, 400.0, "navy"),
+    ("REVRACERS", 2053.0, -1, 10.2, 27.0, 106.0, "burgundy"),
+    ("REVRACERS", 2684.0, -1, 9.6, 17.6, 68.0, "sky"),
+    ("REVRACERS", 2915.0, -1, 10.5, 18.5, 60.0, "blue"),
 )
 PAINT_PANEL_NAMES = ("red", "teal", "blue", "white", "burgundy", "sky", "navy")
 PAINT_SHARP_REACH = 2
