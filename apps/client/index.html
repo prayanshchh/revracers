@@ -280,13 +280,27 @@
 
       <section class="mfd part-tyres" data-hud="mfd" data-page="quick">
         <div class="mfd-cap">
-          <span class="mfd-tab mfd-radio"
-            ><svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 14 V11 a8 8 0 0 1 16 0 V14" />
-              <rect x="2" y="13" width="4" height="7" rx="1.5" />
-              <rect x="18" y="13" width="4" height="7" rx="1.5" />
-              <path d="M20 20 q0 2 -5 2" /></svg
-          ></span>
+          <button
+            type="button"
+            class="mfd-tab mfd-radio"
+            data-hud="radio-voice"
+            data-voice="off"
+            aria-pressed="false"
+            aria-label="Engineer voice"
+            tabindex="-1"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <g class="headset">
+                <path d="M4 14 V11 a8 8 0 0 1 16 0 V14" />
+                <rect x="2" y="13" width="4" height="7" rx="1.5" />
+                <rect x="18" y="13" width="4" height="7" rx="1.5" />
+                <path d="M20 20 q0 2 -5 2" />
+              </g>
+              <path class="voice-cross-gap" d="M3 2.5 L21 21.5" />
+              <path class="voice-cross" d="M3 2.5 L21 21.5" />
+            </svg>
+            <kbd>V</kbd>
+          </button>
           <span class="mfd-tab mfd-pages">
             <i data-hud="mfd-dots"></i><kbd>Y</kbd>
           </span>

@@ -192,6 +192,28 @@ describe("starting a session", () => {
     saveSettings({ ...moved, qualifying: "run" });
     expect(stageOf(load(), null)).toBe("qualifying");
   });
+
+  test("the engineer only shows text until the player turns the voice on, and the choice is kept", () => {
+    expect(load().engineerVoice).toBe(false);
+    storage.set(
+      "revracers.settings",
+      JSON.stringify({
+        version: 2,
+        engineerVoice: true,
+        session: "weekend",
+        qualifying: "run",
+        laps: 10,
+      }),
+    );
+    const old = load();
+    expect(old.engineerVoice).toBe(false);
+    expect(stageOf(old, null)).toBe("qualifying");
+    expect(old.laps).toBe(10);
+    saveSettings({ ...old, engineerVoice: true });
+    expect(load().engineerVoice).toBe(true);
+    saveSettings({ ...load(), engineerVoice: false });
+    expect(load().engineerVoice).toBe(false);
+  });
 });
 
 describe("starting a qualifying lap", () => {
