@@ -2,7 +2,7 @@ import * as THREE from "three/webgpu";
 import { attribute, float, mix, vec3 } from "three/tsl";
 
 export const parkedStride = 6;
-const regionSize = 1600;
+const regionSize = 800;
 
 interface Body {
   length: number;

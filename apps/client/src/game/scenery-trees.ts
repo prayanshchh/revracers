@@ -1,15 +1,19 @@
 import * as THREE from "three/webgpu";
 import {
   atan,
+  dFdx,
+  dFdy,
   float,
   floor,
   Fn,
   fract,
   fwidth,
+  If,
   instancedBufferAttribute,
   mix,
   normalize,
   positionGeometry,
+  select,
   sin,
   smoothstep,
   step,
@@ -44,6 +48,7 @@ const turn = Math.PI * 2;
 const highRingFrom = Math.sin((22 * Math.PI) / 180);
 const ringFrom = Math.sin((12 * Math.PI) / 180);
 const ringTo = Math.sin((32 * Math.PI) / 180);
+const shareFloor = 0.002;
 const frameInset = 0.012;
 const alphaCutoff = 0.42;
 const shadowCutoff = 0.5;
@@ -200,28 +205,43 @@ function billboard(
 }
 
 interface Framed {
-  ring: THREE.Node<"float">;
-  low: (sheet: THREE.Texture) => THREE.Node<"vec4">;
-  high: (sheet: THREE.Texture) => THREE.Node<"vec4">;
+  share: THREE.Node<"float">;
+  near: (sheet: THREE.Texture) => THREE.Node<"vec4">;
+  far: (sheet: THREE.Texture) => THREE.Node<"vec4">;
 }
 
 function framed(quad: Billboard): Framed {
   const [lowFirst, lowSecond] = quad.low.map((at) => varying(at));
   const [highFirst, highSecond] = quad.high.map((at) => varying(at));
   const blend = varying(quad.blend);
-  const pair =
-    (a: THREE.Node<"vec2"> | undefined, b: THREE.Node<"vec2"> | undefined) =>
-    (sheet: THREE.Texture) =>
-      mix(texture(sheet, a), texture(sheet, b), blend);
+  const ring = varying(quad.ring);
+  const upper = ring.greaterThan(0.5);
+  const first = select(upper, highFirst ?? vec2(0), lowFirst ?? vec2(0));
+  const second = select(upper, highSecond ?? vec2(0), lowSecond ?? vec2(0));
+  const otherFirst = select(upper, lowFirst ?? vec2(0), highFirst ?? vec2(0));
+  const otherSecond = select(
+    upper,
+    lowSecond ?? vec2(0),
+    highSecond ?? vec2(0),
+  );
+  const across = dFdx(first);
+  const down = dFdy(first);
   return {
-    ring: varying(quad.ring),
-    low: pair(lowFirst, lowSecond),
-    high: pair(highFirst, highSecond),
+    share: select(upper, float(1).sub(ring), ring),
+    near: (sheet) => mix(texture(sheet, first), texture(sheet, second), blend),
+    far: (sheet) =>
+      mix(
+        texture(sheet, otherFirst).grad(across, down),
+        texture(sheet, otherSecond).grad(across, down),
+        blend,
+      ),
   };
 }
 
-function crisp(cover: THREE.Node<"float">): THREE.Node<"float"> {
-  const edge = fwidth(cover).max(1e-3);
+function crisp(
+  cover: THREE.Node<"float">,
+  edge: THREE.Node<"float">,
+): THREE.Node<"float"> {
   return cover.sub(alphaCutoff).div(edge).add(0.5).clamp(0, 1);
 }
 
@@ -283,11 +303,6 @@ function foliage(
   );
   material.positionNode = quad.position;
   const seen = framed(quad);
-  const below = seen.low(albedo);
-  const above = seen.high(albedo);
-  const picture = mix(below, above, seen.ring);
-  const leaf = picture.rgb.div(picture.a.max(1e-3)).pow(leafGamma);
-  const alpha = mix(crisp(below.a), crisp(above.a), seen.ring);
   const tint = varying(
     mix(
       vec3(1).sub(vec3(tintSpread, tintSpread * 0.4, tintSpread)),
@@ -306,29 +321,41 @@ function foliage(
       ),
   );
   const shares = sunShares(quad.direction).map((share) => varying(share));
-  const baked = mix(seen.low(light), seen.high(light), seen.ring).rgb;
   const [front = float(0), right = float(0), left = float(0)] = shares;
-  const direct = baked.x
-    .mul(front)
-    .add(baked.y.mul(right))
-    .add(baked.z.mul(left))
-    .div(table.lightScale)
-    .pow(sunContrast)
-    .mul(smoothstep(0, sunFade, sunModel.y));
   const lamps = Fn(() => canopyLight())();
-  const sun = sunLight.mul(cloudShade()).mul(lamps).mul(direct).mul(sunGain);
   const sky = Fn(() =>
     skyIrradiance(float(skyFacing)).mul(floodlit() ? floodGain : skyGain),
   )();
-  const hue = leaf.mul(tint);
-  const lit = mix(
-    vec3(hue.dot(vec3(0.2126, 0.7152, 0.0722))),
-    hue,
-    leafSaturation,
-  )
-    .mul(sun.add(sky))
-    .div(Math.PI);
-  material.colorNode = vec4(lit, alpha);
+  material.colorNode = Fn(() => {
+    const picture = seen.near(albedo).toVar();
+    const edge = fwidth(picture.a).max(1e-3);
+    const alpha = crisp(picture.a, edge).toVar();
+    const baked = seen.near(light).rgb.toVar();
+    If(seen.share.greaterThan(shareFloor), () => {
+      const other = seen.far(albedo);
+      alpha.assign(mix(alpha, crisp(other.a, edge), seen.share));
+      picture.assign(mix(picture, other, seen.share));
+      baked.assign(mix(baked, seen.far(light).rgb, seen.share));
+    });
+    const leaf = picture.rgb.div(picture.a.max(1e-3)).pow(leafGamma);
+    const direct = baked.x
+      .mul(front)
+      .add(baked.y.mul(right))
+      .add(baked.z.mul(left))
+      .div(table.lightScale)
+      .pow(sunContrast)
+      .mul(smoothstep(0, sunFade, sunModel.y));
+    const sun = sunLight.mul(cloudShade()).mul(lamps).mul(direct).mul(sunGain);
+    const hue = leaf.mul(tint);
+    const lit = mix(
+      vec3(hue.dot(vec3(0.2126, 0.7152, 0.0722))),
+      hue,
+      leafSaturation,
+    )
+      .mul(sun.add(sky))
+      .div(Math.PI);
+    return vec4(lit, alpha);
+  })();
   return material;
 }
 
@@ -349,8 +376,7 @@ function shade(albedo: THREE.Texture, instances: Instances): THREE.Material {
   );
   const spread = quad.place.w.mul(quad.look.z);
   material.positionNode = quad.position.sub(sunModel.mul(spread));
-  const seen = framed(quad);
-  const cover = mix(seen.low(albedo).a, seen.high(albedo).a, seen.ring);
+  const cover = framed(quad).near(albedo).a;
   material.colorNode = vec4(0, 0, 0, cover);
   material.maskShadowNode = cover.greaterThan(shadowCutoff);
   return material;

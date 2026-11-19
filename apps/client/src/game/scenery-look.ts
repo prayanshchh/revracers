@@ -1,5 +1,13 @@
 import * as THREE from "three/webgpu";
-import { float, positionWorld, smoothstep, texture, uniform } from "three/tsl";
+import {
+  float,
+  Fn,
+  If,
+  positionWorld,
+  smoothstep,
+  texture,
+  uniform,
+} from "three/tsl";
 
 export type Season = "spring" | "summer" | "autumn" | "winter";
 
@@ -155,16 +163,24 @@ const cloudOffset = uniform(new THREE.Vector2());
 let cloudField: THREE.DataTexture | null = null;
 
 export function cloudShade(): THREE.Node<"float"> {
-  cloudField ??= noiseMap();
-  const at = positionWorld.xy.add(cloudOffset);
-  const mass = texture(cloudField, at.div(cloudTile)).r;
-  const detail = texture(cloudField, at.div(cloudDetailTile)).r;
-  const field = mass.add(detail.sub(0.5).mul(cloudDetail));
-  const clear = float(1).sub(cloudShare);
-  const cover = smoothstep(clear.sub(cloudEdge), clear.add(cloudEdge), field);
-  return float(1).sub(
-    cover.mul(cloudDepth).mul(smoothstep(0, 0.05, cloudShare)),
-  );
+  const field = (cloudField ??= noiseMap());
+  return Fn(() => {
+    const shade = float(1).toVar();
+    If(cloudShare.greaterThan(0), () => {
+      const at = positionWorld.xy.add(cloudOffset);
+      const mass = texture(field, at.div(cloudTile)).r;
+      const detail = texture(field, at.div(cloudDetailTile)).r;
+      const sum = mass.add(detail.sub(0.5).mul(cloudDetail));
+      const clear = float(1).sub(cloudShare);
+      const cover = smoothstep(clear.sub(cloudEdge), clear.add(cloudEdge), sum);
+      shade.assign(
+        float(1).sub(
+          cover.mul(cloudDepth).mul(smoothstep(0, 0.05, cloudShare)),
+        ),
+      );
+    });
+    return shade;
+  })();
 }
 
 export function setCloudShadows(cover: number, time: number): void {
