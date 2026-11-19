@@ -6,7 +6,8 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 
-SPECIES = ("oak", "elm", "ash", "shrub", "palm")
+SPECIES = ("oak", "elm", "ash", "shrub", "palm", "liveoak", "juniper", "mesquite", "cedarelm")
+SHARED = ("columns", "rows", "azimuths", "rings", "sunElevation", "sunTurns", "lightScale")
 COLOUR_QUALITY = 84
 LIGHT_QUALITY = 84
 LIGHT_SCALE = 2
@@ -59,17 +60,22 @@ def pack(source, out, name):
 def main():
     source = Path(sys.argv[1])
     out = Path(sys.argv[2])
+    names = sys.argv[3:] or list(SPECIES)
     out.mkdir(parents=True, exist_ok=True)
-    first = json.loads((source / f"{SPECIES[0]}.json").read_text())
-    packed = {name: pack(source, out, name) for name in SPECIES}
+    first = json.loads((source / f"{names[0]}.json").read_text())
+    packed = {name: pack(source, out, name) for name in names}
     table = {
         "columns": first["columns"],
         "rows": first["rows"],
         "azimuths": first["azimuths"],
         "rings": first["rings"],
-        **packed[SPECIES[0]][1],
-        "species": {name: packed[name][0] for name in SPECIES},
+        **packed[names[0]][1],
     }
+    kept = json.loads((out / "trees.json").read_text()) if (out / "trees.json").exists() else {"species": {}}
+    for key in SHARED:
+        if key in kept and kept[key] != table[key]:
+            raise SystemExit(f"{key} differs from the packed trees: {kept[key]} vs {table[key]}")
+    table["species"] = {name: packed[name][0] if name in packed else kept["species"][name] for name in SPECIES if name in packed or name in kept["species"]}
     (out / "trees.json").write_text(json.dumps(table, indent=2) + "\n")
 
 

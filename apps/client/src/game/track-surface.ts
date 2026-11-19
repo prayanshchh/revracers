@@ -85,16 +85,19 @@ const lushLuminance = 0.075;
 const turfTile = 2;
 const turfSecondTile = 2.9;
 const turfSecondAngle = 1.13;
-const turfMean = 0.1089;
+const turfMean = 0.1321;
 const turfCrevice = 0.4;
 const turfRelief = 0.004;
 const dryScale = 0.045;
 const dryTint = vec3(1.28, 1.12, 0.8);
 const photoShare = 0.6;
-const photoMean = 0.085;
+const photoHue = vec3(1.24, 0.99, 0.36);
+const photoHueShare = 0.75;
+const photoHueRange = vec3(0.55, 0.85, 0.6);
+const photoHueReach = vec3(1.15, 1.15, 1.25);
+const photoMean = 0.17;
 const mowWidth = 4.5;
 const mowStrength = 0.03;
-const meadowGrade = vec3(0.92, 1.1, 0.7);
 const meadowDetail = 0.8;
 const meadowCoarseTile = 13.7;
 const meadowCoarseAngle = 0.47;
@@ -219,6 +222,7 @@ export function gravelBed(
   field: FloatNode,
   lateral: FloatNode,
   along: FloatNode,
+  tint: ColourNode = gravelTint,
 ): GravelBed {
   const world = positionWorld.xy.toVar();
   const tiled = world.div(gravelTile).toVar();
@@ -268,7 +272,7 @@ export function gravelBed(
         .add(height.mul(gravelScatter))
         .add(macro.sub(1).mul(gravelEdgeWobble));
       const width = fwidth(field).max(0.02);
-      colour.assign(stones.mul(gravelTint).mul(tone));
+      colour.assign(stones.mul(tint).mul(tone));
       cover.assign(
         smoothstep(float(0.5).sub(width), float(0.5).add(width), edge),
       );
@@ -314,7 +318,10 @@ export function screenBump(
   return det.abs().mul(normalView).sub(gradient).normalize();
 }
 
-export function asphaltDetail(grain: THREE.Texture): AsphaltDetail {
+export function asphaltDetail(
+  grain: THREE.Texture,
+  patched = true,
+): AsphaltDetail {
   const lateral = uv().x.mul(asphaltTile);
   const along = uv().y.mul(asphaltTile);
   const world = positionWorld.xy;
@@ -325,7 +332,9 @@ export function asphaltDetail(grain: THREE.Texture): AsphaltDetail {
   const coarse = texture(grain, vec2(uv().y, uv().x.negate()).mul(coarseScale))
     .rgb.dot(vec3(1 / 3))
     .div(0.0152);
-  const { inside, seam } = patches(lateral, along);
+  const { inside, seam } = patched
+    ? patches(lateral, along)
+    : { inside: float(0), seam: float(0) };
   const crack = seams(lateral, along);
   const tone = float(1)
     .add(blotch)
@@ -344,6 +353,34 @@ export function asphaltDetail(grain: THREE.Texture): AsphaltDetail {
 export interface KerbPaint {
   red: [number, number, number];
   white: [number, number, number];
+  edge?: [number, number, number];
+  edgeWidth?: number;
+}
+
+const chipColour = vec3(0.26, 0.25, 0.235);
+const dustColour = vec3(0.24, 0.2, 0.15);
+
+function weathered(
+  paint: ColourNode,
+  across: FloatNode,
+  along: FloatNode,
+  speck: FloatNode,
+): ColourNode {
+  const chips = smoothstep(
+    0.6,
+    0.65,
+    mx_noise_float(vec2(across.mul(16), along.mul(30)).add(9.1)),
+  );
+  const dust = smoothstep(0.45, 1, across).mul(
+    mx_noise_float(vec2(across.mul(4), along.mul(6)).add(3.7))
+      .mul(0.5)
+      .add(0.5),
+  );
+  return mix(
+    mix(paint, chipColour.mul(speck), chips.mul(0.85)),
+    dustColour.mul(speck),
+    dust.mul(0.5),
+  );
 }
 
 export function shadeKerb(
@@ -382,8 +419,20 @@ export function shadeKerb(
   const foot = float(1).sub(smoothstep(kerbFoot * 0.4, kerbFoot, across));
   const face = smoothstep(1, 1 + kerbFace, across);
   const joint = smoothstep(1 - kerbJoint, 1, across);
-  const paint = mix(red, white, whiteBlock).mul(speck);
-  const marked = mix(paint, paint.mul(1 - kerbRubber), rubber);
+  const blocks = mix(red, white, whiteBlock);
+  const paint = (
+    colours?.edge
+      ? mix(
+          vec3(...colours.edge),
+          blocks,
+          aa(float(colours.edgeWidth ?? 0), across),
+        )
+      : blocks
+  ).mul(speck);
+  const rubbed = mix(paint, paint.mul(1 - kerbRubber), rubber);
+  const marked = colours?.edge
+    ? weathered(rubbed, across, along, speck)
+    : rubbed;
   const top = marked
     .mul(float(1).sub(seam.mul(0.35)))
     .mul(float(1).sub(groove.mul(0.4)))
@@ -451,7 +500,12 @@ export function turf(
   const dry = vertexStage(
     smoothstep(0.3, 0.85, mx_noise_float(world.mul(dryScale).add(7.7))),
   ).mul(turfDryness);
+  const hue = photo
+    .div(dot(photo, vec3(0.2126, 0.7152, 0.0722)).max(1e-4))
+    .div(photoHue)
+    .clamp(photoHueRange, photoHueReach);
   const colour = blades
+    .mul(mix(vec3(1), hue, photoHueShare))
     .mul(turfTint)
     .mul(mix(vec3(1), dryTint, dry))
     .mul(mix(float(1), ground, photoShare))
@@ -508,7 +562,6 @@ export function meadow(map: THREE.Texture, photo: ColourNode): Turf {
     .mul(mix(float(1), coarse, meadowCoarse))
     .mul(patch.mul(meadowPatch).add(1));
   const colour = photo
-    .mul(meadowGrade)
     .mul(turfTint)
     .mul(mix(vec3(1), dryTint, dry))
     .mul(detail);

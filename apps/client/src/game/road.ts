@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
 import { dressVenue, type Frames } from "./venue-dressing.ts";
-import { venueStructures } from "./venue-structures.ts";
+import { loadLandmarks, placeLandmarks } from "./venue-landmarks.ts";
 import {
   Fn,
   If,
@@ -25,6 +25,7 @@ import {
   output,
   texture,
   uniform,
+  uniformArray,
   uv,
   vec2,
   vec3,
@@ -32,10 +33,12 @@ import {
 } from "three/tsl";
 import { CSMShadowNode } from "three/examples/jsm/csm/CSMShadowNode.js";
 import { gltfLoader } from "./gltf-loader.ts";
-import { SkyLitMaterial } from "./sky-ambient.ts";
+import { MatteLighting, SkyLitMaterial } from "./sky-ambient.ts";
 import type { SkyState } from "./sky.ts";
 import apronAUrl from "../../../../content/tracks/hill-country/textures/baked/apron_a.png?url";
 import apronBUrl from "../../../../content/tracks/hill-country/textures/baked/apron_b.png?url";
+import apronCUrl from "../../../../content/tracks/hill-country/textures/baked/apron_c.png?url";
+import runoff from "../../../../content/tracks/hill-country/source/runoff.json";
 import streaksUrl from "../../../../content/tracks/hill-country/textures/baked/asphalt_streaks.png?url";
 import terrainUrl from "../../../../content/tracks/hill-country/textures/baked/terrain_albedo.jpg?url";
 import grainUrl from "../../../../content/tracks/hill-country/textures/source/asphalt_track_base_color.jpg?url";
@@ -65,6 +68,7 @@ import { glaze } from "./venue-facade.ts";
 export const groundFiles = [
   apronAUrl,
   apronBUrl,
+  apronCUrl,
   streaksUrl,
   terrainUrl,
   grainUrl,
@@ -84,26 +88,77 @@ const streakAlong = 1 / 24;
 const apronShade = 0.5;
 const grassMean = 0.315;
 const grassDetail = 0.75;
-const growingFrom = 0.004;
-const growingFull = 0.02;
+const growingFrom = 0.3;
+const growingFull = 0.42;
 const terrainGain = 0.62;
 const apronReach = 60;
 const grassTile = 3;
 const detailAnisotropy = 4;
 const maskEdge = 0.012;
 const paintGrain = 0.24;
-const paintRed = vec3(0.47, 0.085, 0.09);
-const paintTeal = vec3(0.047, 0.296, 0.114);
-const paintBlue = vec3(0.035, 0.06, 0.26);
-const paintWhite = vec3(0.63, 0.62, 0.59);
-const paintBurgundy = vec3(0.16, 0.035, 0.1);
-const paintNavy = vec3(0.06, 0.056, 0.125);
-const paintSky = vec3(0.11, 0.33, 0.52);
+interface RunoffPaint {
+  red: THREE.Node<"vec3">;
+  teal: THREE.Node<"vec3">;
+  blue: THREE.Node<"vec3">;
+  white: THREE.Node<"vec3">;
+  burgundy: THREE.Node<"vec3">;
+  navy: THREE.Node<"vec3">;
+  sky: THREE.Node<"vec3">;
+  concrete: THREE.Node<"vec3">;
+  runoff: THREE.Node<"vec3">;
+}
+const trainingPaint: RunoffPaint = {
+  red: vec3(0.47, 0.085, 0.09),
+  teal: vec3(0.047, 0.296, 0.114),
+  blue: vec3(0.035, 0.06, 0.26),
+  white: vec3(0.63, 0.62, 0.59),
+  burgundy: vec3(0.16, 0.035, 0.1),
+  navy: vec3(0.06, 0.056, 0.125),
+  sky: vec3(0.11, 0.33, 0.52),
+  concrete: vec3(0.3, 0.295, 0.275),
+  runoff: vec3(0.14, 0.135, 0.13),
+};
+const hillPaint: RunoffPaint = {
+  red: vec3(0.37, 0.024, 0.029),
+  teal: vec3(0.035, 0.28, 0.085),
+  blue: vec3(0.05, 0.08, 0.24),
+  white: vec3(0.74, 0.78, 0.76),
+  burgundy: vec3(0.2, 0.04, 0.08),
+  navy: vec3(0.04, 0.07, 0.17),
+  sky: vec3(0.11, 0.33, 0.52),
+  concrete: vec3(0.181, 0.178, 0.17),
+  runoff: vec3(0.15, 0.145, 0.14),
+};
+const hillKerb: KerbPaint = {
+  red: [0.41, 0.024, 0.029],
+  white: [0.8, 0.84, 0.82],
+  edge: [0.06, 0.28, 0.6],
+  edgeWidth: 0.17,
+};
+const hillAsphalt = vec3(0.642, 0.684, 0.686);
+const designStep = 16;
+const hillTone = 0.154;
+const repairGain = 1.25;
+const hillDrySpecular = 0.4;
+const grazingGain = 0.75;
+const grazingReach = 0.09;
+
+function grazing(): THREE.Node<"float"> {
+  const facing = normalView.dot(positionViewDirection).abs();
+  return exp(facing.div(grazingReach).negate()).mul(grazingGain).add(1);
+}
+const hillGravel = vec3(0.78, 0.725, 0.63);
+const pavedChroma = 0.12;
+const pavedTile = 3;
+const pavedMean = 0.26;
+const pavedPhoto = 0.45;
+const pavedGrain = 0.45;
+const hillGround = new WeakSet<THREE.Material>();
 const panelFrom = 0.5;
 const panelTo = 0.56;
-const concreteColor = vec3(0.3, 0.295, 0.275);
-const runoffAsphalt = vec3(0.14, 0.135, 0.13);
 const paintRoughness = 0.62;
+const paintGloss = 0.2;
+const asphaltGloss = 0.5;
 const grassRoughness = 0.95;
 const startLampRows = 2;
 const startLampRed = vec3(2, 0.02, 0.012);
@@ -167,6 +222,13 @@ const firstCascadeLayer = 2;
 export const cascadeLayers = cascadeEnds.map(
   (_, cascade) => firstCascadeLayer + cascade,
 );
+const fineCasters =
+  /fence|rail|armco_post|banner_steel|stand_seats|stand_aisles|scaffold|paddock_people|crew|tyres/;
+const fineCascades = 2;
+
+export function casterCascades(mesh: THREE.Mesh): number {
+  return fineCasters.test(mesh.name) ? fineCascades : cascadeEnds.length;
+}
 const bodyContact = { x: 0.07, hx: 2.3, hy: 0.72, reach: 0.75, strength: 0.62 };
 const tyreContacts = [
   [1.49, -0.74, 0.2, 0.15],
@@ -193,6 +255,7 @@ const blendedMaterials = new Set(["track track marks"]);
 const alphaCutoffs: Record<string, number> = {
   "track debris fence": 0.5,
   "track pit decals": 0.35,
+  "track words road paint": 0.5,
 };
 const shadowCasters =
   /^(wall|fence_steel|stand_seats|stand_concrete|roofs|rooftops|columns|tower_plates|tower_core|veil|gantry|light_panel|paddock|billboard|prop)/;
@@ -201,6 +264,7 @@ const depthOffsets: Record<string, number> = {
   "track lane road paint": -1,
   "track road kerb": -1,
   "track pit decals": -2,
+  "track words road paint": -2,
   "track track marks": -1.5,
   "track road grass": 1,
   "track pit asphalt": 0.5,
@@ -431,6 +495,13 @@ class HorizonEnvironment extends THREE.EnvironmentNode {
 
 class GroundMaterial extends THREE.MeshPhysicalNodeMaterial {
   horizon: THREE.Node<"float"> | null = null;
+  gloss: THREE.Node<"float"> | null = null;
+
+  override setupLightingModel(): THREE.PhysicalLightingModel {
+    return this.gloss
+      ? new MatteLighting(this.gloss)
+      : super.setupLightingModel();
+  }
 
   override setupEnvironment(
     builder: THREE.NodeBuilder,
@@ -456,7 +527,13 @@ function shadeHorizon(
     mix(float(surroundShade), float(1), open),
     wet,
   );
-  material.specularIntensityNode = mix(float(drySpecular), float(1), wet);
+  material.specularIntensityNode = mix(
+    float(hillGround.has(material) ? hillDrySpecular : drySpecular),
+    float(1),
+    wet,
+  );
+  if (hillGround.has(material))
+    material.gloss = mix(float(asphaltGloss), float(1), wet);
 }
 
 function skyGlint(sky: SkyRadiance | null, strength: THREE.Node<"float">) {
@@ -609,6 +686,21 @@ export interface BakedGround {
 interface NaturalGround {
   gravel: GravelMaps;
   turf: THREE.Texture;
+  designs: THREE.Texture;
+}
+
+const designPalette = uniformArray(
+  runoff.palette.map((entry) => new THREE.Vector3(...entry.albedo)),
+  "vec3",
+);
+
+function designColour(code: THREE.Node<"float">): THREE.Node<"vec3"> {
+  const slot = (code as Share)
+    .mul(255 / designStep)
+    .floor()
+    .clamp(0, runoff.palette.length - 1)
+    .toInt();
+  return designPalette.element(slot) as unknown as THREE.Node<"vec3">;
 }
 
 interface Ground {
@@ -641,16 +733,20 @@ function shadeRoad(
     baked.streaks,
     vec2(uv().x.mul(streakAcross), uv().y.mul(streakAlong)),
   ).r;
-  const tone = mix(
-    float(asphaltDark),
-    float(asphaltLight),
-    smoothstep(0.08, 0.42, photo),
-  );
+  const tone = baked.natural
+    ? photo.sub(0.5).div(repairGain).add(1).mul(hillTone)
+    : mix(
+        float(asphaltDark),
+        float(asphaltLight),
+        smoothstep(0.08, 0.42, photo),
+      );
+  if (baked.natural) hillGround.add(material);
   const band = rubber();
-  const detail = asphaltDetail(baked.grain);
+  const detail = asphaltDetail(baked.grain, !baked.natural);
   asphaltDetails.set(material, detail);
   material.colorNode = asphaltGrain(source)
     .mul(tone)
+    .mul(baked.natural ? hillAsphalt.mul(grazing()) : vec3(1))
     .mul(detail.tone)
     .mul(asphaltTint)
     .mul(float(1).add(streak.sub(0.5).mul(streakStrength)))
@@ -665,12 +761,14 @@ function shadeRoad(
 function shadePaved(
   material: THREE.MeshStandardNodeMaterial,
   source: THREE.MeshStandardMaterial,
+  baked: BakedGround | null,
 ): void {
   if (!source.map) return;
   const shade = source.name.includes("apron") ? apronShade : 1;
   material.colorNode = asphaltGrain(source)
     .mul(float(asphaltLight * shade))
-    .mul(asphaltTint);
+    .mul(asphaltTint)
+    .mul(baked?.natural ? hillAsphalt.mul(grazing()) : vec3(1));
   if (source.roughnessMap)
     material.roughnessNode = texture(source.roughnessMap, uv()).g;
 }
@@ -708,7 +806,7 @@ function grassAndGravel(
   lateral: THREE.Node<"float">,
 ): Ground {
   const along = uv().y.mul(grassTile);
-  const gravel = gravelBed(natural.gravel, field, lateral, along);
+  const gravel = gravelBed(natural.gravel, field, lateral, along, hillGravel);
   const lawn = turf(
     natural.turf,
     texture(baked.terrain, uv(2)).rgb.mul(terrainGain),
@@ -762,17 +860,33 @@ function shadeApron(
       .div(asphaltMean),
     paintGrain,
   );
-  let color = mix(ground.colour, concreteColor.mul(hard), concrete);
-  color = mix(color, runoffAsphalt.mul(hard), paved);
-  color = mix(color, paintTeal.mul(hard), teal);
-  color = mix(color, paintBlue.mul(hard), blue);
-  color = mix(color, paintNavy.mul(hard), crisp(a.g.min(a.b)));
-  color = mix(color, paintRed.mul(hard), red);
-  color = mix(color, paintBurgundy.mul(hard), paired(a.r, a.b));
-  color = mix(color, paintWhite.mul(hard), white);
-  color = mix(color, paintSky.mul(hard), paired(a.b, a.a));
+  const paint = baked.natural ? hillPaint : trainingPaint;
+  let color = mix(ground.colour, paint.concrete.mul(hard), concrete);
+  color = mix(color, paint.runoff.mul(hard), paved);
+  color = mix(color, paint.teal.mul(hard), teal);
+  color = mix(color, paint.blue.mul(hard), blue);
+  color = mix(color, paint.navy.mul(hard), crisp(a.g.min(a.b)));
+  color = mix(color, paint.red.mul(hard), red);
+  color = mix(color, paint.burgundy.mul(hard), paired(a.r, a.b));
+  color = mix(color, paint.white.mul(hard), white);
+  color = mix(color, paint.sky.mul(hard), paired(a.b, a.a));
+  let designed: THREE.Node<"float"> = float(0);
+  if (baked.natural) {
+    const c = texture(baked.natural.designs, uv(1));
+    const first = crisp(c.r);
+    const second = crisp(c.b);
+    color = mix(color, designColour(c.g).mul(hard), first);
+    color = mix(color, designColour(c.a).mul(hard), second);
+    designed = first.max(second);
+  }
   material.colorNode = color;
-  const sealed = concrete.max(paved).max(teal).max(blue).max(red).max(white);
+  const sealed = concrete
+    .max(paved)
+    .max(teal)
+    .max(blue)
+    .max(red)
+    .max(white)
+    .max(designed);
   const loose = ground.cover.mul(sealed.oneMinus());
   sealedShare.set(material, sealed);
   gravelShare.set(material, loose);
@@ -781,6 +895,8 @@ function shadeApron(
     float(paintRoughness),
     sealed,
   );
+  if (material instanceof SkyLitMaterial)
+    material.gloss = mix(float(1), float(paintGloss), sealed);
   if (ground.relief)
     material.normalNode = mix(
       screenBump(ground.relief, 1),
@@ -807,9 +923,24 @@ function shadeTerrain(
   const growing = smoothstep(
     float(growingFrom),
     float(growingFull),
-    photo.g.sub(photo.b),
+    photo.g.sub(photo.b).div(photo.g.max(1e-4)),
   );
-  material.colorNode = mix(photo, field.colour, growing);
+  const brightest = photo.r.max(photo.g).max(photo.b).max(1e-4);
+  const grey = smoothstep(
+    float(pavedChroma),
+    float(pavedChroma * 0.5),
+    brightest.sub(photo.r.min(photo.g).min(photo.b)).div(brightest),
+  ).mul(growing.oneMinus());
+  const grain = texture(baked.grain, positionWorld.xy.div(pavedTile))
+    .rgb.dot(vec3(1 / 3))
+    .div(asphaltMean);
+  const level = dot(photo, vec3(0.2126, 0.7152, 0.0722))
+    .div(pavedMean)
+    .clamp(0.6, 1.4);
+  const paved = hillPaint.concrete
+    .mul(mix(float(1), level, pavedPhoto))
+    .mul(mix(float(1), grain, pavedGrain));
+  material.colorNode = mix(mix(photo, field.colour, growing), paved, grey);
   material.normalNode = screenBump(field.relief.mul(growing), 1);
 }
 
@@ -819,7 +950,7 @@ function shadeAsphaltSurface(
   baked: BakedGround | null,
 ): void {
   if (baked && source.name.includes("road")) shadeRoad(material, source, baked);
-  else shadePaved(material, source);
+  else shadePaved(material, source, baked);
 }
 
 const shadersBySuffix: {
@@ -838,7 +969,8 @@ const shadersBySuffix: {
         shadeKerb(
           material,
           baked.grain,
-          (source.userData["kerb"] as KerbPaint | undefined) ?? null,
+          (source.userData["kerb"] as KerbPaint | undefined) ??
+            (baked.natural ? hillKerb : null),
         );
     },
   },
@@ -905,7 +1037,8 @@ export function surface(
     emissiveIntensity: source.emissiveIntensity,
     side: THREE.DoubleSide,
     alphaTest: alphaCutoffs[source.name] ?? 0,
-    alphaToCoverage: source.name.endsWith("fence"),
+    alphaToCoverage:
+      source.name.endsWith("fence") || source.name in alphaCutoffs,
     transparent: blendedMaterials.has(source.name),
     depthWrite: !blendedMaterials.has(source.name),
     polygonOffset: offset !== 0,
@@ -953,17 +1086,27 @@ async function loadBaked(
     map.anisotropy = anisotropy;
     return map;
   };
-  const [apronA, apronB, streaks, terrain, grain, gravel, gravelHeight, lawn] =
-    await Promise.all([
-      load(apronAUrl, THREE.NoColorSpace),
-      load(apronBUrl, THREE.NoColorSpace),
-      load(streaksUrl, THREE.NoColorSpace),
-      load(terrainUrl, THREE.SRGBColorSpace),
-      load(grainUrl, THREE.SRGBColorSpace),
-      load(gravelUrl, THREE.SRGBColorSpace),
-      load(gravelHeightUrl, THREE.NoColorSpace),
-      load(turfUrl, THREE.SRGBColorSpace),
-    ]);
+  const [
+    apronA,
+    apronB,
+    designs,
+    streaks,
+    terrain,
+    grain,
+    gravel,
+    gravelHeight,
+    lawn,
+  ] = await Promise.all([
+    load(apronAUrl, THREE.NoColorSpace),
+    load(apronBUrl, THREE.NoColorSpace),
+    load(apronCUrl, THREE.NoColorSpace),
+    load(streaksUrl, THREE.NoColorSpace),
+    load(terrainUrl, THREE.SRGBColorSpace),
+    load(grainUrl, THREE.SRGBColorSpace),
+    load(gravelUrl, THREE.SRGBColorSpace),
+    load(gravelHeightUrl, THREE.NoColorSpace),
+    load(turfUrl, THREE.SRGBColorSpace),
+  ]);
   for (const map of [streaks, grain, gravel, gravelHeight, lawn])
     map.wrapS = THREE.RepeatWrapping;
   for (const map of [gravel, gravelHeight, lawn])
@@ -977,6 +1120,7 @@ async function loadBaked(
     natural: {
       gravel: { albedo: gravel, height: gravelHeight, streaks },
       turf: lawn,
+      designs,
     },
   };
 }
@@ -1036,6 +1180,7 @@ export async function loadRoad(
   skyLoad: Promise<SkyRadiance | null> | SkyRadiance | null = null,
   frames: Promise<Frames> | null = null,
 ): Promise<THREE.Object3D> {
+  const landmarks = loadLandmarks();
   const [gltf, baked, sky, line] = await Promise.all([
     primed(roadKey(url), () => gltfLoader().loadAsync(url)),
     primed(groundKey, () => loadBaked(anisotropy, textureLimit)),
@@ -1059,8 +1204,8 @@ export async function loadRoad(
   });
   const dress = (source: THREE.MeshStandardMaterial) =>
     surface(source, anisotropy, baked, sky);
-  gltf.scene.add(...venueStructures(dress));
   if (line) dressVenue(gltf.scene, line, { dress, anisotropy });
+  placeLandmarks(gltf.scene, await landmarks, dress, line);
   return gltf.scene;
 }
 
@@ -1089,7 +1234,8 @@ export function releaseCpuCopies(
   kept: Set<unknown>,
 ): void {
   root.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) return;
+    if (!(object instanceof THREE.Mesh) || object.parent instanceof THREE.LOD)
+      return;
     releaseGeometry(object as THREE.Mesh, kept);
     const materials = [object.material as THREE.MeshStandardMaterial].flat();
     for (const material of materials) {

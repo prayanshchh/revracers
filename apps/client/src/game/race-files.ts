@@ -14,6 +14,7 @@ import { streetFiles } from "./street-ground.ts";
 import { carFile, teams } from "./teams.ts";
 import { trainingTextures, trainingUpgrades } from "./training-files.ts";
 import { venueFiles } from "./venue-dressing.ts";
+import { landmarkFiles } from "./venue-landmarks.ts";
 
 const playerParts = [
   "car.glb",
@@ -37,7 +38,14 @@ function builtFiles(circuit: Circuit): string[] | null {
 function groundOf(circuit: Circuit): string[] {
   const built = builtFiles(circuit);
   if (built) return [...trainingTextures, ...built, ...crowdAtlas, crewUrl];
-  return [roadUrl, ...groundFiles, ...venueFiles, crewUrl, ...crowdFiles];
+  return [
+    roadUrl,
+    ...groundFiles,
+    ...venueFiles,
+    ...landmarkFiles,
+    crewUrl,
+    ...crowdFiles,
+  ];
 }
 
 export function treeKinds(circuit: Circuit): Species[] {
@@ -60,6 +68,8 @@ export function sceneFiles(
     ...circuitFiles(circuit),
     ...groundOf(circuit),
     ...(circuit.trees ? [circuit.trees] : []),
+    ...(circuit.skyline ? [circuit.skyline] : []),
+    ...(circuit.parked ? [circuit.parked] : []),
     ...treeDownloads(treeKinds(circuit)),
     ...playerParts.map((part) => carFile(team, part)),
     ...tyreParts.map((part) => carFile("shared", part)),

@@ -169,6 +169,7 @@ import {
 } from "./game/warm-cache.ts";
 import { loadShow } from "./game/opening.ts";
 import { showActions } from "./game/weekend-ui.ts";
+import { FrameGovernor, RefreshProbe } from "./game/frame-governor.ts";
 
 const nightEnds = 6.5;
 const nightStarts = 19;
@@ -847,7 +848,7 @@ function playerSeat(driver: Driver | null, team: string): PlayerSeat {
 
 function bestLapWatcher(
   trace: LapTrace,
-  store: (best: { trace: number[]; sectors: number[] }) => void,
+  store: (best: NonNullable<LapTrace["reference"]>) => void,
 ): () => void {
   let saved = trace.bestTime ?? Infinity;
   return () => {
@@ -1253,6 +1254,7 @@ function strategyChoice(
 
 async function main(): Promise<void> {
   if (!canvas || !hudRoot) throw new Error("drive page markup is missing");
+  const refreshProbe = new RefreshProbe((step) => requestAnimationFrame(step));
   fitStage();
   window.addEventListener("resize", fitStage);
   if (!("gpu" in navigator))
@@ -1381,11 +1383,12 @@ async function main(): Promise<void> {
   const sound = await soundStart;
 
   let frameStale = true;
+  let renderScale = 1;
   const resize = () => {
     frameStale = true;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * renderScale);
     renderer.setSize(width, height, false);
     scene.resize(width, height, renderer.getPixelRatio());
     engine.viewResize(width, height);
@@ -1967,11 +1970,21 @@ async function main(): Promise<void> {
     if (frameStale) draw();
     frameStale = false;
   };
+  const governor = new FrameGovernor(
+    refreshProbe.stop(),
+    (scale) => {
+      renderScale = scale;
+      resize();
+    },
+    !params.has("fullres"),
+  );
   void renderer.setAnimationLoop(() => {
     if (waiting) {
+      governor.pause();
       holdForReady();
       return;
     }
+    governor.tick(performance.now());
     const now = performance.now() / 1000;
     if (staged(now)) return;
     if (replay.active) {
@@ -1982,7 +1995,10 @@ async function main(): Promise<void> {
     const afterRace = flow?.finished === true;
     if (afterRace) afterFlag(now);
     else if (!paused && !ended) step(now);
-    else if (!idle(now)) return;
+    else if (!idle(now)) {
+      governor.pause();
+      return;
+    }
     frameStale = false;
     canvas.style.transform = scene.mirrored ? "scaleX(-1)" : "";
     draw();

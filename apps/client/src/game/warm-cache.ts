@@ -4,7 +4,7 @@ import { startHour } from "./event-art.ts";
 import type { WebGPURenderer } from "three/webgpu";
 import { forgetPrimed } from "./prime.ts";
 import { raceFiles, sceneFiles } from "./race-files.ts";
-import { brokenCloud, groundPrimes, primeGround } from "./scene.ts";
+import { groundPrimes, primeGround } from "./scene.ts";
 import { carOf, type Settings, tracks } from "./settings.ts";
 import {
   primeSky,
@@ -18,9 +18,7 @@ import { upgradeAll, upgradeFiles } from "./upgrades.ts";
 
 function skyOf(settings: Settings, trackHour: number, now: Date): string[] {
   const hour = startHour(settings.timeOfDay, trackHour, now);
-  return hour === null
-    ? skyDownloads(["circuit"])
-    : skyFor(hour, brokenCloud(settings.clouds));
+  return hour === null ? skyDownloads(["circuit"]) : skyFor(hour);
 }
 
 export function eventFiles(settings: Settings, now = new Date()): string[] {
@@ -37,14 +35,11 @@ export function loadingFiles(settings: Settings, now = new Date()): string[] {
   if (!track) return [];
   const circuit = circuitOf(track.id);
   const hour = startHour(settings.timeOfDay, track.hour, now);
-  const skyKnown =
-    hour !== null &&
-    settings.timeOfDay !== "now" &&
-    settings.clouds !== "random";
+  const skyKnown = hour !== null && settings.timeOfDay !== "now";
   return [
     ...engineDownloads(circuit),
     ...sceneFiles(circuit, carOf(settings).id, []),
-    ...(skyKnown ? skyFor(hour, brokenCloud(settings.clouds)) : []),
+    ...(skyKnown ? skyFor(hour) : []),
   ];
 }
 
@@ -76,15 +71,14 @@ export function primeEvent(
   if (!track || step === "hub" || step === "circuits") return;
   const circuit = circuitOf(track.id);
   const hour = startHour(settings.timeOfDay, track.hour, new Date());
-  const clouded = brokenCloud(settings.clouds);
   const sky = step === "settings" && hour !== null;
   const wanted = new Set([
     ...groundPrimes(circuit),
-    ...(sky ? skyPrimes(hour, clouded) : []),
+    ...(sky ? skyPrimes(hour) : []),
   ]);
   forgetPrimed((key) => wanted.has(key));
   primeGround(renderer, circuit);
-  if (sky) primeSky(hour, clouded);
+  if (sky) primeSky(hour);
 }
 
 export async function warmGame(

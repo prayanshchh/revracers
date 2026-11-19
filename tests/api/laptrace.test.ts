@@ -119,6 +119,13 @@ describe("sector deltas against the stored personal best", () => {
     expect(state.status.slice(0, 2)).toEqual(["pb", "slower"]);
   });
 
+  test("a best lap stored before the sector lines moved is re-split at the new lines", () => {
+    const trace = new LapTrace(length, [150, 200], reference);
+    const state = atEndOfLap(trace, 1, [9.5, 10, 10]);
+    expect(state.deltas[0]).toBeCloseTo(-0.5, 5);
+    expect(state.status[0]).toBe("pb");
+  });
+
   test("NaN gaps in a stored trace give no delta instead of a wild number", () => {
     const gappy = [...referenceTrace];
     gappy[50] = Number.NaN;

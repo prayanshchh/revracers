@@ -73,11 +73,11 @@ export function rememberReference(
   driver: Driver | null,
   track: string,
   car: string,
-  reference: { trace: number[]; sectors: number[] },
+  reference: { trace: number[]; sectors: number[]; fastestSectors: number[] },
 ): void {
   const sectorsMs = reference.sectors.map(toMs);
   const key = cacheKey(driver, track, car);
-  const previous = readCache(key)?.bestSectorsMs ?? sectorsMs;
+  const previous = reference.fastestSectors.map(toMs);
   writeCache(key, {
     timeMs: sectorsMs.reduce((sum, ms) => sum + ms, 0),
     sectorsMs,

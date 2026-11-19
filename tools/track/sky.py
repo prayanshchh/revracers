@@ -24,6 +24,7 @@ HAZE_FROM = 3.5
 MONOTONE_FROM = 10.0
 HAZE_SMOOTH = 24.0
 CLOUD_ABOVE = 5.0
+EXTINCTION = np.array([0.1, 0.13, 0.2])
 
 
 def read_header(data):
@@ -85,7 +86,7 @@ def box(image, width, height):
     return (out / weights[..., None]).astype(np.float32)
 
 
-def clear_sky(image, latitudes, sun_direction):
+def clear_sky(image, latitudes, sun_direction, shown=None):
     red, blue = image[..., 0], image[..., 2]
     chroma = (blue - red) / np.maximum(blue, 1e-6)
     sky_chroma = np.percentile(chroma, CLEAR_PERCENTILE, axis=1)[:, None]
@@ -123,7 +124,7 @@ def clear_sky(image, latitudes, sun_direction):
     cell_rows = ((np.arange(height) + 0.5) * rows / height).astype(int)
     cell_lat = latitudes[cell_rows]
     cell_lon = ((np.arange(width) + 0.5) / width - 0.5) * 2 * np.pi
-    cell_angle = np.degrees(sun_angle(cell_lat[:, None], cell_lon[None, :], sun_direction))
+    cell_angle = np.degrees(sun_angle(cell_lat[:, None], cell_lon[None, :], sun_direction if shown is None else shown))
     position = np.clip(cell_angle / CLEAR_BIN - 0.5, 0, len(glow) - 1)
     lower = np.floor(position).astype(int)
     upper = np.minimum(lower + 1, len(glow) - 1)
@@ -136,12 +137,70 @@ def clear_sky(image, latitudes, sun_direction):
     return field.astype(np.float32), share
 
 
+def toward(elevation, azimuth):
+    return np.array([np.cos(elevation) * np.cos(azimuth), np.cos(elevation) * np.sin(azimuth), np.sin(elevation)])
+
+
+def air_mass(elevation):
+    return 1 / max(np.sin(elevation), 0.05)
+
+
+def ground_env(sky):
+    env_lat = (0.5 - (np.arange(ENV_SIZE[1]) + 0.5) / ENV_SIZE[1]) * np.pi
+    weight = np.sin(np.maximum(env_lat, 0))[:, None, None] * np.cos(env_lat)[:, None, None]
+    sky_irradiance = (sky * weight * (env_lat[:, None, None] > 0)).sum(axis=(0, 1)) * (np.pi / ENV_SIZE[1]) * (2 * np.pi / ENV_SIZE[0])
+    below = np.clip(-np.degrees(env_lat) / GROUND_BLEND, 0, 1)[:, None, None]
+    ground = GROUND_ALBEDO * (sky_irradiance / np.pi) * ENV_GAIN_BELOW
+    return sky * (1 - below) + ground[None, None, :] * below, sky_irradiance / np.pi
+
+
+def relight(folder, source, target, degrees):
+    meta = json.loads((folder / f"{source}.json").read_text())
+    data = (folder / f"{source}.hdr").read_bytes()
+    start, width, rows = read_header(data)
+    height = int(round(rows / meta["keepTop"]))
+    pixels = np.empty((rows, width, 4), np.uint8)
+    offset = start
+    for y in range(rows):
+        pixels[y], offset = scanline(data, offset, width)
+    image = decode(pixels)
+    latitudes = (0.5 - (np.arange(rows) + 0.5) / height) * np.pi
+    elevation = np.radians(degrees)
+    sun = toward(meta["elevation"], meta["azimuth"])
+    clear, share = clear_sky(image, latitudes, sun, toward(elevation, meta["azimuth"]))
+    before, _ = clear_sky(image, latitudes, sun)
+    clear_lat = latitudes[((np.arange(CLEAR_SIZE[1]) + 0.5) * rows / CLEAR_SIZE[1]).astype(int)]
+    env_lat = (0.5 - (np.arange(ENV_SIZE[1]) + 0.5) / ENV_SIZE[1]) * np.pi
+    row = np.clip(np.searchsorted(-clear_lat, -env_lat), 0, CLEAR_SIZE[1] - 1)
+    column = (np.arange(ENV_SIZE[0]) * CLEAR_SIZE[0] // ENV_SIZE[0]).astype(int)
+    env, sky_radiance = ground_env(clear[row][:, column])
+    _, sky_before = ground_env(before[row][:, column])
+    folder.joinpath(f"{target}-clear.hdr").write_bytes(f"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {CLEAR_SIZE[1]} +X {CLEAR_SIZE[0]}\n".encode() + encode(clear).tobytes())
+    folder.joinpath(f"{target}-env.hdr").write_bytes(f"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {ENV_SIZE[1]} +X {ENV_SIZE[0]}\n".encode() + encode(env).tobytes())
+    reddening = np.exp(-EXTINCTION * (air_mass(elevation) - air_mass(meta["elevation"])))
+    sun_colour = np.asarray(meta["sunColor"]) * reddening
+    band = (np.degrees(clear_lat) > HORIZON_BAND[0]) & (np.degrees(clear_lat) < HORIZON_BAND[1])
+    relit = {
+        **meta,
+        "elevation": float(elevation),
+        "skyRadiance": [float(v) for v in np.asarray(meta["skyRadiance"]) * sky_radiance / sky_before],
+        "horizon": [float(v) for v in np.asarray(meta["horizon"]) * clear[band].mean(axis=(0, 1)) / before[band].mean(axis=(0, 1))],
+        "sunColor": [float(v) for v in sun_colour / sun_colour.max()],
+    }
+    lines = ",\n".join(f"  {json.dumps(key)}: {json.dumps(value)}" for key, value in relit.items())
+    folder.joinpath(f"{target}.json").write_text("{\n" + lines + "\n}\n")
+    print(f"{target}: {source} relit for a {degrees} deg sun, sky radiance {np.round(sky_radiance, 4)}, sun colour {np.round(relit['sunColor'], 3)}")
+
+
 def sun_angle(latitude, longitude, sun_direction):
     cos_angle = np.sin(latitude) * sun_direction[2] + np.cos(latitude) * (np.cos(longitude) * sun_direction[0] + np.sin(longitude) * sun_direction[1])
     return np.arccos(np.clip(cos_angle, -1, 1))
 
 
 def main():
+    if sys.argv[1] == "--relight":
+        relight(Path(sys.argv[2]), sys.argv[3], sys.argv[4], float(sys.argv[5]))
+        return
     source = Path(sys.argv[1])
     out = Path(sys.argv[2])
     name = sys.argv[3]

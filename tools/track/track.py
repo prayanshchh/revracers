@@ -72,9 +72,6 @@ TERRAIN_ROAD_SINK = 0.5
 PIT_CLEARANCE = 9.0
 PIT_BUILDING_HEIGHT = 14.0
 BUILDING_DEFAULT_HEIGHT = 5.0
-SUITE_REACH = 95.0
-SUITE_AREA = (320.0, 2600.0)
-SUITE_SLIM = 9.0
 TOWER_MIN_HEIGHT = 40.0
 AMPHITHEATRE_REACH = 160.0
 UTM = Transformer.from_crs(4326, 32614, always_xy=True)
@@ -93,24 +90,24 @@ BALCONY_OCCUPANCY = 0.85
 BALCONY_GROUP_SCALE = 1 / 9.0
 BALCONY_GROUP = 0.3
 CROWD_OCCUPANCY = 0.9
-CROWD_SPRITES = 32
-CROWD_ROW_STEP = 2.0
-CROWD_BANKS = ((540.0, 760.0), (1180.0, 1460.0), (1640.0, 1860.0), (2360.0, 2640.0), (3660.0, 4360.0), (4680.0, 4900.0), (5120.0, 5330.0))
-CROWD_BANK_NEAR = 0.6
-CROWD_BANK_FAR = 5.4
-CROWD_BANK_ROW = 0.9
-CROWD_BANK_BACK = 6.0
-CROWD_WALL_CLEARANCE = 0.5
-CROWD_BANK_JITTER = 0.4
-CROWD_BANK_DENSITY = 0.42
-CROWD_GROVE_SCALE = 1 / 45.0
-CROWD_GROVE = 0.42
+CROWD_SPRITES = 64
+REMOVED_STANDS = (1183793497,)
+REBUILT_STANDS = (460658888, 460658889, 460658893, 460658894, 460658895, 460658896)
+STAND_LOOKS = {
+    460658890: {"seat": "navy", "sign": "turn1", "top": 9.5, "flags": 9},
+    460683347: {"seat": "silver", "roof": False, "clad": "turn12", "top": 14.4},
+    460658892: {"seat": "grey", "roof": False, "cover": 0.8, "sign": "turn15", "top": 14.6},
+    460658891: {"seat": "grey", "cover": 0.8, "sign": "turn15", "top": 14.2},
+    998801547: {"seat": "navy", "cover": 0.5},
+    998801548: {"seat": "silver"},
+    998801549: {"seat": "silver"},
+}
 CROWD_SHIRTS = ((0.62, 0.06, 0.05), (0.72, 0.1, 0.06), (0.06, 0.14, 0.5), (0.08, 0.2, 0.62), (0.75, 0.74, 0.72), (0.82, 0.82, 0.8), (0.05, 0.05, 0.06), (0.1, 0.11, 0.13), (0.75, 0.42, 0.06), (0.06, 0.34, 0.16), (0.42, 0.14, 0.42), (0.7, 0.6, 0.12))
 START_LINE = 323.0
 GRID_BEHIND_LINE = 16.0
 GRID_SPACING = 8.0
 GRID_OFFSET = 3.5
-SECTOR_LINES = [(30.136219, -97.632485), (30.137265, -97.636632)]
+SECTOR_BEAMS = (1653.0, 3918.0)
 
 
 def circuit_chain(osm):
@@ -489,59 +486,18 @@ def balcony_crowd(pit, points, normal, centre, camber, origin_height, length):
     return np.concatenate(rows)
 
 
-def crowd(stands, ground_height, points, normal, offsets, origin_height, path, balconies):
+def crowd(stands, path, balconies):
     rng = np.random.default_rng(CROWD_SEED)
-    seated = [standshape.seats(stand) for stand in stands]
-    seated = np.concatenate(seated)
-    keep = rng.random(len(seated)) < CROWD_OCCUPANCY
-    seated = seated[keep]
-    rows = np.arange(0, len(points), max(1, int(round(CROWD_ROW_STEP / STEP))))
-    banks = []
-    for start, end in CROWD_BANKS:
-        for row in rows[(rows * STEP >= start) & (rows * STEP < end)]:
-            for sign, side in ((1, 0), (-1, 1)):
-                for depth in np.arange(CROWD_BANK_NEAR, CROWD_BANK_FAR, CROWD_BANK_ROW):
-                    xy = points[row] + normal[row] * sign * (offsets[row, side, -1] - CROWD_BANK_BACK + depth)
-                    banks.append(xy + rng.normal(0, CROWD_BANK_JITTER, 2))
-    banks = np.array(banks)
-    grove = value_noise(banks, CROWD_GROVE_SCALE, CROWD_SEED)
-    banks = banks[(grove > CROWD_GROVE) & (rng.random(len(banks)) < CROWD_BANK_DENSITY)]
-    _, nearest = cKDTree(points).query(banks)
-    across = np.einsum("ij,ij->i", banks - points[nearest], normal[nearest])
-    side = (across < 0).astype(int)
-    wall = offsets[nearest, side, -1] - CROWD_BANK_BACK
-    banks = banks[np.abs(across) > wall + CROWD_WALL_CLEARANCE]
-    standing = np.column_stack([banks, ground_height(banks) - origin_height])
-    positions = np.concatenate([seated, standing])
-    shirts = np.array(CROWD_SHIRTS, float)[rng.integers(0, len(CROWD_SHIRTS), len(positions))]
-    shirts *= rng.uniform(0.7, 1.15, (len(positions), 1))
-    chance = rng.random(len(positions))
-    sprite = rng.integers(0, CROWD_SPRITES, len(positions)) + np.where(np.arange(len(positions)) < len(seated), 0, CROWD_SPRITES)
-    data = np.column_stack([positions, chance, sprite, shirts])
+    seated = np.concatenate([standshape.seats(stand) for stand in stands])
+    seated = seated[rng.random(len(seated)) < CROWD_OCCUPANCY]
+    shirts = np.array(CROWD_SHIRTS, float)[rng.integers(0, len(CROWD_SHIRTS), len(seated))]
+    shirts *= rng.uniform(0.7, 1.15, (len(seated), 1))
+    data = np.column_stack([seated, rng.random(len(seated)), rng.integers(0, CROWD_SPRITES, len(seated)), shirts])
     guests = np.random.default_rng(CROWD_SEED + 2)
     tops = np.array(CROWD_SHIRTS, float)[guests.integers(0, len(CROWD_SHIRTS), len(balconies))] * guests.uniform(0.7, 1.15, (len(balconies), 1))
     hosted = np.column_stack([balconies, guests.random(len(balconies)), guests.integers(0, CROWD_SPRITES, len(balconies)) + CROWD_SPRITES, tops])
     path.write_bytes(np.concatenate([data, hosted]).astype(np.float32).tobytes())
-    return len(seated), len(standing), len(hosted)
-
-
-def suite_of(item, near, points):
-    polygon = Polygon(item["outline"])
-    if not SUITE_AREA[0] <= polygon.area <= SUITE_AREA[1]:
-        return None
-    gap, row = near.query(np.array(polygon.centroid.coords[0]))
-    if gap > SUITE_REACH:
-        return None
-    corners = np.array(polygon.minimum_rotated_rectangle.exterior.coords)[:4]
-    sides = np.linalg.norm(np.roll(corners, -1, axis=0) - corners, axis=1)
-    if sides.min() < SUITE_SLIM:
-        return None
-    if sides[0] < sides[1]:
-        corners = np.roll(corners, -1, axis=0)
-    front, rear = corners[:2].mean(axis=0), corners[2:].mean(axis=0)
-    if np.linalg.norm(rear - points[row]) < np.linalg.norm(front - points[row]):
-        corners = np.roll(corners, -2, axis=0)
-    return {"corners": corners.round(3).tolist(), "base": round(item["base"], 3), "height": round(item["height"], 3)}
+    return len(seated), len(hosted)
 
 
 def stand_line(data):
@@ -553,13 +509,12 @@ def stand_line(data):
         "depth": round(float(shape["front"] - shape["back"]), 3),
         "base": round(float(shape["base"]), 3),
         "roof": bool(data["roof"]),
+        **STAND_LOOKS.get(data["id"], {}),
     }
 
 
-def structures(layout_data, points):
-    near = cKDTree(points)
-    suites = [suite for suite in (suite_of(item, near, points) for item in layout_data["buildings"]) if suite]
-    return {"suites": suites, "stands": [stand_line(data) for data in layout_data["stands"]]}
+def structures(layout_data):
+    return {"stands": [stand_line(data) for data in layout_data["stands"] if data["id"] not in REBUILT_STANDS]}
 
 
 def venue(osm, ground_height, points, origin_height):
@@ -578,10 +533,12 @@ def venue(osm, ground_height, points, origin_height):
         centroid = np.array(polygon.centroid.coords[0])
         base = float(ground_height(outline).min() - origin_height)
         if tags.get("building") == "grandstand" or tags.get("leisure") == "bleachers":
+            if way["id"] in REMOVED_STANDS:
+                continue
             target = points[near.query(centroid)[1]]
             facing = (target - centroid) / np.linalg.norm(target - centroid)
             stands.append(
-                {"outline": outline.round(3).tolist(), "base": base, "facing": facing.round(5).tolist(), "roof": tags.get("building") == "grandstand" and polygon.area > 2500}
+                {"id": way["id"], "outline": outline.round(3).tolist(), "base": base, "facing": facing.round(5).tolist(), "roof": tags.get("building") == "grandstand" and polygon.area > 2500}
             )
         elif tags.get("name") == "Pit Garages":
             pit = {"outline": outline.round(3).tolist(), "base": base, "height": PIT_BUILDING_HEIGHT}
@@ -679,7 +636,7 @@ def main():
     origin_height = centre[0]
     reach, garage_rows, garage_front = pit_reach(osm, points, tangents, zone)
     wall_left, wall_right = walls(osm, points, tangents, width, unary_union([left_ring, right_ring]), k, STEP, reach)
-    sectors = [float(round(spline.project(osm.local([line])[0]) - start, 3) % round(length, 3)) for line in SECTOR_LINES]
+    sectors = list(SECTOR_BEAMS)
     extents = verge_extents(width, wall_left, wall_right)
     pit_rows = np.zeros(len(points), bool)
     pit_rows[zone] = True
@@ -740,9 +697,9 @@ def main():
     write_horizon(root, build, osm, origin_height, xs, ys)
     layout_data = venue(osm, ground_height, points, origin_height)
     (build / "venue.json").write_text(json.dumps(layout_data))
-    (root / "structures.json").write_text(json.dumps(structures(layout_data, points), separators=(",", ":")) + "\n")
+    (root / "structures.json").write_text(json.dumps(structures(layout_data), separators=(",", ":")) + "\n")
     balconies = balcony_crowd(track["pitLane"], points, n, centre, camber, origin_height, length)
-    print("crowd", crowd(layout_data["stands"], ground_height, points, n, offsets, origin_height, root / "crowd.bin", balconies))
+    print("crowd", crowd(layout_data["stands"], root / "crowd.bin", balconies))
     heading = np.degrees(np.arctan2(tangents[:, 1], tangents[:, 0]))
     jump = np.abs(np.diff(gaussian_filter1d(curvature(points, tangents), 0.5, mode="wrap"))) / step
     print(

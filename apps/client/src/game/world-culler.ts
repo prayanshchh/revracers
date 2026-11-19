@@ -655,6 +655,8 @@ export class WorldCuller {
   constructor(
     root: THREE.Object3D,
     private readonly casterLayers: number[],
+    private readonly nearCaster: (mesh: THREE.Mesh) => number = () =>
+      casterLayers.length,
   ) {
     this.cast = casterLayers.map(() => []);
     const meshes: THREE.Mesh[] = [];
@@ -677,7 +679,9 @@ export class WorldCuller {
     const seen = new CulledMesh(mesh, cell, true);
     if (mesh.castShadow) {
       let like = seen;
+      const reach = this.nearCaster(mesh);
       this.casterLayers.forEach((layer, cascade) => {
+        if (cascade >= reach) return;
         like = new CulledMesh(casterCopy(mesh, layer), smallCell, false, like);
         this.cast[cascade]?.push(like);
       });

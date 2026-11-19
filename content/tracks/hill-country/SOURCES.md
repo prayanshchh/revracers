@@ -21,14 +21,20 @@ from the same sources, so they stay aligned.
   ground, which together with the colour finds the gravel beds. USGS National
   Map imagery and 3DEP elevation (`source/region-*`, public domain) give the
   horizon.
-- Run-off paint layout: `source/paint.png` is a map, measured frame by frame
-  from reference onboard footage that is not in the repo, of which colour
-  each patch of run-off has (asphalt, grass, green, red, white, blue,
-  burgundy, painted kerb), one row per 2 m of track and one column per
-  0.5 m across. `tools/track/aerial.py` recolours the aerial classes with
-  it, paints the kerbs it lists and stamps our sponsor wordmarks; it only
-  changes the baked textures, never the sealed or gravel spans the engine
-  drives on.
+- Ground colour: USDA National Agriculture Imagery Program, Texas, flown
+  21 August 2024 at 0.6 m (`source/aerial-2024.jpg` colour and
+  `source/aerial-2024-nir.png` near infrared, public domain, served by the
+  Microsoft Planetary Computer data API, fetched by `tools/track/fetch.py`).
+  `tools/track/aerial.py` grades it into the October terrain albedo: dry grass
+  becomes straw and olive by its vegetation index, leafy trees stay green and
+  bare ground keeps its own colour.
+- Run-off paint layout: `source/runoff.json` lists the paint designs measured
+  from real race broadcasts and onboard laps of the 2024 to 2026 races at the
+  real circuit (not in the repo): sponsor-coloured bands, areas, stripes, stars
+  and REVRACERS wordmarks by track distance and side, plus the paint palette
+  the shader uses. `tools/track/runoff.py` draws them into
+  `textures/baked/apron_c.png` over the aerial paint classes; it only changes
+  the baked textures, never the sealed or gravel spans the engine drives on.
 - Trackside dressing: `dressing.json` lists sponsor banners by distance and
   side, gantries, added grandstands, cranes, spectator banks, distance
   boards, parked cars, tents, screens and where fences are left out;
@@ -38,13 +44,31 @@ from the same sources, so they stay aligned.
 - Skies: Poly Haven, CC0 (`sky/`): Kloofendal 48d Partly Cloudy Pure Sky for the
   circuit's own time of day, and Qwantani Dawn, Mid Morning, Noon, Afternoon,
   Dusk 2 and Night Pure Sky for the other time-of-day settings.
-- Trees: `tools/scenery/grow.py` grows an oak, an elm, an ash and a shrub
-  (and a feather palm for street circuits) branch by branch and leaf by leaf;
-  they are rendered to the pictures in `content/scenery/trees`, which every
-  circuit shares. Where each tree stands comes from the aerial photograph:
-  growing canopy is where near-infrared is well above red, and
-  `source/scenery.json` holds the thresholds, the planted groves and the
-  clearances from the track, pit lane, buildings, roads and stands.
+- Trees: `tools/scenery/grow.py` grows the Central Texas species of the
+  Blackland Prairie around the circuit (plateau live oak, Ashe juniper, honey
+  mesquite, cedar elm; the oak, elm, ash, shrub and palm are kept for other
+  circuits) branch by branch and leaf by leaf; they are rendered to the
+  pictures in `content/scenery/trees`, which every circuit shares. Where each
+  tree stands and how tall it is comes from `source/canopy.png`
+  (`tools/scenery/canopy.py`): USGS 3D Elevation Program 2017 lidar canopy
+  heights (StratMap 50 cm, public domain) where the USDA NAIP 2024 aerial
+  (0.6 m, public domain, Planetary Computer items
+  tx_m_3009751_se/3009752_sw/3009759_ne/3009760_nw_14_060_20240821) still shows
+  vegetation, and outside the lidar cells that are canopy in both the 2022 and
+  2024 aerials. `source/scenery.json` holds the crown detection, growth since
+  2017, species by height, the clearances from the track, pit lane, buildings,
+  roads and stands, and plots kept clear for grandstands and the theme park.
+- Car parks: `tools/scenery/lots.py` fills the OpenStreetMap parking areas
+  (`circuit-map.json`) along their mapped parking aisles, or in rows where
+  none are mapped, with race-day cars, pickups and school buses
+  (`cars.bin`); the rules are in `source/scenery.json` under `lots`.
+- Downtown skyline, water towers, high-voltage lines and large far buildings
+  (warehouses, schools, industrial roofs): OpenStreetMap footprints, parts,
+  heights and power lines, © OpenStreetMap contributors, ODbL, saved in
+  `source/skyline.json` by `tools/track/skyline.py`, which writes
+  `skyline.json`. The distant woodland edges 1.5-6.5 km out come from the
+  regional USGS aerial (`source/region-aerial.jpg`), classified with
+  thresholds fitted to the lidar canopy where the two overlap.
 - Spectators: pictures of 34 Microsoft Rocketbox adult avatars (MIT) in
   sitting and standing poses, in `content/scenery/crowd`, shared by every
   circuit. Shirts and caps are left white in a mask so each spectator gets a
@@ -54,6 +78,14 @@ from the same sources, so they stay aligned.
   Nimbara Cloud, Maison Luce, Halden) set in Anton, Oswald, Playfair Display,
   Montserrat, Cinzel and Barlow Condensed (SIL Open Font License); no real
   sponsor artwork is used.
+- `textures/boards/boards.webp` is the trackside board atlas drawn by
+  `tools/track/realboards.py` (`uv run --project tools/track python
+tools/track/realboards.py build/hill-country/fonts
+content/tracks/hill-country/textures/boards`): one row per board style seen
+  at the real circuit, each copying only colour, layout and lettering style and
+  reading REVRACERS. Fonts: the ones above plus Nunito, Great Vibes, Pacifico
+  and Archivo Black (SIL Open Font License), fetched by `fetch.py`; emblems
+  are drawn shapes.
 
 ## Pipeline
 
@@ -70,22 +102,30 @@ from the same sources, so they stay aligned.
 5. `blender -b --factory-startup -P tools/track/road.py -- content/tracks/hill-country build/hill-country`
    builds `road.glb`: road, paint, kerbs, ground, terrain, horizon, pit lane,
    walls, fences, boards, grandstands, pit building, buildings, observation
-   tower, start gantry, tents, cranes, masts, screens and the Austin skyline.
+   tower, start gantry, tents, cranes, masts and screens.
 6. `tools/track/sky.py` crops a sky and bakes its environment.
 7. `blender -b --factory-startup -P tools/track/scan.py -- content/tracks/hill-country build/hill-country`
    checks the whole lap for trackside and ground problems.
-8. `uv run --project tools/track python tools/scenery/trees.py content/tracks/hill-country build/hill-country`
+8. `uv run --project tools/track python tools/scenery/canopy.py content/tracks/hill-country <naip 2024 dir> <lidar dsm.npz>`
+   rebuilds `source/canopy.png` (only when the canopy sources change), then
+   `uv run --project tools/track python tools/scenery/trees.py content/tracks/hill-country build/hill-country`
    writes `trees.bin`: position, height, kind and shadow flag of every tree,
    from `source/scenery.json`, the aerial photograph and the venue layout.
 
+`uv run --project tools/track python tools/scenery/lots.py content/tracks/hill-country build/hill-country`
+writes `cars.bin`.
+
+`uv run --project tools/track python tools/track/skyline.py content/tracks/hill-country build/hill-country [--fetch]`
+writes `skyline.json` from `source/skyline.json` (`--fetch` refreshes it from OpenStreetMap).
+
 The tree pictures are shared by all circuits and only need rebuilding when a
 tree changes: `uv run --project tools/track python tools/scenery/grow.py <dir>`
-grows the five trees,
+grows the trees (name them to grow only some),
 `blender -b --factory-startup -P tools/scenery/impostor.py -- <dir>/<tree>.npz <bake dir>/<tree> 512`
 renders one from twelve directions at two heights, with its colour and the
 sunlight it receives from three sides, and
 `uv run --project tools/track python tools/scenery/pack.py <bake dir> content/scenery/trees`
-packs the renders and writes `trees.json`.
+packs the renders and writes `trees.json` (name species to repack only those).
 
 The spectator pictures are shared too.
 `blender -b --factory-startup -P tools/scenery/crowd.py -- <rocketbox dir> <bake dir>`
@@ -107,6 +147,15 @@ simulates; beyond it the lidar terrain is blended in smoothly. Building
 heights come from OSM tags where present. The observation tower position
 comes from OpenStreetMap; its form is an approximation. Grandstand seating,
 roofs and the pit building facade are generated, not surveyed.
+
+## Landmarks
+
+`landmarks.glb` and `landmarks.json` are generated by `tools/track/landmarks.py` (Blender) from OpenStreetMap
+footprints in `source/osm.json`, the road.glb terrain and measured heights from the USGS 3DEP 2017 lidar
+(public domain) and public 2025-2026 race footage used only as measurement reference. Every texture in it is
+synthesised by `tools/track/landmark_textures.py`; no photo or third-party image is embedded. Lettering uses
+the OFL fonts listed above (Montserrat, Barlow Condensed, Playfair Display). Building and ride names are
+generic or fictional.
 
 ## Pit crew
 

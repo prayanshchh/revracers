@@ -9,6 +9,18 @@ import {
   standSeats,
   type StandSpec,
 } from "../../apps/client/src/game/grandstand.ts";
+import {
+  knownBoard,
+  realBoards,
+} from "../../apps/client/src/game/trackside-boards.ts";
+import {
+  type Armco,
+  armcoParts,
+  type Billboard,
+  billboardParts,
+  type Hoarding,
+  hoardingParts,
+} from "../../apps/client/src/game/venue-barriers.ts";
 import { gantryParts } from "../../apps/client/src/game/trackside-gantry.ts";
 import {
   boardAt,
@@ -19,6 +31,8 @@ import {
 import {
   type BankSpec,
   bankSpots,
+} from "../../apps/client/src/game/venue-crowd.ts";
+import {
   carPark,
   type CraneSpec,
   craneParts,
@@ -39,10 +53,15 @@ import {
   type Zone,
 } from "../../apps/client/src/game/trackside-props.ts";
 import {
+  type Builder,
   type Station,
   stations,
   type TrainingTrack,
 } from "../../apps/client/src/game/training-layout.ts";
+import {
+  type Structure,
+  structureParts,
+} from "../../apps/client/src/game/venue-gantry.ts";
 import { repoRoot } from "../support/repo.ts";
 
 interface Venue extends Dressing {
@@ -56,6 +75,9 @@ interface Venue extends Dressing {
   posts: Post[];
   pylons: Pylon[];
   fenceless: Sector[];
+  armco: Armco[];
+  hoardings: Hoarding[];
+  billboards: Billboard[];
 }
 
 type Triple = [number, number, number];
@@ -96,8 +118,27 @@ function planOf(known: Partial<Venue> & Dressing): Venue {
     posts: [],
     pylons: [],
     fenceless: [],
+    armco: [],
+    hoardings: [],
+    billboards: [],
     ...known,
   };
+}
+
+const realAtlas = new Set(["hill-country"]);
+
+function overheads(
+  name: string,
+  list: Station[],
+  length: number,
+  plan: Venue,
+): Builder[] {
+  if (!realAtlas.has(name)) {
+    const built = gantryParts(list, length, plan.gantries);
+    return [built.steel, built.faces, built.deck];
+  }
+  const built = structureParts(list, length, plan.gantries, () => 0);
+  return [built.faces, built.steel, built.dark, built.concrete];
 }
 
 const circuits = ["hill-country", "neon-boulevard"].map((name) => {
@@ -154,14 +195,22 @@ describe.each(circuits)("trackside dressing at $name", (circuit) => {
   const { list, track, plan } = circuit;
 
   test("every planned banner names a sponsor row that exists", () => {
-    const names = [
+    const wrapped = (name: string) =>
+      boardRow(name) !== 0 || name === "northwind";
+    const real = realAtlas.has(circuit.name);
+    const overhead = [
       ...plan.boards.flatMap((span) => [span.left, span.right]),
-      ...plan.gantries.map((gantry) => gantry.board),
-      ...plan.stands.flatMap((stand) => stand.board ?? []),
+      ...plan.gantries.flatMap((gantry) => [
+        gantry.board,
+        ...[(gantry as Structure).back ?? gantry.board],
+      ]),
     ];
-    const unknown = names.filter(
-      (name) => boardRow(name) === 0 && name !== "northwind",
-    );
+    const unknown = [
+      ...overhead.filter((name) => !(real ? knownBoard(name) : wrapped(name))),
+      ...plan.stands
+        .flatMap((stand) => stand.board ?? [])
+        .filter((name) => !wrapped(name)),
+    ];
     expect(unknown).toEqual([]);
   });
 
@@ -173,15 +222,15 @@ describe.each(circuits)("trackside dressing at $name", (circuit) => {
   });
 
   test("nothing of a banner gantry hangs low over the asphalt", () => {
-    const built = gantryParts(list, track.length, plan.gantries);
-    const low = [built.steel, built.faces, built.deck]
+    const built = overheads(circuit.name, list, track.length, plan);
+    const low = built
       .flatMap((part) => triples(part.position))
       .filter(([x, y, z]) => {
         const { station, lateral } = seen(list, x, z);
         const over = Math.abs(lateral) < station.half + 0.5;
         return over && y - station.y < clearance;
       });
-    expect(built.faces.position.length).toBeGreaterThan(0);
+    expect(built[1]?.position.length).toBeGreaterThan(0);
     expect(low).toEqual([]);
   });
 
@@ -254,6 +303,45 @@ describe.each(circuits)("trackside objects at $name", (circuit) => {
     expect(inside).toEqual([]);
   });
 
+  test("armco and fence boards follow the wall line, never the asphalt", () => {
+    const armco = armcoParts(list, track.length, plan.armco, flat);
+    const boards = hoardingParts(
+      list,
+      track.length,
+      plan.hoardings,
+      flat,
+      realBoards,
+    );
+    const wrong = [armco.rails, armco.posts, boards.faces, boards.frame]
+      .flatMap((part) => triples(part.position))
+      .filter(([x, , z]) => {
+        const { station, lateral, wall } = seen(list, x, z);
+        return (
+          Math.abs(lateral) < station.half + 1 || Math.abs(lateral) < wall - 1
+        );
+      });
+    expect(wrong).toEqual([]);
+  });
+
+  test("freestanding boards stand on the verge, off the asphalt and in front of the wall", () => {
+    const signs = billboardParts(
+      list,
+      track.length,
+      plan.billboards,
+      flat,
+      realBoards,
+    );
+    const wrong = [signs.faces, signs.frame]
+      .flatMap((part) => triples(part.position))
+      .filter(([x, , z]) => {
+        const { station, lateral, wall } = seen(list, x, z);
+        return (
+          Math.abs(lateral) < station.half + 3 || Math.abs(lateral) > wall - 1
+        );
+      });
+    expect(wrong).toEqual([]);
+  });
+
   test("no timing pylon stands on the asphalt", () => {
     const built = pylonParts(plan.pylons, flat);
     const on = triples(built.body.position).filter(([x, , z]) => {
@@ -261,6 +349,22 @@ describe.each(circuits)("trackside objects at $name", (circuit) => {
       return Math.abs(lateral) < station.half + 1.5;
     });
     expect(on).toEqual([]);
+  });
+
+  test("marshal light panels hang on the fence, above head height and off the asphalt", () => {
+    const posts = postParts(list, track.length, plan.posts, flat);
+    const off = [
+      ...triples(posts.housing.position),
+      ...triples(posts.face.position),
+    ].filter(([x, , z]) => {
+      const { station, lateral, wall } = seen(list, x, z);
+      return (
+        Math.abs(lateral) < station.half + 2 || Math.abs(lateral) < wall - 1.2
+      );
+    });
+    const low = triples(posts.face.position).filter(([, y]) => y < 1.8);
+    expect(off).toEqual([]);
+    expect(low).toEqual([]);
   });
 
   test("marshal posts and their marshals stand behind the wall, clear of the cars", () => {

@@ -21,6 +21,7 @@ import {
   pass,
   pow,
   renderOutput,
+  screenCoordinate,
   select,
   smoothstep,
   step,
@@ -81,6 +82,11 @@ const mirrorSky = 1000;
 const glowStreak = 0.025;
 const glowTaps = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
 const hazeForward = 0.35;
+const scatterPower = 4;
+const veilPower = 5;
+const veilCorePower = 32;
+const veilGrey = 2;
+const veilLift = 0.25;
 const bloomStrength = 0.1;
 const bloomRadius = 0.55;
 const bloomThreshold = 1.6;
@@ -107,8 +113,19 @@ const rearFrame = 0.0019;
 const rearSoft = 0.0012;
 const rearShade = 0.18;
 const rearRim = [0.035, 0.06, 0.09] as const;
+const ditherRow = 4099;
+const ditherColumn = 2161;
+const ditherLevels = 255;
 const shockGrey = 0.68;
 const shockBright = 1.25;
+
+function dithered(shown: THREE.Node<"vec3">): THREE.Node<"vec3"> {
+  const pixel = screenCoordinate.xy.floor();
+  const across = hash(pixel.x.add(pixel.y.mul(ditherRow)));
+  const down = hash(pixel.y.add(pixel.x.mul(ditherColumn)));
+  const noise = across.add(down).sub(1);
+  return shown.add(noise.div(ditherLevels));
+}
 
 export interface AtmosphereState {
   sunDirection: THREE.Vector3;
@@ -131,6 +148,8 @@ export interface AtmosphereState {
   rearView: number;
   film: number;
   lift: number;
+  scatter: number;
+  veil: number;
 }
 
 type FloatNode = THREE.Node<"float">;
@@ -240,6 +259,8 @@ export class Atmosphere {
   private readonly rearView = uniform(0);
   private readonly film = uniform(0);
   private readonly lift = uniform(0);
+  private readonly scatter = uniform(0);
+  private readonly veil = uniform(0);
   private readonly scenePass: ReturnType<typeof pass>;
   private detail = false;
 
@@ -289,8 +310,19 @@ export class Atmosphere {
       float(1).sub(exp(beyond.negate())).mul(hazeMax).mul(ground.oneMinus()),
       float(0),
     );
+    const forward = pow(toSun, scatterPower);
+    const scattering = forward.mul(this.scatter).add(1);
     const haze = float(1)
-      .sub(exp(view.length().mul(density).div(this.hazeDistance).negate()))
+      .sub(
+        exp(
+          view
+            .length()
+            .mul(density)
+            .mul(scattering)
+            .div(this.hazeDistance)
+            .negate(),
+        ),
+      )
       .max(mist)
       .mul(hazeMax)
       .mul(ground)
@@ -432,7 +464,15 @@ export class Atmosphere {
       });
       return colour;
     })();
-    const graded = mix(wetRoad, tint, haze)
+    const hazed = mix(wetRoad, tint, haze);
+    const broad = pow(toSun, veilPower).mul(this.veil);
+    const core = pow(toSun, veilCorePower).mul(this.veil);
+    const graded = mix(
+      hazed,
+      vec3(hazed.dot(vec3(0.2126, 0.7152, 0.0722))),
+      broad.mul(veilGrey).min(1),
+    )
+      .add(this.sunColor.mul(broad.mul(veilLift).add(core)))
       .add(glow.rgb)
       .mul(vec3(grade.x, grade.y, grade.z));
     const wetLens = Fn(() => {
@@ -509,7 +549,7 @@ export class Atmosphere {
     const framed = rear ? this.withRearView(shaken, rear) : shaken;
     this.pipeline = new THREE.RenderPipeline(
       renderer,
-      vec4(this.developed(renderOutput(vec4(framed, 1)).rgb), 1),
+      vec4(dithered(this.developed(renderOutput(vec4(framed, 1)).rgb)), 1),
     );
     this.pipeline.outputColorTransform = false;
   }
@@ -587,6 +627,8 @@ export class Atmosphere {
     this.rearView.value = state.rearView;
     this.film.value = state.film;
     this.lift.value = state.lift;
+    this.scatter.value = state.scatter;
+    this.veil.value = state.veil;
     this.lensWater.value = state.lensWater;
     if (this.glow) this.glow.strength.value = bloomStrength * state.glare;
     this.reflections.value = state.reflections;

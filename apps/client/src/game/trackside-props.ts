@@ -11,22 +11,20 @@ import {
 } from "./training-layout.ts";
 import { beam, wallAt } from "./street-layout.ts";
 import { hash } from "./street-shell.ts";
-import { boardAt, type BoardSpan, wrapV } from "./trackside-plan.ts";
+import { realBoards } from "./trackside-boards.ts";
+import {
+  type Atlas,
+  boardNameAt,
+  type BoardSpan,
+  wraps,
+  wrapV,
+} from "./trackside-plan.ts";
 
 export interface CraneSpec {
   at: number;
   side: number;
   back: number;
   turn?: number;
-}
-
-export interface BankSpec {
-  from: number;
-  to: number;
-  side: number;
-  near: number;
-  far: number;
-  share: number;
 }
 
 export interface Zone {
@@ -47,13 +45,10 @@ const boomRise = 1.08;
 const boomTurn = 0.5;
 const hookDrop = 2.5;
 const hookLine = 0.12;
-const bankRow = 0.95;
-const bankSpacing = 0.62;
-const bankJitter = 0.3;
 const coarse = 6;
 const bucketSize = 64;
 const replacedBaked =
-  /^(billboard_|prop_crane|stand_|columns$|roofs$|distance_)/;
+  /^(billboard_|prop_crane|stand_|columns$|roofs$|distance_|gantry_(boards|steel)$|light_panel$)/;
 const loftedBaked = /^prop_(dark|steel)$/;
 const bakedCeiling = 8;
 const bakedRows = 12;
@@ -182,35 +177,6 @@ export function craneParts(
   return { body, dark };
 }
 
-export function bankSpots(
-  list: Station[],
-  length: number,
-  specs: BankSpec[],
-  ground: Height,
-): number[] {
-  const spots: number[] = [];
-  specs.forEach((spec, index) => {
-    const span = wrap(spec.to - spec.from, length);
-    const columns = Math.floor(span / bankSpacing);
-    const rows = Math.floor((spec.far - spec.near) / bankRow);
-    for (let column = 0; column < columns; column++)
-      for (let row = 0; row < rows; row++) {
-        const seed = index * 7919 + column * 31 + row * 0.37;
-        if (hash(seed) > spec.share * (1 - (0.6 * row) / rows)) continue;
-        const s =
-          spec.from + (column + hash(seed + 1) * bankJitter) * bankSpacing;
-        const station = stationAt(list, length, s);
-        const wall = wallAt(station, spec.side);
-        const lateral =
-          wall + spec.near + (row + hash(seed + 2) * bankJitter) * bankRow;
-        const [x = 0, , z = 0] = place(station, spec.side * lateral, 0);
-        const height = ground(x, z);
-        if (height !== null) spots.push(x, height, z);
-      }
-  });
-  return spots;
-}
-
 const lookups = new WeakMap<Station[], Map<number, Station[]>>();
 
 function bucket(x: number, z: number): number {
@@ -326,6 +292,7 @@ export function rebranded(
   list: Station[],
   spans: BoardSpan[],
   stretch = 1,
+  atlas: Atlas = wraps,
 ): void {
   const position = geometry.getAttribute("position");
   const uv = geometry.getAttribute("uv");
@@ -339,12 +306,12 @@ export function rebranded(
     const found = locate(list, x, z);
     if (!found) continue;
     const { station, lateral: side } = found;
-    const row = boardAt(spans, station.s, side);
+    const row = atlas.row(boardNameAt(spans, station.s, side));
     for (const i of corners)
       uv.setXY(
         i,
         uv.getX(i) * stretch,
-        wrapV(row, position.getY(i) > y ? 1 : 0),
+        atlas.v(row, position.getY(i) > y ? 1 : 0),
       );
   }
   uv.needsUpdate = true;
@@ -425,16 +392,39 @@ export interface Marker {
   at: number;
   side: number;
   metres: number;
+  board?: string;
+  cell?: number;
+  lift?: number;
+  out?: number;
+}
+
+export interface MarkerShape {
+  wide: number;
+  tall: number;
+  out: number;
 }
 
 const markerValues = [200, 150, 100, 50];
-const markerWide = 1.15;
-const markerTall = 0.58;
+const markerShape: MarkerShape = { wide: 1.15, tall: 0.58, out: 5.4 };
 const markerLow = 0.3;
-const markerOut = 5.4;
 const markerInside = 1.2;
 const markerClear = 1.6;
 const markerPost = 0.06;
+const markerBack = 0.025;
+
+function markerStyle(
+  marker: Marker,
+  row: number,
+  atlas: Atlas,
+  shape: MarkerShape,
+): { cellAt: number; rowAt: number; low: number; reach: number } {
+  return {
+    cellAt: marker.cell ?? Math.max(0, markerValues.indexOf(marker.metres)),
+    rowAt: marker.board === undefined ? row : atlas.row(marker.board),
+    low: marker.lift ?? markerLow,
+    reach: marker.out ?? shape.out,
+  };
+}
 
 export function markerParts(
   list: Station[],
@@ -442,15 +432,23 @@ export function markerParts(
   markers: Marker[],
   ground: Height,
   row: number,
+  atlas: Atlas = wraps,
+  shape: MarkerShape = markerShape,
 ): { faces: Builder; posts: Builder } {
   const faces = new Builder(1);
   const posts = new Builder(1);
+  const { wide: markerWide, tall: markerTall } = shape;
   for (const marker of markers) {
     const station = stationAt(list, length, marker.at);
-    const cellAt = Math.max(0, markerValues.indexOf(marker.metres));
+    const { cellAt, rowAt, low, reach } = markerStyle(
+      marker,
+      row,
+      atlas,
+      shape,
+    );
     const room = wallAt(station, marker.side) - markerInside;
     if (room < station.half + markerClear) continue;
-    const out = Math.min(station.half + markerOut, room);
+    const out = Math.min(station.half + reach, room);
     const [x = 0, , z = 0] = place(station, marker.side * out, 0);
     const base = [x, ground(x, z) ?? station.y, z];
     const across = [station.lx, 0, station.lz];
@@ -471,15 +469,33 @@ export function markerParts(
       [-0.5, 1],
     ];
     for (const [share, rise] of spots)
-      faces.vertex(corner(share, markerLow + rise * markerTall), back, [
+      faces.vertex(corner(share, low + rise * markerTall), back, [
         [
           (cellAt + 0.5 + share * marker.side * -0.94) / cells,
-          wrapV(row, 0.04 + rise * 0.92),
+          atlas.v(rowAt, 0.04 + rise * 0.92),
         ],
       ]);
     faces.quad(first, first + 1, first + 2, first + 3);
+    const middle = corner(0, low + markerTall / 2).map(
+      (value, axis) => value - (back[axis] ?? 0) * markerBack,
+    );
+    box(
+      posts,
+      middle,
+      [markerWide / 2 + 0.02, markerTall / 2 + 0.02, markerBack * 0.8],
+      [across, up, back],
+    );
     for (const share of [-0.42, 0.42])
-      beam(posts, corner(share, -0.3), corner(share, markerLow), markerPost);
+      beam(
+        posts,
+        corner(share, -0.3).map(
+          (v, axis) => v - (back[axis] ?? 0) * markerBack * 2,
+        ),
+        corner(share, low + markerTall * 0.8).map(
+          (v, axis) => v - (back[axis] ?? 0) * markerBack * 2,
+        ),
+        markerPost,
+      );
   }
   return { faces, posts };
 }
@@ -632,6 +648,80 @@ export interface Pylon {
   tall: number;
   wide: number;
   turn?: number;
+  foot?: number;
+  deep?: number;
+}
+
+interface PylonParts {
+  body: Builder;
+  lamps: Builder;
+  plates: Builder;
+}
+
+const plateRows = ["pylon a", "pylon b", "pylon c"];
+const plateLines = 12;
+const plateCells = 4;
+const plateInset = 0.12;
+const columnSize = 1.1;
+
+function plateRow(at: number[], half: number, pitch: number, line: number) {
+  const row = realBoards.row(plateRows[Math.floor(line / plateCells)] ?? "");
+  const cell = line % plateCells;
+  return { at, half, pitch, row, cell };
+}
+
+function tower(
+  parts: PylonParts,
+  pylon: Pylon,
+  base: number,
+  axes: number[][],
+): void {
+  const [along = up, , across = up] = axes;
+  const foot = pylon.foot ?? 0;
+  const deep = (pylon.deep ?? 1.2) / 2;
+  const half = pylon.wide / 2;
+  const board = pylon.tall - foot;
+  const centre = (rise: number) => [pylon.x, base + rise, pylon.z];
+  box(
+    parts.body,
+    centre(foot / 2 - 0.3),
+    [columnSize / 2, foot / 2 + 0.3, columnSize / 2],
+    axes,
+  );
+  box(parts.body, centre(foot + board / 2), [half, board / 2, deep], axes);
+  const pitch = (board - 2 * plateInset) / plateLines;
+  for (const side of [1, -1]) {
+    const normal = across.map((v) => v * side);
+    for (let line = 0; line < plateLines; line++) {
+      const top = foot + board - plateInset - line * pitch;
+      const plate = plateRow(centre(0), half, pitch, line);
+      const first = parts.plates.count;
+      const corners: [number, number, number][] = [
+        [-1, -1, 0],
+        [1, -1, 1],
+        [1, 1, 1],
+        [-1, 1, 0],
+      ];
+      for (const [a, b, u] of corners)
+        parts.plates.vertex(
+          plate.at.map(
+            (v, axis) =>
+              v +
+              (along[axis] ?? 0) * a * side * (half - plateInset) +
+              (up[axis] ?? 0) * (top - pitch / 2 + b * pitch * 0.46) +
+              (normal[axis] ?? 0) * (deep + 0.01),
+          ),
+          normal,
+          [
+            [
+              (plate.cell + u) / plateCells,
+              realBoards.v(plate.row, b > 0 ? 1 : 0),
+            ],
+          ],
+        );
+      parts.plates.quad(first, first + 1, first + 2, first + 3);
+    }
+  }
 }
 
 const pylonRows = 10;
@@ -640,18 +730,20 @@ const pylonHead = 2.6;
 const pylonCap = 1.35;
 const pylonDigit = 0.55;
 
-export function pylonParts(
-  pylons: Pylon[],
-  ground: Height,
-): { body: Builder; lamps: Builder } {
+export function pylonParts(pylons: Pylon[], ground: Height): PylonParts {
   const body = new Builder(1);
   const lamps = new Builder(1);
+  const plates = new Builder(1);
   for (const pylon of pylons) {
     const turn = pylon.turn ?? 0;
     const along = [Math.cos(turn), 0, Math.sin(turn)];
     const across = [-Math.sin(turn), 0, Math.cos(turn)];
     const axes = [along, up, across];
     const base = ground(pylon.x, pylon.z) ?? 0;
+    if (pylon.foot !== undefined) {
+      tower({ body, lamps, plates }, pylon, base, axes);
+      continue;
+    }
     const half = pylon.wide / 2;
     const shaft = pylon.tall - pylonHead;
     box(
@@ -687,12 +779,19 @@ export function pylonParts(
           [out, up, slide],
         );
   }
-  return { body, lamps };
+  return { body, lamps, plates };
 }
 
 export interface Post {
   at: number;
   side: number;
+  shelter?: boolean;
+  raised?: number;
+}
+
+interface Spot {
+  axes: number[][];
+  at: (rise: number) => number[];
 }
 
 const postBack = 1.8;
@@ -705,15 +804,147 @@ const plateSize = [0.3, 0.36, 0.03];
 const plateLift = 3.3;
 const plateAhead = 1.6;
 const postPole = 0.09;
+const lightPanel = [0.36, 0.44, 0.07];
+const fenceInset = 0.15;
+const panelOut = 0.55;
+const panelTurn = 0.7;
+const panelHeight = 2.75;
+const fenceAhead = -4;
+const shelterHalf = [1.3, 1.1];
+const shelterEave = 2.5;
+const shelterRoof = [1.45, 0.06, 1.25];
+const shelterLeg = 0.07;
+const cabinetSize = [0.35, 0.55, 0.3];
+const cabinTall = 1.9;
+
+type Corner = (a: number, c: number, rise: number) => number[];
+
+function legs(
+  dark: Builder,
+  hut: Spot,
+  rise: [number, number],
+  size: number,
+): Corner {
+  const [ax = up, , az = up] = hut.axes;
+  const [wide = 0, deep = 0] = shelterHalf;
+  const corner: Corner = (a, c, height) =>
+    hut
+      .at(height)
+      .map(
+        (value, axis) =>
+          value + (ax[axis] ?? 0) * a * wide + (az[axis] ?? 0) * c * deep,
+      );
+  for (const [a, c] of [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ] as const)
+    beam(dark, corner(a, c, rise[0]), corner(a, c, rise[1]), size);
+  return corner;
+}
+
+function cabin(dark: Builder, plate: Builder, hut: Spot, lift: number): void {
+  const [wide = 0, deep = 0] = shelterHalf;
+  const corner = legs(dark, hut, [-0.3, lift], 0.1);
+  box(dark, hut.at(lift), [wide + 0.2, 0.1, deep + 0.2], hut.axes);
+  box(
+    plate,
+    hut.at(lift + cabinTall / 2 + 0.1),
+    [wide, cabinTall / 2, deep],
+    hut.axes,
+  );
+  box(plate, hut.at(lift + cabinTall + 0.18), shelterRoof, hut.axes);
+  box(
+    dark,
+    corner(0, -1.02, lift + cabinTall * 0.62),
+    [wide * 0.85, cabinTall * 0.2, 0.02],
+    hut.axes,
+  );
+  for (let h = 0.3; h < lift; h += 0.3)
+    beam(dark, corner(1.15, -0.2, h), corner(1.15, 0.2, h), 0.03);
+  for (const c of [-0.2, 0.2])
+    beam(dark, corner(1.15, c, -0.2), corner(1.15, c, lift + 1), 0.04);
+}
+
+function shelter(dark: Builder, plate: Builder, hut: Spot): void {
+  const corner = legs(dark, hut, [-0.3, shelterEave], shelterLeg);
+  box(plate, hut.at(shelterEave + 0.06), shelterRoof, hut.axes);
+  box(dark, corner(0.55, 0.4, 0.55), cabinetSize, hut.axes);
+  for (const rise of [0.5, 1.0])
+    beam(dark, corner(-1, -1, rise), corner(1, -1, rise), 0.04);
+  box(dark, corner(-0.55, 0.6, 0.45), [0.5, 0.04, 0.18], hut.axes);
+  for (const lean of [-0.75, -0.6, -0.45])
+    beam(dark, corner(lean, 0.85, 0.2), corner(lean - 0.05, 0.9, 1.6), 0.025);
+  box(dark, corner(-0.6, 0.85, 0.25), [0.22, 0.12, 0.08], hut.axes);
+}
+
+interface PanelParts {
+  housing: Builder;
+  face: Builder;
+}
+
+function fencePanel(
+  parts: PanelParts,
+  station: Station,
+  side: number,
+  floor: number,
+): void {
+  const fence = side * (wallAt(station, side) + fenceInset);
+  const lateral = fence - side * panelOut;
+  const forward = [-station.lz, 0, station.lx];
+  const inward = [-side * station.lx, 0, -side * station.lz];
+  const normal = forward.map(
+    (v, i) => -v * Math.cos(panelTurn) + (inward[i] ?? 0) * Math.sin(panelTurn),
+  );
+  const right = [-(normal[2] ?? 0), 0, normal[0] ?? 0];
+  const [wide = 0, tall = 0, deep = 0] = lightPanel;
+  const centre = place(station, lateral, 0).map((v, i) =>
+    i === 1 ? floor + panelHeight : v,
+  );
+  const at = (a: number, b: number, c: number) =>
+    centre.map(
+      (v, i) =>
+        v + (right[i] ?? 0) * a + (up[i] ?? 0) * b + (normal[i] ?? 0) * c,
+    );
+  box(parts.housing, centre, lightPanel, [right, up, normal]);
+  const mount = place(station, fence, 0).map((v, i) =>
+    i === 1 ? floor + panelHeight : v,
+  );
+  beam(
+    parts.housing,
+    mount.map((v, i) => (i === 1 ? floor - 0.3 : v)),
+    mount.map((v, i) => (i === 1 ? floor + panelHeight + tall : v)),
+    0.1,
+  );
+  beam(parts.housing, mount, at(0, 0, -deep), 0.06);
+  beam(parts.housing, at(0, -tall, -deep), at(0, -tall - 0.4, -deep), 0.05);
+  const row = realBoards.row("lights");
+  const first = parts.face.count;
+  const corners: [number, number, number][] = [
+    [-1, -1, 0],
+    [1, -1, 1],
+    [1, 1, 1],
+    [-1, 1, 0],
+  ];
+  for (const [a, b, u] of corners)
+    parts.face.vertex(
+      at(a * wide * 0.92, b * tall * 0.92, deep + 0.01),
+      normal,
+      [[u / 8, realBoards.v(row, b > 0 ? 1 : 0)]],
+    );
+  parts.face.quad(first, first + 1, first + 2, first + 3);
+}
 
 export function postParts(
   list: Station[],
   length: number,
   posts: Post[],
   ground: Height,
-): { dark: Builder; plate: Builder; marshals: number[] } {
+): { dark: Builder; plate: Builder; marshals: number[] } & PanelParts {
   const dark = new Builder(1);
   const plate = new Builder(1);
+  const panels: PanelParts = { housing: new Builder(1), face: new Builder(1) };
   const marshals: number[] = [];
   for (const post of posts) {
     const spot = (ahead: number, back: number) => {
@@ -730,17 +961,24 @@ export function postParts(
     };
     const [wide = 0, tall = 0] = hutSize;
     const hut = spot(0, postBack + wide);
-    box(dark, hut.at(tall), hutSize, hut.axes);
+    if (post.raised) cabin(dark, plate, hut, post.raised);
+    else if (post.shelter) shelter(dark, plate, hut);
+    else box(dark, hut.at(tall), hutSize, hut.axes);
     const panel = spot(panelAhead, panelBack);
-    beam(dark, panel.at(-0.3), panel.at(panelLift), postPole);
-    box(dark, panel.at(panelLift), panelSize, panel.axes);
+    if (post.shelter) {
+      const station = stationAt(list, length, post.at + fenceAhead);
+      fencePanel(panels, station, post.side, panel.at(0)[1] ?? station.y);
+    } else {
+      beam(dark, panel.at(-0.3), panel.at(panelLift), postPole);
+      box(dark, panel.at(panelLift), panelSize, panel.axes);
+    }
     const sign = spot(plateAhead, postBack);
     beam(dark, sign.at(-0.3), sign.at(plateLift), postPole);
     box(plate, sign.at(plateLift), plateSize, sign.axes);
     for (const ahead of [-1.1, 0.2, 1.1])
       marshals.push(...spot(ahead, postBack - 0.5).at(0));
   }
-  return { dark, plate, marshals };
+  return { dark, plate, marshals, ...panels };
 }
 
 export interface PropPlan {
@@ -780,10 +1018,22 @@ export function venueProps(
       part: pylons.lamps.part("pylon lamps", "track stand canopy"),
       look: "roof",
     },
+    {
+      part: pylons.plates.part("pylon plates", "track real boards"),
+      look: "real",
+    },
     { part: posts.dark.part("marshal posts", "track prop dark"), look: "dark" },
     {
       part: posts.plate.part("marshal plates", "track stand canopy"),
       look: "roof",
+    },
+    {
+      part: posts.housing.part("light panels", "track prop dark"),
+      look: "dark",
+    },
+    {
+      part: posts.face.part("light panel faces", "track real boards"),
+      look: "real",
     },
   ];
   return { parts, marshals: posts.marshals };

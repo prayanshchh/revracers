@@ -3,7 +3,7 @@ import dressing from "../../../../content/tracks/hill-country/dressing.json";
 import structures from "../../../../content/tracks/hill-country/structures.json";
 import screensUrl from "../../../../content/tracks/neon-boulevard/textures/screens.webp?url";
 import wrapsUrl from "../../../../content/tracks/neon-boulevard/textures/wraps.webp?url";
-import { crowdData, placedCrowd } from "./crowd.ts";
+import { crowdData, placedCrowd, riseShare, standingFrom } from "./crowd.ts";
 import {
   emptyStand,
   type Ground,
@@ -13,21 +13,38 @@ import {
   standParts,
   standSeats,
 } from "./grandstand.ts";
+import {
+  bankSpots,
+  footprints,
+  standDecks,
+  standLine,
+  aimed,
+  standPieces,
+  trackAim,
+} from "./venue-crowd.ts";
+import {
+  amphitheatreSeats,
+  buildingOutlines,
+  stages,
+  standFiles,
+  standMeshes,
+} from "./venue-stands.ts";
+import { galvanisedSteel } from "./fence-steel.ts";
 import { releaseOnceUploaded } from "./preload.ts";
 import { meshOf } from "./training-ground.ts";
 import { type Part, place, type Station } from "./training-layout.ts";
-import { gantryParts } from "./trackside-gantry.ts";
+import { boardsFile, realBoards, standBoard } from "./trackside-boards.ts";
+import { structureParts } from "./venue-gantry.ts";
+import { armcoParts, billboardParts, hoardingParts } from "./venue-barriers.ts";
 import { float } from "three/tsl";
 import { type Sign, signMesh } from "./street-screens.ts";
-import { boardNameAt, boardRow } from "./trackside-plan.ts";
+import { boardNameAt } from "./trackside-plan.ts";
 import {
-  bankSpots,
   type Height,
   heightField,
   inSector,
   inZone,
   locate,
-  type Marker,
   markerParts,
   rebranded,
   rewrapped,
@@ -47,29 +64,32 @@ export interface Frames {
 interface People {
   seated: number[];
   standing: number[];
+  fans: number[];
 }
 
-export const venueFiles = [wrapsUrl, screensUrl];
+export const venueFiles = [wrapsUrl, screensUrl, boardsFile, ...standFiles];
 
 const boardMeshes = /^wall_(boards|tecpro)$/;
-const bannerMeshes = /^(paddock_banner|pit_strip|gantry_boards)$/;
+const bannerMeshes = /^(paddock_banner|pit_strip)$/;
+const lampMeshes = /^start_lamps$/;
+const distanceShape = { wide: 1.5, tall: 0.75, out: 4.2 };
+const lampLift = 0.9;
 const blockMesh = "wall_tecpro";
 const blockTile = 3;
 const boardTile = 8;
 const fenceMeshes = /^(debris_fence|fence_steel)$/;
-const markerMesh = /^distance_boards$/;
-const markerSteps = [150, 100, 50];
-const markerRoom = 160;
+const steelMesh = /^fence_steel$/;
+const wallMeshes = /^wall_(boards|tecpro|concrete)$/;
 const screenGlow = 0.35;
 const screenTurn = 0.45;
 const groundMeshes = /^(terrain|verges)$/;
-const seatedSprites = 32;
 const fallbackBoard = "revracers";
 const wheelMeshes = /^prop_(hut|marquee)$/;
 const crowdStride = 8;
 
 function sources(
   map: THREE.Texture,
+  real: THREE.Texture,
 ): Record<string, THREE.MeshStandardMaterial> {
   const plain = (
     name: string,
@@ -88,6 +108,11 @@ function sources(
       name: "track wall boards",
       map,
       roughness: 0.6,
+    }),
+    real: new THREE.MeshStandardMaterial({
+      name: "track real boards",
+      map: real,
+      roughness: 0.62,
     }),
     steel: plain("track gantry steel", 0.5, 0.45, 0.5),
     deck: plain("track venue concrete", 0.55, 0.9),
@@ -179,30 +204,10 @@ function texture(url: string, anisotropy: number): THREE.Texture {
   return map;
 }
 
-function markersOf(scene: THREE.Object3D, frames: Frames): Marker[] {
-  const markers: Marker[] = [];
-  for (const mesh of meshesOf(scene, markerMesh)) {
-    const position = mesh.geometry.getAttribute("position");
-    const uv = mesh.geometry.getAttribute("uv");
-    for (let first = 0; first + 3 < position.count; first += 4) {
-      const corners = [first, first + 1, first + 2, first + 3];
-      const mean = (pick: (i: number) => number) =>
-        corners.reduce((sum, i) => sum + pick(i), 0) / 4;
-      const found = locate(
-        frames.list,
-        mean((i) => position.getX(i)),
-        mean((i) => position.getZ(i)),
-      );
-      const metres = markerSteps[Math.floor(mean((i) => uv.getY(i)) * 3)];
-      if (!found || metres === undefined) continue;
-      markers.push({
-        at: found.station.s + metres,
-        side: Math.sign(found.lateral) || 1,
-        metres,
-      });
-    }
-  }
-  return markers;
+function turnOf(screen: object): number {
+  return "turn" in screen && typeof screen.turn === "number"
+    ? screen.turn
+    : screenTurn;
 }
 
 function screenSigns(frames: Frames, ground: Height): Sign[] {
@@ -212,8 +217,9 @@ function screenSigns(frames: Frames, ground: Height): Sign[] {
     const [x = 0, , z = 0] = place(station, screen.side * screen.lateral, 0);
     const inward = [-screen.side * station.lx, -screen.side * station.lz];
     const back = [station.lz, -station.lx];
-    const nx = (inward[0] ?? 0) + (back[0] ?? 0) * screenTurn;
-    const nz = (inward[1] ?? 0) + (back[1] ?? 0) * screenTurn;
+    const turn = turnOf(screen);
+    const nx = (inward[0] ?? 0) + (back[0] ?? 0) * turn;
+    const nz = (inward[1] ?? 0) + (back[1] ?? 0) * turn;
     return {
       x,
       y: ground(x, z) ?? station.y,
@@ -234,61 +240,17 @@ function locateAt(frames: Frames, s: number): Station | undefined {
 function boardFor(frames: Frames, x: number, z: number): string {
   const found = locate(frames.list, x, z);
   return found
-    ? boardNameAt(dressing.boards, found.station.s, found.lateral)
+    ? standBoard(boardNameAt(dressing.boards, found.station.s, found.lateral))
     : fallbackBoard;
 }
 
-function standLine(
-  stand: (typeof structures.stands)[number],
-  frames: Frames,
-): StandLine | null {
-  const [first, last] = stand.front.map((point) => [
-    Number(point[0]),
-    -Number(point[1]),
-  ]);
-  if (!first || !last) return null;
-  const x = (Number(first[0]) + Number(last[0])) / 2;
-  const z = (Number(first[1]) + Number(last[1])) / 2;
-  if (inZone(dressing.clear, frames.list, frames.length, x, z)) return null;
-  const run = [
-    Number(last[0]) - Number(first[0]),
-    Number(last[1]) - Number(first[1]),
-  ];
-  const flipped =
-    -Number(run[1]) * Number(stand.back[0]) -
-      Number(run[0]) * Number(stand.back[1]) <
-    0;
-  return {
-    from: flipped ? last : first,
-    to: flipped ? first : last,
-    depth: stand.depth,
-    base: stand.base,
-    roof: stand.roof,
-    board: boardFor(frames, x, z),
-  };
-}
-
 function standLines(frames: Frames): StandLine[] {
-  return structures.stands.flatMap((stand) => standLine(stand, frames) ?? []);
-}
-
-function addedStands(
-  frames: Frames,
-  ground: Ground,
-  lines: StandLine[],
-  mesh: (part: Part, source: string) => THREE.Mesh,
-): THREE.Mesh[] {
-  const built = emptyStand();
-  standParts(frames.list, frames.length, dressing.stands, built, ground);
-  lineStandParts(lines, built);
-  return [
-    mesh(built.deck.part("stand deck", "track stand deck"), "seats"),
-    mesh(built.aisle.part("stand aisles", "track stand aisle"), "aisle"),
-    mesh(built.skirt.part("stand skirt", "track stand skirt"), "skirt"),
-    mesh(built.banner.part("stand banner", "track wall boards"), "boards"),
-    mesh(built.frame.part("stand scaffold", "track stand frame"), "frame"),
-    mesh(built.roof.part("stand canopy", "track stand canopy"), "roof"),
-  ];
+  const cleared = (x: number, z: number) =>
+    inZone(dressing.clear, frames.list, frames.length, x, z);
+  const board = (x: number, z: number) => boardFor(frames, x, z);
+  return structures.stands.flatMap(
+    (stand) => standLine(stand, cleared, board) ?? [],
+  );
 }
 
 type Cast = (part: Part, source: string) => THREE.Mesh;
@@ -297,14 +259,18 @@ function props(
   frames: Frames,
   height: Height,
   mesh: Cast,
-): { meshes: THREE.Mesh[]; marshals: number[] } {
+): { meshes: THREE.Mesh[]; parts: Part[]; marshals: number[] } {
   const { parts, marshals } = venueProps(
     frames.list,
     frames.length,
     dressing,
     height,
   );
-  return { meshes: parts.map(({ part, look }) => mesh(part, look)), marshals };
+  return {
+    meshes: parts.map(({ part, look }) => mesh(part, look)),
+    parts: parts.map(({ part }) => part),
+    marshals,
+  };
 }
 
 export function dressVenue(
@@ -313,7 +279,10 @@ export function dressVenue(
   look: { dress: Dress; anisotropy: number },
 ): void {
   const { list, length } = frames;
-  const made = sources(texture(wrapsUrl, look.anisotropy));
+  const made = sources(
+    texture(wrapsUrl, look.anisotropy),
+    texture(boardsFile, look.anisotropy),
+  );
   const dressed = new Map<string, THREE.Material>();
   const material = (key: string) => {
     const known = dressed.get(key);
@@ -335,9 +304,12 @@ export function dressVenue(
       list,
       dressing.boards,
       object.name === blockMesh ? blockTile / boardTile : 1,
+      realBoards,
     );
-    object.material = material("boards");
+    object.material = material("real");
   }
+  for (const object of meshesOf(scene, lampMeshes))
+    object.geometry.translate(0, lampLift, 0);
   for (const object of meshesOf(scene, bannerMeshes)) {
     rewrapped(object.geometry);
     object.material = material("boards");
@@ -346,24 +318,44 @@ export function dressVenue(
     inSector(dressing.fenceless, list, length, x, z);
   for (const object of meshesOf(scene, fenceMeshes))
     without(object.geometry, open);
+  for (const object of meshesOf(scene, steelMesh))
+    for (const each of [object.material].flat()) galvanisedSteel(each);
+  const railed = (x: number, z: number) =>
+    inSector(dressing.armco, list, length, x, z);
+  for (const object of meshesOf(scene, wallMeshes))
+    without(object.geometry, railed);
+  const armco = armcoParts(list, length, dressing.armco, height);
+  const signs = billboardParts(
+    list,
+    length,
+    dressing.billboards,
+    height,
+    realBoards,
+  );
+  const hoardings = hoardingParts(
+    list,
+    length,
+    dressing.hoardings,
+    height,
+    realBoards,
+  );
   const markers = markerParts(
     list,
     length,
-    [
-      ...dressing.markers,
-      ...markersOf(scene, frames).filter((found) =>
-        dressing.markers.every(
-          (marker) => Math.abs(marker.at - found.at) > markerRoom,
-        ),
-      ),
-    ],
+    dressing.markers,
     height,
-    boardRow("distance"),
+    realBoards.row("distance"),
+    realBoards,
+    distanceShape,
   );
   movedWheel(scene, frames, height);
   strippedBaked(scene, height);
-  const built = gantryParts(list, length, dressing.gantries);
+  const built = structureParts(list, length, dressing.gantries, height);
   const placed = props(frames, height, mesh);
+  const stands = emptyStand();
+  standParts(list, length, dressing.stands, stands, ground);
+  lineStandParts(lines, stands);
+  const pieces = standPieces(stands);
   const screens = signMesh(
     screenSigns(frames, height),
     texture(screensUrl, look.anisotropy),
@@ -372,23 +364,37 @@ export function dressVenue(
   screens.name = "venue_screens";
   scene.add(
     mesh(built.steel.part("banner steel", "track gantry steel"), "steel"),
-    mesh(built.faces.part("banner faces", "track wall boards"), "boards"),
-    mesh(built.deck.part("banner deck", "track venue concrete"), "deck"),
-    mesh(markers.faces.part("marker boards", "track wall boards"), "boards"),
+    mesh(built.faces.part("banner faces", "track real boards"), "real"),
+    mesh(
+      built.concrete.part("banner concrete", "track venue concrete"),
+      "deck",
+    ),
+    mesh(built.dark.part("banner dark", "track prop dark"), "dark"),
+    mesh(markers.faces.part("marker boards", "track real boards"), "real"),
+    mesh(armco.rails.part("armco rails", "track gantry steel"), "steel"),
+    mesh(armco.posts.part("armco posts", "track gantry steel"), "steel"),
+    mesh(hoardings.faces.part("hoarding faces", "track real boards"), "real"),
+    mesh(hoardings.frame.part("hoarding frame", "track prop dark"), "dark"),
+    mesh(signs.faces.part("billboard faces", "track real boards"), "real"),
+    mesh(signs.frame.part("billboard frame", "track prop dark"), "dark"),
     mesh(markers.posts.part("marker posts", "track stand frame"), "frame"),
     ...placed.meshes,
     screens,
-    ...addedStands(frames, ground, lines, mesh),
+    ...standMeshes(pieces, mesh, look),
+  );
+  const blocked = footprints(
+    [...pieces.map(({ part }) => part), ...placed.parts],
+    height,
+    buildingOutlines,
+    standDecks(pieces),
   );
   const people: People = {
     seated: [
       ...standSeats(list, length, dressing.stands, ground),
       ...lineStandSeats(lines),
     ],
-    standing: [
-      ...bankSpots(list, length, dressing.banks, height),
-      ...placed.marshals,
-    ],
+    standing: placed.marshals,
+    fans: bankSpots(list, length, dressing.banks, height, blocked),
   };
   scene.userData["people"] = people;
   scene.userData["frames"] = frames;
@@ -400,7 +406,7 @@ function keptCrowd(known: Float32Array, frames: Frames): number[] {
     const row = known.subarray(i, i + crowdStride);
     const x = Number(row[0]);
     const z = -Number(row[1]);
-    if (Number(row[4]) < seatedSprites) continue;
+    if (Number(row[4]) < standingFrom) continue;
     if (inZone(dressing.clear, frames.list, frames.length, x, z)) continue;
     kept.push(...row);
   }
@@ -419,10 +425,17 @@ export async function venuePeople(
   const frames = scene.userData["frames"] as Frames | undefined;
   if (!people || !frames) return known;
   const kept = keptCrowd(known, frames);
-  const added = placedCrowd(people.standing, people.seated);
+  const added = placedCrowd(
+    people.standing,
+    [...people.seated, ...amphitheatreSeats],
+    people.fans,
+    standingFrom,
+    riseShare,
+  );
   const all = new Float32Array(kept.length + added.length);
   all.set(kept);
   all.set(added, kept.length);
+  aimed(all, trackAim(frames.list, stages));
   return all;
 }
 

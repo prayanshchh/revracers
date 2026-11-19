@@ -77,4 +77,9 @@ export const migrations = [
     DROP COLUMN IF EXISTS locked_until;
   DROP TABLE IF EXISTS auth_tokens;
   `,
+  `
+  ALTER TABLE laps
+    ADD COLUMN IF NOT EXISTS legacy_sectors boolean NOT NULL DEFAULT false;
+  UPDATE laps SET legacy_sectors = true WHERE track = 'hill-country';
+  `,
 ];

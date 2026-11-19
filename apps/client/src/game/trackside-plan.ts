@@ -15,6 +15,12 @@ export interface GantrySpec {
   right?: number;
 }
 
+export interface Atlas {
+  row: (name: string) => number;
+  v: (row: number, rise: number) => number;
+  aspect: number;
+}
+
 export interface Dressing {
   boards: BoardSpan[];
   gantries: GantrySpec[];
@@ -75,3 +81,5 @@ export function boardNameAt(
 export function boardAt(spans: BoardSpan[], s: number, sign: number): number {
   return boardRow(boardNameAt(spans, s, sign));
 }
+
+export const wraps: Atlas = { row: boardRow, v: wrapV, aspect: wrapAspect };

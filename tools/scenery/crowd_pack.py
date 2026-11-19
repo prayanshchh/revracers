@@ -14,7 +14,8 @@ def main():
     people = np.load(source / "people.npy")
     mask = np.load(source / "people-mask.npy")
     Image.fromarray((np.clip(people, 0, 1) * 255 + 0.5).astype(np.uint8)).save(out / "people.webp", quality=QUALITY, alpha_quality=95, method=6, exact=True)
-    Image.fromarray((np.clip(mask, 0, 1) * 255 + 0.5).astype(np.uint8)).save(out / "people-mask.webp", quality=QUALITY, method=6)
+    channels = np.concatenate([mask, np.zeros(mask.shape[:2] + (1,), mask.dtype)], -1)
+    Image.fromarray((np.clip(channels, 0, 1) * 255 + 0.5).astype(np.uint8)).save(out / "people-mask.webp", quality=QUALITY, method=6)
     print("sprites", people.shape, "covered", float((people[..., 3] > 0.5).mean()), "tinted", float(mask.mean()))
 
 
