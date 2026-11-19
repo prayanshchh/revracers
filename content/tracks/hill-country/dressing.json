@@ -257,14 +257,15 @@
       "solid": true
     },
     {
-      "from": 1165,
+      "from": 1138,
       "to": 1290,
       "side": -1,
-      "rows": 22,
-      "gap": 10,
+      "rows": 26,
+      "gap": 7,
       "seat": "silver",
       "sign": "turn4",
-      "cover": 0.4
+      "cover": 0.4,
+      "top": 15
     },
     {
       "from": 1995,
@@ -298,7 +299,7 @@
   ],
   "clear": [
     {
-      "from": 1150,
+      "from": 1125,
       "to": 1305,
       "side": -1,
       "near": 20,
@@ -352,7 +353,7 @@
     },
     {
       "from": 1100,
-      "to": 1160,
+      "to": 1134,
       "side": -1,
       "near": 3,
       "far": 40,
