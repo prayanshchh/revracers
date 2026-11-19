@@ -174,6 +174,7 @@ const cheerCars = Array.from(
 );
 const cheerModel = uniformArray(cheerCars, "vec3");
 const viewEdges = [0.3, 0.9] as const;
+const viewStagger = 0.16;
 
 type Atlas = CanvasImageSource & { width: number; height: number };
 
@@ -225,8 +226,11 @@ function material(
   );
   const faced = step(float(1e-3), facing.length());
   const front = flat.dot(facing).clamp(-1, 1).acos();
-  const view = step(float(viewEdges[0]), front)
-    .add(step(float(viewEdges[1]), front))
+  const stagger = fract(sin(phase.mul(12.9898)).mul(43758.5453))
+    .sub(0.5)
+    .mul(viewStagger);
+  const view = step(stagger.add(viewEdges[0]), front)
+    .add(step(stagger.add(viewEdges[1]), front))
     .mul(faced);
   const mirror = step(
     flat.dot(vec2(facing.y, facing.x.negate())),

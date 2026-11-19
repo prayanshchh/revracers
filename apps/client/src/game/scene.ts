@@ -76,6 +76,7 @@ import { ParkedBoxes } from "./pit-props.ts";
 import { expectDownloads } from "./asset-store.ts";
 import {
   releaseUploadedImages,
+  showLater,
   uploadEverything,
   uploadLater,
   warmLater,
@@ -1053,7 +1054,12 @@ export class Scene {
   }
 
   compileMirrors(renderer: THREE.WebGPURenderer): Promise<void> {
-    return this.car.compileMirrors(renderer, this.scene);
+    const hide = showLater(this.scene);
+    try {
+      return this.car.compileMirrors(renderer, this.scene);
+    } finally {
+      hide();
+    }
   }
 
   static downloads(circuit: Circuit, team: string, rivals: string[]): string[] {

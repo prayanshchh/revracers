@@ -209,6 +209,10 @@ function reveal(scene: THREE.Object3D, pass: Pass): () => void {
   };
 }
 
+export function showLater(scene: THREE.Object3D): () => void {
+  return reveal(scene, "later");
+}
+
 function drawEverything(
   scene: THREE.Scene,
   draw: () => void,
