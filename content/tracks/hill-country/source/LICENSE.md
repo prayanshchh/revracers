@@ -24,3 +24,12 @@ https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer
 USGS data is in the public domain. `aerial.jpg` holds bands 1 to 3 (colour)
 and `aerial-nir.png` band 4 (near infrared), both fetched by
 `tools/track/fetch.py` on the DEM grid.
+
+## aerial-2024.jpg and aerial-2024-nir.png
+
+U.S. Department of Agriculture National Agriculture Imagery Program, Texas,
+21 August 2024, 0.6 m (items tx_m_3009751_se_14_060_20240821,
+tx_m_3009752_sw_14_060_20240821, tx_m_3009759_ne_14_060_20240821 and
+tx_m_3009760_nw_14_060_20240821), served by the Microsoft Planetary Computer
+data API. USDA data is in the public domain. Same UTM zone 14N grid and
+top-left corner as `dem.png`; fetched by `tools/track/fetch.py`.

@@ -4,18 +4,29 @@ import type { Accessor, Document } from "@gltf-transform/core";
 import { PNG } from "pngjs";
 import * as THREE from "three/webgpu";
 import { describe, expect, test } from "vitest";
-import { gantryParts } from "../../apps/client/src/game/trackside-gantry.ts";
 import {
   heightField,
   type PropPlan,
   strippedBaked,
   venueProps,
 } from "../../apps/client/src/game/trackside-props.ts";
-import type { GantrySpec } from "../../apps/client/src/game/trackside-plan.ts";
 import {
   stations,
   type TrainingTrack,
 } from "../../apps/client/src/game/training-layout.ts";
+import {
+  type Structure,
+  structureParts,
+} from "../../apps/client/src/game/venue-gantry.ts";
+import {
+  type Armco,
+  armcoParts,
+  type Billboard,
+  billboardParts,
+  type Hoarding,
+  hoardingParts,
+} from "../../apps/client/src/game/venue-barriers.ts";
+import { realBoards } from "../../apps/client/src/game/trackside-boards.ts";
 import { floating, type Shape } from "../support/floating.ts";
 import { readModel } from "../support/gltf.ts";
 import { repoRoot } from "../support/repo.ts";
@@ -45,6 +56,16 @@ const track = JSON.parse(
     garageFront: number;
   };
 };
+function widthAt(share: number): number {
+  const points = track.centerline.length;
+  const at = share * points;
+  const index = Math.floor(at);
+  const blend = at - index;
+  const here = track.centerline[index]?.width ?? 0;
+  const next = track.centerline[(index + 1) % points]?.width ?? 0;
+  return here * (1 - blend) + next * blend;
+}
+
 const skies = [
   "circuit",
   "dawn",
@@ -150,8 +171,8 @@ function standsInside(position: Accessor | null): boolean {
   return false;
 }
 
-const spriteCells = 64;
-const standingFrom = 32;
+const spriteCells = 128;
+const standingFrom = 64;
 const groundMeshes = /^(terrain|verges)$/;
 
 function sceneOf(document: Document): THREE.Group {
@@ -227,7 +248,7 @@ describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
   });
 
   test("road-space masks resolve run-off paint finely along the lap and still fit on the GPU", () => {
-    for (const name of ["apron_a.png", "apron_b.png"]) {
+    for (const name of ["apron_a.png", "apron_b.png", "apron_c.png"]) {
       const image = PNG.sync.read(
         readFileSync(path.join(directory, "textures/baked", name)),
       );
@@ -235,6 +256,27 @@ describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
       expect(image.height / track.length).toBeGreaterThan(sharpRowsPerMetre);
       expect(image.height).toBeLessThanOrEqual(gpuTextureLimit);
     }
+  });
+
+  test("painted run-off designs stay off the racing surface", () => {
+    const image = PNG.sync.read(
+      readFileSync(path.join(directory, "textures/baked/apron_c.png")),
+    );
+    const reach = 60;
+    const step = (2 * reach) / (image.width - 1);
+    const painted: number[] = [];
+    for (let row = 0; row < image.height; row++) {
+      const limit = widthAt(row / image.height) / 2 - 0.5;
+      for (let column = 0; column < image.width; column++) {
+        if (Math.abs(-reach + column * step) > limit) continue;
+        const texel = (row * image.width + column) * 4;
+        const first = image.data[texel] ?? 0;
+        const second = image.data[texel + 2] ?? 0;
+        if (first > 127 || second > 127)
+          painted.push(Math.round((row / image.height) * track.length));
+      }
+    }
+    expect(painted).toEqual([]);
   });
 
   test("kerbs stay out of the pit lane mouth and on the track", () => {
@@ -292,10 +334,20 @@ describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
     strippedBaked(scene, ground);
     const dressing = JSON.parse(
       readFileSync(path.join(directory, "dressing.json"), "utf8"),
-    ) as PropPlan & { gantries: GantrySpec[] };
+    ) as PropPlan & {
+      gantries: Structure[];
+      armco: Armco[];
+      hoardings: Hoarding[];
+      billboards: Billboard[];
+    };
     const list = stations(track as unknown as TrainingTrack, null);
     const added = venueProps(list, track.length, dressing, ground).parts;
-    const gantries = gantryParts(list, track.length, dressing.gantries);
+    const gantries = structureParts(
+      list,
+      track.length,
+      dressing.gantries,
+      ground,
+    );
     const shapes = [
       ...scene.children
         .filter(
@@ -306,7 +358,29 @@ describe.skipIf(lfsPointer)("Hill Country surroundings", () => {
       ...added.map(({ part }) => part),
       gantries.steel.part("banner steel", "steel"),
       gantries.faces.part("banner faces", "boards"),
-      gantries.deck.part("banner deck", "deck"),
+      gantries.dark.part("banner dark", "dark"),
+      gantries.concrete.part("banner concrete", "deck"),
+      ...Object.values(
+        armcoParts(list, track.length, dressing.armco, ground),
+      ).map((part) => part.part("armco", "steel")),
+      ...Object.values(
+        hoardingParts(
+          list,
+          track.length,
+          dressing.hoardings,
+          ground,
+          realBoards,
+        ),
+      ).map((part) => part.part("hoardings", "boards")),
+      ...Object.values(
+        billboardParts(
+          list,
+          track.length,
+          dressing.billboards,
+          ground,
+          realBoards,
+        ),
+      ).map((part) => part.part("billboards", "boards")),
     ];
     expect(shapes.length).toBeGreaterThan(10);
     expect(floating(shapes, ground)).toEqual([]);

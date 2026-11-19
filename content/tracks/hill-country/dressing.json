@@ -2,178 +2,307 @@
   "boards": [
     {
       "from": 0,
-      "left": "aurenne",
-      "right": "aurenne"
+      "left": "harbour",
+      "right": "harbour"
     },
     {
-      "from": 700,
-      "left": "voltara",
-      "right": "voltara"
+      "from": 645,
+      "left": "harbour",
+      "right": "event"
     },
     {
-      "from": 1000,
-      "left": "voltara",
-      "right": "kestrel"
+      "from": 702,
+      "left": "chrono",
+      "right": "chrono"
     },
     {
-      "from": 1250,
-      "left": "voltara",
-      "right": "voltara"
+      "from": 1090,
+      "left": "chrono",
+      "right": "monogram"
     },
     {
-      "from": 1500,
-      "left": "northwind",
-      "right": "northwind"
+      "from": 1212,
+      "left": "archer",
+      "right": "archer"
     },
     {
-      "from": 1900,
-      "left": "marlowe",
-      "right": "marlowe"
+      "from": 1395,
+      "left": "lager",
+      "right": "archer"
     },
     {
-      "from": 2480,
-      "left": "verdale",
-      "right": "verdale"
+      "from": 1530,
+      "left": "archer",
+      "right": "lager"
     },
     {
-      "from": 2850,
-      "left": "northwind",
-      "right": "northwind"
+      "from": 1669,
+      "left": "lager",
+      "right": "lager"
     },
     {
-      "from": 3350,
-      "left": "maison",
-      "right": "maison"
+      "from": 1738,
+      "left": "lottery",
+      "right": "lottery"
     },
     {
-      "from": 3900,
-      "left": "torqua",
-      "right": "torqua"
+      "from": 1960,
+      "left": "stream",
+      "right": "stream"
     },
     {
-      "from": 4150,
-      "left": "torqua",
-      "right": "kestrel"
+      "from": 2072,
+      "left": "energy",
+      "right": "energy"
     },
     {
-      "from": 4260,
-      "left": "torqua",
-      "right": "torqua"
+      "from": 2668,
+      "left": "energy",
+      "right": "energy"
     },
     {
-      "from": 4560,
-      "left": "albaren",
-      "right": "hill tag"
+      "from": 2745,
+      "left": "energy",
+      "right": "concrete"
     },
     {
-      "from": 4800,
-      "left": "voltara",
-      "right": "hill tag"
+      "from": 2822,
+      "left": "energy",
+      "right": "cloud"
     },
     {
-      "from": 5000,
-      "left": "albaren",
-      "right": "albaren"
+      "from": 3082,
+      "left": "concrete",
+      "right": "cloud"
     },
     {
-      "from": 5150,
-      "left": "marlowe",
-      "right": "marlowe"
+      "from": 3379,
+      "left": "concrete",
+      "right": "hex"
     },
     {
-      "from": 5330,
-      "left": "aurenne",
-      "right": "aurenne"
+      "from": 3740,
+      "left": "scarlet",
+      "right": "scarlet"
+    },
+    {
+      "from": 3913,
+      "left": "tyre",
+      "right": "tyre"
+    },
+    {
+      "from": 4226,
+      "left": "card",
+      "right": "card"
+    },
+    {
+      "from": 4504,
+      "left": "event",
+      "right": "event"
+    },
+    {
+      "from": 4738,
+      "left": "airline",
+      "right": "airline"
+    },
+    {
+      "from": 5110,
+      "left": "bank",
+      "right": "bank"
+    },
+    {
+      "from": 5320,
+      "left": "harbour",
+      "right": "harbour"
     }
   ],
   "gantries": [
     {
-      "at": 293,
-      "board": "aurenne",
-      "kind": "sign",
-      "left": 9.5,
-      "height": 2.8
+      "at": 323,
+      "board": "harbour gantry",
+      "back": "harbour",
+      "kind": "start",
+      "from": 9.6,
+      "to": -15,
+      "lockups": 8
     },
     {
-      "at": 1115,
-      "board": "voltara",
-      "kind": "bridge",
-      "height": 5.2
+      "at": 548,
+      "board": "harbour",
+      "kind": "pit",
+      "from": 9.6,
+      "to": 18.8
     },
     {
-      "at": 1640,
-      "board": "northwind",
-      "kind": "truss",
-      "reach": 9,
-      "height": 2.6
+      "at": 754,
+      "board": "chrono",
+      "kind": "cantilever",
+      "leg": 22,
+      "tip": -8,
+      "top": 7.5,
+      "skew": 3,
+      "banner": 2.6
     },
     {
-      "at": 2112,
-      "board": "marlowe",
-      "kind": "sign",
-      "reach": 5,
-      "height": 2.6
+      "at": 1131,
+      "board": "pasta deep",
+      "kind": "footbridge",
+      "from": 45,
+      "to": -30,
+      "deck": 6.6,
+      "lockups": 4,
+      "towers": "scarlet",
+      "depth": 8,
+      "banner": 4.15,
+      "both": true
     },
     {
-      "at": 2470,
-      "board": "verdale",
-      "kind": "bridge",
-      "height": 3.4
+      "at": 1576,
+      "board": "archer",
+      "kind": "cantilever",
+      "leg": -13,
+      "tip": 6,
+      "top": 8.3,
+      "skew": 10
     },
     {
-      "at": 2950,
-      "board": "kestrel",
-      "kind": "truss",
-      "reach": 9,
-      "height": 2.6
+      "at": 2160,
+      "board": "energy",
+      "kind": "footbridge",
+      "from": 24,
+      "to": -36,
+      "both": true,
+      "towers": "cloud",
+      "lockups": 6,
+      "banner": 3.0,
+      "deck": 6.2
     },
     {
-      "at": 3400,
-      "board": "revracers 26",
-      "kind": "truss",
-      "reach": 9,
-      "height": 2.6
+      "at": 2406,
+      "board": "energy",
+      "kind": "cantilever",
+      "leg": 13.5,
+      "tip": -13,
+      "top": 7.7,
+      "lockups": 4
     },
     {
-      "at": 4425,
-      "board": "torqua",
-      "kind": "bridge",
-      "height": 5.2
+      "at": 2945,
+      "board": "cloud",
+      "kind": "scaffold",
+      "leg": -17.7,
+      "tip": 14.5,
+      "top": 11.4,
+      "depth": 2.4
+    },
+    {
+      "at": 3364,
+      "board": "cloud",
+      "kind": "cantilever",
+      "leg": -14,
+      "tip": 8,
+      "top": 8.1
+    },
+    {
+      "at": 4465,
+      "board": "card",
+      "kind": "footbridge",
+      "from": 42,
+      "to": -30,
+      "tower": 42,
+      "lockups": 4
+    },
+    {
+      "at": 5214,
+      "board": "bank",
+      "kind": "footbridge",
+      "from": 22,
+      "to": -50,
+      "tower": 22,
+      "lockups": 6
     }
   ],
   "stands": [
     {
-      "from": 1255,
-      "to": 1450,
+      "from": 5476,
+      "to": 197,
       "side": -1,
-      "rows": 26,
-      "gap": 12,
-      "board": "voltara"
+      "rows": 16,
+      "lateral": 19.5,
+      "lift": 0.1,
+      "top": 11.0,
+      "seat": "grey",
+      "solid": true
+    },
+    {
+      "from": 5476,
+      "to": 197,
+      "side": -1,
+      "rows": 14,
+      "lateral": 34.2,
+      "lift": 9.6,
+      "top": 6.8,
+      "seat": "grey",
+      "solid": true
+    },
+    {
+      "from": 197,
+      "to": 303,
+      "side": -1,
+      "rows": 8,
+      "lateral": 19.5,
+      "lift": 0.1,
+      "top": 5.5,
+      "seat": "grey",
+      "solid": true
+    },
+    {
+      "from": 1165,
+      "to": 1290,
+      "side": -1,
+      "rows": 22,
+      "gap": 10,
+      "seat": "silver",
+      "sign": "turn4",
+      "cover": 0.4
     },
     {
       "from": 1995,
       "to": 2130,
       "side": -1,
+      "rows": 22,
+      "gap": 20,
+      "seat": "silver",
+      "sign": "turn9",
+      "cover": 0.45
+    },
+    {
+      "from": 3512,
+      "to": 3618,
+      "side": -1,
       "rows": 18,
-      "gap": 14,
-      "board": "marlowe"
+      "gap": 12,
+      "seat": "silver",
+      "clad": "turn12",
+      "top": 10
+    },
+    {
+      "from": 4905,
+      "to": 4995,
+      "side": -1,
+      "rows": 16,
+      "gap": 6,
+      "seat": "navy",
+      "crest": "turn19"
     }
   ],
   "clear": [
     {
-      "from": 4790,
-      "to": 5170,
+      "from": 1150,
+      "to": 1305,
       "side": -1,
-      "near": 60,
-      "far": 175,
-      "trees": false
-    },
-    {
-      "from": 1195,
-      "to": 1490,
-      "side": -1,
-      "near": 25,
-      "far": 105,
+      "near": 20,
+      "far": 90,
       "trees": true
     },
     {
@@ -183,92 +312,91 @@
       "near": 25,
       "far": 100,
       "trees": true
+    },
+    {
+      "from": 4890,
+      "to": 5010,
+      "side": -1,
+      "near": 12,
+      "far": 60,
+      "trees": true
+    },
+    {
+      "from": 3470,
+      "to": 3630,
+      "side": -1,
+      "near": 4,
+      "far": 70,
+      "trees": true
     }
   ],
-  "cranes": [
-    {
-      "at": 450,
-      "side": -1,
-      "back": 7
-    },
-    {
-      "at": 625,
-      "side": -1,
-      "back": 9
-    },
-    {
-      "at": 950,
-      "side": 1,
-      "back": 30
-    },
-    {
-      "at": 1850,
-      "side": 1,
-      "back": 12
-    },
-    {
-      "at": 1930,
-      "side": 1,
-      "back": 8
-    },
-    {
-      "at": 2330,
-      "side": -1,
-      "back": 8
-    },
-    {
-      "at": 3110,
-      "side": -1,
-      "back": 6
-    },
-    {
-      "at": 3450,
-      "side": 1,
-      "back": 10
-    },
-    {
-      "at": 3860,
-      "side": -1,
-      "back": 12
-    },
-    {
-      "at": 5400,
-      "side": -1,
-      "back": 10
-    }
-  ],
+  "cranes": [],
   "banks": [
     {
-      "from": 1700,
-      "to": 1900,
+      "from": 310,
+      "to": 700,
       "side": -1,
-      "near": 5,
-      "far": 28,
-      "share": 0.3
+      "near": 3,
+      "far": 72,
+      "share": 1.0,
+      "fade": 0.15
     },
     {
-      "from": 2260,
-      "to": 2470,
-      "side": 1,
+      "from": 700,
+      "to": 880,
+      "side": -1,
+      "near": 3,
+      "far": 35,
+      "share": 0.95,
+      "fade": 0.15
+    },
+    {
+      "from": 1100,
+      "to": 1160,
+      "side": -1,
+      "near": 3,
+      "far": 40,
+      "share": 0.7
+    },
+    {
+      "from": 1295,
+      "to": 1600,
+      "side": -1,
+      "near": 3,
+      "far": 35,
+      "share": 0.8
+    },
+    {
+      "from": 1620,
+      "to": 1880,
+      "side": -1,
       "near": 4,
-      "far": 20,
-      "share": 0.38
+      "far": 36,
+      "share": 0.8
     },
     {
-      "from": 2260,
-      "to": 2460,
+      "from": 1885,
+      "to": 1990,
+      "side": -1,
+      "near": 4,
+      "far": 30,
+      "share": 0.7
+    },
+    {
+      "from": 2140,
+      "to": 2720,
+      "side": -1,
+      "near": 3,
+      "far": 28,
+      "share": 0.75
+    },
+    {
+      "from": 4560,
+      "to": 4860,
       "side": -1,
       "near": 4,
       "far": 24,
-      "share": 0.38
-    },
-    {
-      "from": 2480,
-      "to": 2800,
-      "side": -1,
-      "near": 4,
-      "far": 20,
-      "share": 0.4
+      "share": 0.7
     }
   ],
   "wheel": {
@@ -278,223 +406,442 @@
     "scale": 0.6,
     "turn": 1.33
   },
-  "fenceless": [
+  "roofless": [
     {
-      "from": 1500,
-      "to": 2450,
-      "side": 0
-    },
-    {
-      "from": 2540,
-      "to": 2640,
-      "side": 0
-    },
-    {
-      "from": 4950,
-      "to": 5150,
-      "side": 0
-    }
-  ],
-  "lots": [
-    {
-      "from": 4990,
-      "to": 5110,
+      "from": 5440,
+      "to": 320,
       "side": -1,
-      "lateral": 72,
-      "rows": 4
+      "near": 8,
+      "far": 80,
+      "trees": false,
+      "above": 19.5
     }
   ],
-  "tents": [
+  "rebacked": [
     {
-      "from": 3950,
-      "to": 4030,
+      "from": 5470,
+      "to": 362,
       "side": 1,
-      "lateral": 50,
-      "deep": 12
-    },
-    {
-      "from": 4650,
-      "to": 4750,
-      "side": 1,
-      "lateral": 80,
-      "deep": 14
-    },
-    {
-      "from": 4820,
-      "to": 4900,
-      "side": 1,
-      "lateral": 84,
-      "deep": 12
+      "near": 50,
+      "far": 58,
+      "trees": false
     }
   ],
+  "fenceless": [],
+  "lots": [],
+  "tents": [],
   "screens": [
     {
-      "at": 2135,
+      "at": 1547,
       "side": 1,
-      "lateral": 27,
+      "lateral": 48.1,
+      "wide": 7,
+      "tall": 4.2,
+      "lift": 5,
+      "seed": 0.31
+    },
+    {
+      "at": 2100,
+      "side": 1,
+      "lateral": 26,
       "wide": 8,
-      "tall": 6.5,
-      "lift": 6.5,
+      "tall": 5,
+      "lift": 6,
       "seed": 0.05
     },
     {
-      "at": 2704,
-      "side": -1,
-      "lateral": 46,
-      "wide": 9,
-      "tall": 5,
-      "lift": 5,
-      "seed": 0.12
+      "at": 2482,
+      "side": 1,
+      "lateral": 14.5,
+      "wide": 6,
+      "tall": 3.8,
+      "lift": 3,
+      "seed": 0.18
     },
     {
-      "at": 4440,
-      "side": 1,
-      "lateral": 28,
-      "wide": 8,
-      "tall": 4.5,
+      "at": 2945,
+      "side": -1,
+      "lateral": 16.5,
+      "wide": 14,
+      "tall": 8.5,
       "lift": 2.5,
+      "seed": 0.12,
+      "turn": 2.0
+    },
+    {
+      "at": 3905,
+      "side": 1,
+      "lateral": 32.1,
+      "wide": 6,
+      "tall": 9.5,
+      "lift": 4,
+      "seed": 0.26
+    },
+    {
+      "at": 5076,
+      "side": 1,
+      "lateral": 38.6,
+      "wide": 10,
+      "tall": 6,
+      "lift": 6,
       "seed": 0.2
     }
   ],
   "markers": [
     {
-      "at": 2408,
+      "at": 414,
+      "side": -1,
+      "metres": 200,
+      "out": 3.0
+    },
+    {
+      "at": 464,
+      "side": -1,
+      "metres": 150,
+      "out": 3.0
+    },
+    {
+      "at": 514,
+      "side": -1,
+      "metres": 100,
+      "out": 3.0
+    },
+    {
+      "at": 564,
+      "side": -1,
+      "metres": 50,
+      "out": 3.0
+    },
+    {
+      "at": 2353,
+      "side": -1,
+      "metres": 200
+    },
+    {
+      "at": 2420,
       "side": -1,
       "metres": 150
     },
     {
-      "at": 2458,
+      "at": 2485,
       "side": -1,
-      "metres": 100
+      "metres": 100,
+      "board": "distance navy"
     },
     {
-      "at": 2508,
+      "at": 2520,
       "side": -1,
       "metres": 50
     },
     {
-      "at": 3586,
+      "at": 2753,
+      "side": -1,
+      "metres": 0,
+      "board": "markers",
+      "cell": 0,
+      "lift": 0.9
+    },
+    {
+      "at": 3528,
+      "side": -1,
+      "metres": 200
+    },
+    {
+      "at": 3584,
       "side": -1,
       "metres": 150
     },
     {
-      "at": 3636,
+      "at": 3634,
       "side": -1,
       "metres": 100
     },
     {
-      "at": 3686,
+      "at": 3698,
       "side": -1,
       "metres": 50
+    },
+    {
+      "at": 4881,
+      "side": -1,
+      "metres": 100,
+      "board": "distance navy"
+    },
+    {
+      "at": 4949,
+      "side": -1,
+      "metres": 50
+    },
+    {
+      "at": 5182,
+      "side": -1,
+      "metres": 100,
+      "board": "distance navy"
+    },
+    {
+      "at": 5236,
+      "side": -1,
+      "metres": 50
+    },
+    {
+      "at": 5323,
+      "side": 1,
+      "metres": 0,
+      "board": "markers",
+      "cell": 1,
+      "lift": 0.6
+    },
+    {
+      "at": 5327,
+      "side": -1,
+      "metres": 0,
+      "board": "markers",
+      "cell": 1,
+      "lift": 0.6
+    },
+    {
+      "at": 5386,
+      "side": -1,
+      "metres": 0,
+      "board": "markers",
+      "cell": 0,
+      "lift": 0.9
     }
   ],
   "pylons": [
     {
-      "x": 235.84,
-      "z": 174.16,
-      "tall": 20,
-      "wide": 2.6,
-      "turn": 0.665
+      "x": 239.02,
+      "z": 176.54,
+      "tall": 18,
+      "wide": 4.4,
+      "turn": -0.1199,
+      "foot": 2.0,
+      "deep": 1.2
     },
     {
       "x": 564,
       "z": -341,
-      "tall": 18,
-      "wide": 2
+      "tall": 22,
+      "wide": 2.6,
+      "foot": 4,
+      "deep": 1.2
     }
   ],
   "posts": [
     {
       "at": 180,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 470,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 700,
-      "side": 1
+      "side": 1,
+      "shelter": true
     },
     {
       "at": 930,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 1180,
-      "side": 1
+      "side": 1,
+      "shelter": true
     },
     {
       "at": 1480,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 1760,
-      "side": 1
+      "side": 1,
+      "shelter": true
+    },
+    {
+      "at": 1805,
+      "side": -1,
+      "shelter": true,
+      "raised": 3
     },
     {
       "at": 1960,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 2150,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 2330,
-      "side": 1
+      "side": 1,
+      "shelter": true
     },
     {
       "at": 2528,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 2662,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 2960,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 3260,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 3560,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 3700,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 3930,
-      "side": 1
+      "side": 1,
+      "shelter": true
     },
     {
       "at": 4130,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 4330,
-      "side": 1
+      "side": 1,
+      "shelter": true
     },
     {
       "at": 4600,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
-      "at": 4880,
-      "side": 1
+      "at": 5004,
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 5130,
-      "side": -1
+      "side": -1,
+      "shelter": true
     },
     {
       "at": 5330,
-      "side": 1
+      "side": 1,
+      "shelter": true
+    }
+  ],
+  "armco": [
+    {
+      "from": 2745,
+      "to": 2948,
+      "side": -1,
+      "rails": 3
+    },
+    {
+      "from": 4562,
+      "to": 4850,
+      "side": -1,
+      "rails": 2
+    },
+    {
+      "from": 5052,
+      "to": 5110,
+      "side": 1,
+      "rails": 3
+    }
+  ],
+  "hoardings": [
+    {
+      "from": 570,
+      "to": 654,
+      "side": -1,
+      "board": "harbour",
+      "low": 1.1,
+      "tall": 1.6
+    },
+    {
+      "from": 722,
+      "to": 728,
+      "side": -1,
+      "board": "impact",
+      "low": 0,
+      "tall": 1.05,
+      "back": -0.45
+    },
+    {
+      "from": 1738,
+      "to": 1826,
+      "side": 1,
+      "board": "lottery",
+      "low": 1.1,
+      "tall": 1.3
+    },
+    {
+      "from": 3338,
+      "to": 3344,
+      "side": -1,
+      "board": "impact",
+      "low": 0,
+      "tall": 1.05,
+      "back": -0.45
+    },
+    {
+      "from": 3344,
+      "to": 3374,
+      "side": -1,
+      "board": "event",
+      "low": 0.05,
+      "tall": 1.9,
+      "back": 0.3
+    },
+    {
+      "from": 3390,
+      "to": 3456,
+      "side": -1,
+      "board": "cloud",
+      "low": 1.1,
+      "tall": 1.3
+    },
+    {
+      "from": 3885,
+      "to": 3950,
+      "side": 1,
+      "board": "scarlet",
+      "low": 1.6,
+      "tall": 2.6,
+      "back": 2.0,
+      "repeat": 2
+    }
+  ],
+  "billboards": [
+    {
+      "at": 1908,
+      "lateral": -19,
+      "board": "lottery sign",
+      "wide": 6.5,
+      "tall": 1.5,
+      "low": 0.8,
+      "turn": 0.9
     }
   ]
 }

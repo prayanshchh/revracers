@@ -47,6 +47,32 @@ function smallest(...times: (number | null | undefined)[]): number | null {
   return known.length > 0 ? Math.min(...known) : null;
 }
 
+function traceSectors(
+  trace: ArrayLike<number>,
+  boundaries: number[],
+): number[] | null {
+  const marks = [
+    0,
+    ...boundaries.map((b) => trace[Math.floor(b)] ?? Number.NaN),
+    trace[trace.length - 1] ?? Number.NaN,
+  ];
+  const sectors = marks.slice(1).map((t, i) => t - (marks[i] ?? 0));
+  return sectors.every((t) => t > 0) ? sectors : null;
+}
+
+function resplit(
+  stored: StoredReference | null,
+  boundaries: number[],
+): StoredReference | null {
+  if (!stored) return null;
+  const sectors = traceSectors(stored.trace, boundaries);
+  if (!sectors) return stored;
+  const same =
+    sectors.length === stored.sectors.length &&
+    sectors.every((t, i) => Math.abs(t - (stored.sectors[i] ?? 0)) < 0.005);
+  return same ? stored : { trace: stored.trace, sectors };
+}
+
 export class LapTrace {
   private current: Float64Array;
   private fromLine = false;
@@ -65,8 +91,9 @@ export class LapTrace {
   constructor(
     length: number,
     readonly boundaries: number[],
-    stored: StoredReference | null = null,
+    saved: StoredReference | null = null,
   ) {
+    const stored = resplit(saved, boundaries);
     this.current = new Float64Array(Math.ceil(length) + 1).fill(Number.NaN);
     this.best = stored ? Float64Array.from(stored.trace) : null;
     this.bestSectors = stored?.sectors ?? [];
@@ -132,9 +159,17 @@ export class LapTrace {
     return this.bestLapTime();
   }
 
-  get reference(): { trace: number[]; sectors: number[] } | null {
+  get reference(): {
+    trace: number[];
+    sectors: number[];
+    fastestSectors: number[];
+  } | null {
     return this.best
-      ? { trace: Array.from(this.best), sectors: this.bestSectors }
+      ? {
+          trace: Array.from(this.best),
+          sectors: this.bestSectors,
+          fastestSectors: [...this.fastestSectors],
+        }
       : null;
   }
 

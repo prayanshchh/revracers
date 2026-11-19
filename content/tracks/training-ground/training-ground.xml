@@ -10,6 +10,7 @@
 <section name="track-grass"><attstr name="texture name" val="tr-grass.png"/><attstr name="texture type" val="continuous"/><attnum name="texture size" unit="m" val="2"/><attnum name="friction" val="0.4"/><attnum name="rolling resistance" val="0.08"/><attnum name="roughness" val="0.006"/><attnum name="roughness wavelength" val="3"/></section>
 </section>
 <section name="Straight Mode Zones"><section name="1"><attnum name="start" unit="m" val="3042.5"/><attnum name="end" unit="m" val="441.2"/></section><section name="2"><attnum name="start" unit="m" val="1421"/><attnum name="end" unit="m" val="2424.5"/></section></section>
+<section name="Sectors"><section name="1"><attnum name="distance from start" unit="m" val="1144.167"/></section><section name="2"><attnum name="distance from start" unit="m" val="2288.333"/></section></section>
 <section name="Header">
 <attstr name="name" val="Training Ground"/>
 <attstr name="category" val="circuit"/>

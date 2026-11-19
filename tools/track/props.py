@@ -28,9 +28,6 @@ WHEEL_SPOT = (1490.0, 118.0)
 WHEEL_RADIUS = 28.0
 WHEEL_CARS = 24
 WHEEL_SPOKES = 12
-SKYLINE_CENTRE = (-9800.0, 14900.0)
-SKYLINE_TOWERS = 46
-SKYLINE_SEED = 3
 
 
 def basis(frame, s):
@@ -215,21 +212,10 @@ def wheel(batches, frame, track, ground, s, lateral):
             beam(batches["hut"], base + tangent * sign * 11 + offset, hub + offset * 0.5, 0.55)
 
 
-def skyline(batches, ground_level):
-    rng = np.random.default_rng(SKYLINE_SEED)
-    cx, cy = SKYLINE_CENTRE
-    for _ in range(SKYLINE_TOWERS):
-        x = cx + rng.normal(0, 480)
-        y = cy + rng.normal(0, 420)
-        half = rng.uniform(14, 28)
-        height = rng.uniform(40, 120) + rng.exponential(55)
-        box(batches["skyline"], np.array([x, y, ground_level]), (np.array([half, 0.0, 0.0]), np.array([0.0, half, 0.0])), height)
-
-
 def build(track, build_dir):
     frame = Frame(track)
     ground = ground_lookup(build_dir)
-    batches = {name: Batch() for name in ("marquee", "steel", "dark", "crane", "crane blue", "screen", "hut", "marshal", "skyline")}
+    batches = {name: Batch() for name in ("marquee", "steel", "dark", "crane", "crane blue", "screen", "hut", "marshal")}
     tents(batches, frame, track, ground)
     for s, side in CRANE_SPOTS:
         crane(batches, frame, track, ground, s, side)
@@ -250,5 +236,4 @@ def build(track, build_dir):
     for s, lateral, length, width in MARQUEES:
         marquee(batches, frame, track, ground, s, lateral, length, width)
     wheel(batches, frame, track, ground, *WHEEL_SPOT)
-    skyline(batches, 40.0)
     return batches

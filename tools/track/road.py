@@ -37,6 +37,8 @@ MARK_TRACK = 1.48
 MARK_PAIRED = 0.6
 MARK_CORNER = 1 / 200
 MARK_RANDOM = 70
+MARK_BRAKING = (4, 9)
+MARK_LAUNCH = (1, 3)
 MARK_ROW_NAMES = ("light", "medium", "dark")
 RACING_LINE_MARGIN = 1.8
 RACING_LINE_LOOKAHEAD = 50.0
@@ -308,10 +310,13 @@ def edge_lines(track, mat):
     parts = []
     mouth = track.arc_mask(track.pit["entry"], track.pit["wallStart"])
     gap = mouth & ((track.s % (2 * PIT_DASH)) >= PIT_DASH)
-    for sign in (1, -1):
+    kerbed = kerb_mask(track)
+    for side, sign in ((0, 1), (1, -1)):
         vertices, faces, uv = strip(track, rows, sign * (track.half - LINE_WIDTH), sign * track.half, PAINT_LIFT, True)
+        hidden = kerbed[:, side] & np.roll(kerbed[:, side], -1)
         if sign > 0:
-            faces = [f for i, f in enumerate(faces) if not gap[i]]
+            hidden = hidden | gap
+        faces = [f for i, f in enumerate(faces) if not hidden[i]]
         parts.append((vertices, faces, uv))
     return combine("edge lines", parts, mat)
 
@@ -333,8 +338,12 @@ def rectangle(track, s0, s1, l0, l1, lift):
     return vertices, [(0, 2, 3, 1)], uv
 
 
-def markings(track, mat):
+GRID_YELLOW = 2.2
+
+
+def markings(track, mat, yellow):
     parts = []
+    slots = []
     for line in (0.0, track.data["startLine"]):
         span = track.half[int(line / track.length * track.count) % track.count] - LINE_WIDTH
         parts.append(rectangle(track, line - START_LINE_WIDTH / 2, line + START_LINE_WIDTH / 2, -span, span, PAINT_LIFT))
@@ -343,6 +352,9 @@ def markings(track, mat):
         parts.append(rectangle(track, d - GRID_BAR, d, o - GRID_HALF_WIDTH, o + GRID_HALF_WIDTH, PAINT_LIFT))
         for edge in (o - GRID_HALF_WIDTH, o + GRID_HALF_WIDTH - GRID_BAR):
             parts.append(rectangle(track, d - GRID_LEG, d - GRID_BAR, edge, edge + GRID_BAR, PAINT_LIFT))
+        inner = o - np.sign(o) * GRID_HALF_WIDTH
+        slots.append(rectangle(track, d - GRID_BAR, d, min(inner, inner - np.sign(o) * GRID_YELLOW), max(inner, inner - np.sign(o) * GRID_YELLOW), PAINT_LIFT))
+    combine("grid lines", slots, yellow)
     return combine("markings", parts, mat)
 
 
@@ -456,6 +468,21 @@ def track_marks(track, mat):
         row = int(slot["distance"] / step)
         for side in (-1, 1):
             stroke(row, rng.uniform(16, 42), slot["offset"] + side * MARK_TRACK / 2, rng.uniform(-0.005, 0.005), 0.0, rng.uniform(0.13, 0.18), 1)
+    braking = np.random.default_rng(MARK_SEED + 1)
+    for i in range(track.count):
+        if not (corner[i] and not corner[i - 1]):
+            continue
+        for _ in range(braking.integers(*MARK_BRAKING)):
+            start = i - braking.uniform(20, 130) / step
+            row = int(start) % track.count
+            stroke(start, braking.uniform(30, 95), line[row] + braking.normal(0, 0.6), braking.uniform(-0.01, 0.01), braking.uniform(-0.01, 0.01), braking.uniform(0.12, 0.2), 2)
+    launch = np.random.default_rng(MARK_SEED + 2)
+    for slot in track.data["grid"]:
+        row = int(slot["distance"] / step)
+        for side in (-1, 1):
+            for _ in range(launch.integers(*MARK_LAUNCH)):
+                lateral = slot["offset"] + side * (MARK_TRACK / 2 + launch.normal(0, 0.12))
+                stroke(row + launch.integers(-2, 3), launch.uniform(30, 80), lateral, launch.uniform(-0.003, 0.003), 0.0, launch.uniform(0.14, 0.2), launch.integers(0, 2))
     return combine("track marks", parts, mat)
 
 
@@ -641,6 +668,52 @@ def pit_decals(track, mat):
         )
     vertices, faces, uv = batch.arrays()
     return mesh("pit decals", vertices, faces, {"UVMap": uv}, mat, smooth=False)
+
+
+WORD_COLUMNS = 24
+WORD_LIFT = 0.012
+
+
+def runoff_words(track, root, derived, mat):
+    plan = root / "source" / "runoff.json"
+    layout_path = derived / "runoff_words.json"
+    if not plan.exists() or not layout_path.exists():
+        return None
+    layout = json.loads(layout_path.read_text())
+    batch = trackside.Batch()
+    for design in json.loads(plan.read_text())["designs"]:
+        if design["kind"] != "word":
+            continue
+        entry = layout["|".join(str(design.get(k, "")) for k in ("style", "emblem", "tracking", "slant", "colour"))]
+        height = design["height"]
+        length = height * entry["aspect"]
+        turn = np.radians(design.get("turn", 0.0))
+        along = np.array([np.cos(turn), np.sin(turn)])
+        up = np.array([-np.sin(turn), np.cos(turn)])
+        starts = [design["at"][0]]
+        repeat = design.get("repeat")
+        while repeat and starts[-1] + repeat["every"] <= repeat["to"]:
+            starts.append(starts[-1] + repeat["every"])
+        for start in starts:
+            lane = design.get("lane")
+            if lane is None:
+                lateral = design["at"][1]
+            else:
+                sign = 1 if lane[0] == "left" else -1
+                row = int(round((start % track.length) / track.length * track.count)) % track.count
+                lateral = sign * (track.half[row] + lane[1])
+            centre = np.array([start, lateral], float)
+            u = np.linspace(0, 1, WORD_COLUMNS + 1)
+            for k in range(WORD_COLUMNS):
+                quad = []
+                uvs = []
+                for a, b in ((u[k], 0), (u[k + 1], 0), (u[k + 1], 1), (u[k], 1)):
+                    s_l = centre + along * (a - 0.5) * length + up * (b - 0.5) * height
+                    quad.append(track.place_at(s_l[0], np.array([s_l[1]]), WORD_LIFT)[0])
+                    uvs.append((entry["u"][0] + a * (entry["u"][1] - entry["u"][0]), entry["v"][0] + b * (entry["v"][1] - entry["v"][0])))
+                batch.add(quad, uvs)
+    vertices, faces, uv = batch.arrays()
+    return mesh("runoff words", vertices, faces, {"UVMap": uv}, mat, smooth=False)
 
 
 def distance_meshes(track, derived):
@@ -837,7 +910,6 @@ def props_meshes(track, build):
         "screen": flat_material("track prop screen", (0.02, 0.03, 0.05), 0.2, 0.25),
         "hut": flat_material("track prop hut", (0.78, 0.78, 0.76), 0.0, 0.6),
         "marshal": flat_material("track prop marshal", (0.85, 0.32, 0.05), 0.0, 0.6),
-        "skyline": flat_material("track prop skyline", (0.32, 0.36, 0.42), 0.2, 0.5),
     }
     for name, batch in parts.items():
         vertices, faces, uv = batch.arrays()
@@ -894,7 +966,8 @@ def main():
     )
     road(track, asphalt)
     edge_lines(track, paint)
-    markings(track, paint)
+    yellow = flat_material("track pit yellow", (0.78, 0.5, 0.012), 0.0, 0.6)
+    markings(track, paint, yellow)
     kerbs(track, kerb)
     track_marks(track, material("track track marks", derived / "track_marks_base_color.png", alpha=True))
     pit_lane(
@@ -906,7 +979,7 @@ def main():
             source / "asphalt_track_normal.jpg",
         ),
     )
-    pit_markings(track, paint, flat_material("track pit yellow", (0.78, 0.5, 0.012), 0.0, 0.6))
+    pit_markings(track, paint, yellow)
     pit_apron(
         track,
         material(
@@ -924,6 +997,7 @@ def main():
     trackside_meshes(track, source, derived)
     venue_meshes(track, build, source, derived)
     pit_decals(track, material("track pit decals", derived / "pit_decals_base_color.png", alpha=True))
+    runoff_words(track, root, derived, material("track words road paint", derived / "runoff_words_base_color.png", alpha=True))
     terrain(
         track,
         build,

@@ -28,6 +28,10 @@ REGION_CENTRE = (631483, 3334446)
 REGION_DEM_PIXELS = 1100
 REGION_AERIAL_PIXELS = 4096
 OSM_MAP = "https://api.openstreetmap.org/api/0.6/map.json"
+NAIP_2024_SERVICE = "https://planetarycomputer.microsoft.com/api/data/v1/item/bbox"
+NAIP_2024_ITEMS = ("tx_m_3009751_se_14_060_20240821", "tx_m_3009752_sw_14_060_20240821", "tx_m_3009759_ne_14_060_20240821", "tx_m_3009760_nw_14_060_20240821")
+NAIP_2024_METRES_PER_PIXEL = 0.6
+NAIP_2024_TILE = 1024
 KEEP = ("highway", "area:highway", "barrier", "building", "landuse", "natural", "leisure", "amenity", "man_made", "raceway")
 
 
@@ -156,6 +160,36 @@ def fetch_region(dem_out, aerial_out):
     Image.fromarray(np.round((dem - 100.0) * 100.0).astype(np.uint16)).save(dem_out)
 
 
+def fetch_naip_2024(colour_out, infrared_out):
+    step = NAIP_2024_METRES_PER_PIXEL
+    width, height = int(round(DEM_SIZE[0] / step)), int(round(DEM_SIZE[1] / step))
+    data = np.zeros((4, height, width), np.uint8)
+    have = np.zeros((height, width), bool)
+    for top in range(0, height, NAIP_2024_TILE):
+        for left in range(0, width, NAIP_2024_TILE):
+            w, h = min(NAIP_2024_TILE, width - left), min(NAIP_2024_TILE, height - top)
+            xmin, ymax = DEM_ORIGIN[0] + left * step, DEM_ORIGIN[1] - top * step
+            xmax, ymin = xmin + w * step, ymax - h * step
+            for item in NAIP_2024_ITEMS:
+                need = ~have[top : top + h, left : left + w]
+                if not need.any():
+                    break
+                url = (
+                    f"{NAIP_2024_SERVICE}/{xmin},{ymin},{xmax},{ymax}/{w}x{h}.npy?collection=naip&item={item}"
+                    "&coord_crs=epsg:32614&dst_crs=epsg:32614&assets=image&asset_bidx=image%7C1,2,3,4&resampling=bilinear"
+                )
+                tile = np.load(io.BytesIO(get(url)), allow_pickle=False)
+                if tile.ndim != 3 or tile.shape[0] != 5:
+                    continue
+                valid = (tile[4] > 0) & need
+                data[:, top : top + h, left : left + w][:, valid] = tile[:4][:, valid]
+                have[top : top + h, left : left + w] |= valid
+    if not have.all():
+        raise RuntimeError("NAIP 2024 left part of the grid uncovered")
+    Image.fromarray(np.moveaxis(data[:3], 0, -1)).save(colour_out, quality=AERIAL_QUALITY, subsampling=0)
+    Image.fromarray(data[3]).save(infrared_out)
+
+
 def fetch_fonts(directory):
     directory.mkdir(parents=True, exist_ok=True)
     for name, path in FONTS.items():
@@ -176,6 +210,8 @@ def main():
         fetch_aerial(source / "aerial.jpg")
     if not (source / "aerial-nir.png").exists():
         fetch_aerial(source / "aerial-nir.png", NEAR_INFRARED_BAND, "L")
+    if not (source / "aerial-2024.jpg").exists():
+        fetch_naip_2024(source / "aerial-2024.jpg", source / "aerial-2024-nir.png")
     if not (source / "region-aerial.jpg").exists():
         fetch_region(source / "region-dem.png", source / "region-aerial.jpg")
 

@@ -1,8 +1,10 @@
 import * as THREE from "three";
 
-export const atlasColumns = 8;
-export const atlasRows = 8;
+export const atlasColumns = 24;
+export const atlasRows = 16;
+export const cowboyCells = 12;
 export const alphaCutoff = 0.5;
+export const farCutoff = 0.22;
 const spriteCells = atlasColumns * atlasRows;
 
 function halved(level: Float32Array, width: number, height: number) {
@@ -77,8 +79,7 @@ export function spriteBounds(
   for (;;) {
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++)
-        if ((level[y * w + x] ?? 0) >= alphaCutoff)
-          markTexel(boxes, x, y, w, h);
+        if ((level[y * w + x] ?? 0) >= farCutoff) markTexel(boxes, x, y, w, h);
     if (w === 1 && h === 1) break;
     ({ next: level, w, h } = halved(level, w, h));
   }

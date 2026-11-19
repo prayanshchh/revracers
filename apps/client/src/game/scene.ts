@@ -30,6 +30,7 @@ import {
 } from "./training-layout.ts";
 import { standSeats } from "./grandstand.ts";
 import { clearedTrees, type Frames, venuePeople } from "./venue-dressing.ts";
+import { unbuilt } from "./landmark-footprints.ts";
 import { dressed } from "./street-venue.ts";
 import { FieldCars } from "./field-cars.ts";
 import { frameIndex, type Engine, type HudInfo } from "./engine.ts";
@@ -52,6 +53,7 @@ import { GridCars, type GridSlot } from "./grid.ts";
 import { crewFile, roadFile, sceneFiles, treeKinds } from "./race-files.ts";
 import {
   cascadeLayers,
+  casterCascades,
   loadRoad,
   primeRoad,
   releaseCpuCopies,
@@ -85,7 +87,12 @@ import { SafetyCar } from "./safety-car.ts";
 import type { StartLights } from "./start-lights.ts";
 import { SdSky } from "./sky.ts";
 import { SkyBox } from "./skybox.ts";
-import { sessionLight, type SessionLight } from "./daylight.ts";
+import {
+  irisStops,
+  lightHour,
+  sessionLight,
+  type SessionLight,
+} from "./daylight.ts";
 import {
   floodMap,
   Floodlights,
@@ -99,8 +106,16 @@ import {
 } from "./floodlights.ts";
 import type { LampSpot } from "./desert-lamps.ts";
 import { useFloodAmbient } from "./sky-ambient.ts";
-import { Crowd, crowdLamps, placedCrowd } from "./crowd.ts";
+import {
+  Crowd,
+  crowdLamps,
+  nearestCars,
+  placedCrowd,
+  plainSprites,
+} from "./crowd.ts";
 import { Trees, treeStride } from "./scenery-trees.ts";
+import { Skyline } from "./skyline.ts";
+import { CarParks } from "./car-parks.ts";
 import { setCloudShadows } from "./scenery-look.ts";
 import { TyreSmoke } from "./tyre-smoke.ts";
 import { TyreStones } from "./tyre-stones.ts";
@@ -115,6 +130,7 @@ import { frustumContains, WorldCuller } from "./world-culler.ts";
 import type { TyreInfo } from "./tyres.ts";
 
 const gateLead = 30;
+const cheerFields = 3;
 const onboardReach = 3;
 const chaseFollow = 0.5;
 const cameraListSlot = 21;
@@ -170,6 +186,10 @@ const cloudCover: Record<string, number> = {
 const overcastFrom = 0.9;
 const overcastDry = 0.85;
 const brokenSun = 0.18;
+const sunnyCover = 0.45;
+const irisSeconds = 0.6;
+const irisLongest = 0.25;
+const irisCut = (25 * Math.PI) / 180;
 
 const shockFrom = 0.3;
 const shockFull = 1.2;
@@ -181,15 +201,6 @@ function coverOf(clouds: string): number {
   if (known !== undefined) return known;
   const all = Object.values(cloudCover);
   return all[Math.floor(Math.random() * all.length)] ?? 0;
-}
-
-function brokenCover(cover: number): boolean {
-  return cover > 0 && cover < overcastFrom;
-}
-
-export function brokenCloud(clouds: string): boolean {
-  const cover = cloudCover[clouds];
-  return cover === undefined || brokenCover(cover);
 }
 
 interface TrackData {
@@ -345,12 +356,11 @@ function sessionLighting(
 ): SessionLighting {
   if (night) return nightLighting(skyBox, look);
   const [sr = 1, sg = 1, sb = 1] = skyBox.meta.sunColor;
-  const [hr = 1, hg = 1, hb = 1] = skyBox.meta.horizon;
   return {
     colour: new THREE.Color(sr, sg, sb),
     intensity: skyBox.sunIntensity,
     elevation: skyBox.meta.elevation,
-    haze: new THREE.Color(hr, hg, hb),
+    haze: skyBox.airHaze,
     sunGlow: sunGlow * skyBox.sunStrength,
     glare: 1,
     glowMirror: 0,
@@ -404,7 +414,6 @@ function sharedLoads(
   renderer: THREE.WebGPURenderer,
   light: SessionLight,
   circuit: Circuit,
-  clouded: boolean,
 ): SharedLoads {
   const sky = SkyBox.load(
     light.elevation,
@@ -412,7 +421,7 @@ function sharedLoads(
     light.night,
     circuit.sky,
     circuit.night,
-    clouded,
+    circuit.day,
   ).then((loaded) => {
     loaded.refreshEnvironment(renderer, 0, 1);
     return loaded;
@@ -506,6 +515,14 @@ function clearOf(frames: Frames): Clear {
     outside(values, stride, zones, frames.list, frames.length);
 }
 
+function skylineOf(circuit: Circuit): Promise<Skyline> | null {
+  return circuit.skyline ? Skyline.load(circuit.skyline) : null;
+}
+
+function parkedOf(circuit: Circuit): Promise<CarParks> | null {
+  return circuit.parked ? CarParks.load(circuit.parked) : null;
+}
+
 function plantTrees(
   circuit: Circuit,
   loads: SharedLoads,
@@ -515,7 +532,9 @@ function plantTrees(
   if (circuit.trees)
     return Trees.load(
       circuit.ground === "glb"
-        ? clearedTrees(circuit.trees, framesOf(loads), treeStride)
+        ? clearedTrees(circuit.trees, framesOf(loads), treeStride).then(
+            (trees) => unbuilt(trees, treeStride),
+          )
         : circuit.trees,
       anisotropy,
       kinds,
@@ -555,7 +574,7 @@ async function desertCrowd(
   const track = data as unknown as TrainingTrack;
   const list = stations(track, line);
   const seats = standSeats(list, track.length, plan.stands.map(dressed));
-  return placedCrowd([], seats);
+  return placedCrowd([], seats, [], plainSprites);
 }
 
 async function venueExtras(
@@ -692,6 +711,11 @@ export class Scene {
   private readonly eye = new THREE.Vector3();
   private readonly sunShine = new THREE.Color();
   private readonly carPosition = new THREE.Vector3();
+  private readonly cheering = Array.from(
+    { length: cheerFields + 1 },
+    () => new THREE.Vector3(),
+  );
+  private readonly cheerReach = new Float64Array(cheerFields);
   private viewMirrored = false;
   private cinematic: CameraPose | null = null;
   private readonly sunlight: Sunlight;
@@ -719,6 +743,9 @@ export class Scene {
   private overcast = -1;
   private bodyWater = -1;
   private weatherTime = 0;
+  private iris = 0;
+  private irisClock = 0;
+  private irisTurn = 0;
   private cars: Float64Array | null = null;
   private pits: Float64Array | null = null;
   private crewGuest = -1;
@@ -787,6 +814,8 @@ export class Scene {
     rearView: 0,
     film: 1,
     lift: 1,
+    scatter: 0,
+    veil: 0,
   };
   rearMirror = 0;
 
@@ -836,7 +865,8 @@ export class Scene {
     crew?.attachCar(car.tyreMounts(), car.wingParts(), car.damage);
     const night = light.night >= 1;
     const lit = sessionLighting(skyBox, night, look);
-    this.clearSight = night && look ? look.visibility : clearVisibility;
+    this.clearSight =
+      night && look ? look.visibility : skyBox.sight(clearVisibility);
     this.atmosphere.layer = night && look ? look.layer : 0;
     this.cloudLight = lit.cloudLight;
     this.airLight = lit.air;
@@ -851,6 +881,8 @@ export class Scene {
     this.atmosphere.glare = lit.glare;
     this.atmosphere.film = night ? 0 : 1;
     this.atmosphere.lift = night ? nightLift : 1;
+    this.atmosphere.scatter = skyBox.scatter;
+    this.atmosphere.veil = skyBox.glare;
     this.atmosphere.glowMirror = lit.glowMirror;
     this.atmosphere.sheen = lit.sheen;
     this.atmosphere.haze.copy(lit.haze);
@@ -914,10 +946,14 @@ export class Scene {
     const venue = circuit.venue;
     expectDownloads(Scene.downloads(circuit, team, rivals));
     const anisotropy = renderer.getMaxAnisotropy();
-    const local = engine.trackLocal();
+    const sdLocal = engine.trackLocal();
+    const local = {
+      ...sdLocal,
+      timeOfDay: lightHour(sdLocal.timeOfDay / 3600) * 3600,
+    };
     const light = sessionLight(local.timeOfDay / 3600);
     const cover = coverOf(clouds);
-    const loads = sharedLoads(renderer, light, circuit, brokenCover(cover));
+    const loads = sharedLoads(renderer, light, circuit);
     const carLoad = loads.env.then((env) =>
       GltfCar.load(team, renderer, env, !venue),
     );
@@ -928,6 +964,8 @@ export class Scene {
       frame,
       { people, crews },
       trees,
+      skyline,
+      parked,
       road,
       data,
       car,
@@ -946,6 +984,8 @@ export class Scene {
         roadLoad,
       ),
       plantTrees(circuit, loads, anisotropy),
+      skylineOf(circuit),
+      parkedOf(circuit),
       roadLoad,
       loads.line,
       carLoad,
@@ -963,7 +1003,7 @@ export class Scene {
     const start = engine.trackPoint(0, 0);
     const placed = placeOnTrack(road, frame, start);
     placed.updateMatrixWorld(true);
-    const culler = new WorldCuller(road, cascadeLayers);
+    const culler = new WorldCuller(road, cascadeLayers, casterCascades);
     cityGlow.value = light.lamps;
     crowdLamps.value = light.lamps;
     const floodlights =
@@ -973,13 +1013,13 @@ export class Scene {
     const track = new THREE.Group();
     track.add(
       placed,
-      ...presentRoots(people, trees).map((root) =>
+      ...presentRoots(people, trees, skyline, parked).map((root) =>
         placeOnTrack(root, frame, start),
       ),
       placeOnTrack(racingLine.root, frame, start),
     );
     const scene = new Scene(
-      new SdSky(local),
+      new SdSky(local, circuit.day, frame.heading),
       skyBox,
       people,
       trees,
@@ -1047,6 +1087,13 @@ export class Scene {
   restartLights(lights: StartLights, signalAt: number): void {
     this.lights = lights;
     this.signalAt = signalAt;
+  }
+
+  private nearCars(): THREE.Vector3[] {
+    const [player, ...slots] = this.cheering;
+    player?.copy(this.carPosition);
+    nearestCars(this.cars, carStride, this.eye, slots, this.cheerReach);
+    return this.cheering;
   }
 
   get fieldCars(): Float64Array | null {
@@ -1286,6 +1333,32 @@ export class Scene {
     this.weather = weather;
   }
 
+  private irisScale(shaded: number): number {
+    const now = performance.now();
+    const dt = Math.min(irisLongest, (now - this.irisClock) / 1000);
+    this.irisClock = now;
+    const [, , , , , , , , backX, backY] = this.camera.matrixWorld.elements;
+    const target =
+      irisStops(
+        { x: -backX, y: -backY },
+        this.sunlight.direction,
+        this.skyBox.iris,
+      ) *
+      (1 - shaded);
+    const turn = Math.atan2(backY, backX);
+    const cut =
+      Math.abs(
+        Math.atan2(
+          Math.sin(turn - this.irisTurn),
+          Math.cos(turn - this.irisTurn),
+        ),
+      ) > irisCut;
+    this.irisTurn = turn;
+    this.iris +=
+      (target - this.iris) * (cut ? 1 : Math.min(1, dt / irisSeconds));
+    return 2 ** this.iris;
+  }
+
   private applyWeather(frame: Float64Array, onboard: boolean): void {
     const w = this.weather;
     const time = frame[frameIndex.time] ?? 0;
@@ -1310,13 +1383,15 @@ export class Scene {
     const broken = this.cover < overcastFrom ? this.cover : 0;
     this.skyBox.broken.value = broken;
     const shaded = overcast * this.cloudLight;
-    this.sunlight.dim(
-      (1 - overcastSun * shaded) * (1 - brokenSun * broken * this.cloudLight),
-    );
-    setCloudShadows(broken * this.cloudLight * (1 - overcast), time);
+    const blocking =
+      (Math.max(0, broken - sunnyCover) / (1 - sunnyCover)) * this.cloudLight;
+    this.sunlight.dim((1 - overcastSun * shaded) * (1 - brokenSun * blocking));
+    setCloudShadows(blocking * (1 - overcast), time);
     this.scene.environmentIntensity = 1 - overcastAmbient * shaded;
     this.atmosphere.exposure =
-      this.baseExposure * (1 + overcastExposure * shaded);
+      this.baseExposure *
+      (1 + overcastExposure * shaded) *
+      this.irisScale(shaded);
     this.atmosphere.haze
       .copy(this.baseHaze)
       .lerp(this.greyHaze, overcast)
@@ -1708,7 +1783,7 @@ export class Scene {
     const lit = this.lights.lit(time - this.signalAt);
     setStartLights(this.cinematic ? 0 : lit);
     this.updateSky(time, eyeX, eyeY, eyeZ);
-    this.people?.update(this.eye.set(eyeX, eyeY, eyeZ));
+    this.people?.update(this.eye.set(eyeX, eyeY, eyeZ), this.nearCars());
     this.trees?.update(
       this.eye,
       this.sunlight.direction,

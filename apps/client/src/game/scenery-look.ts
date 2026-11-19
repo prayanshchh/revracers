@@ -13,28 +13,28 @@ interface SeasonLook {
 
 const looks: Record<Season, SeasonLook> = {
   spring: {
-    turf: [0.84, 1.06, 0.9],
-    dryness: 0.2,
+    turf: [0.66, 1.0, 0.62],
+    dryness: 0.1,
     foliage: [0.9, 1.08, 0.86],
     turning: 0,
     turned: [1, 1, 1],
   },
   summer: {
-    turf: [0.96, 1.0, 0.94],
+    turf: [1.04, 0.98, 0.9],
     dryness: 0.8,
     foliage: [0.98, 1.0, 0.9],
     turning: 0.03,
     turned: [1.45, 1.1, 0.5],
   },
   autumn: {
-    turf: [0.95, 1.0, 0.95],
-    dryness: 0.62,
+    turf: [0.88, 1, 0.82],
+    dryness: 0.5,
     foliage: [1.3, 1, 0.71],
     turning: 0.05,
     turned: [1.7, 1.12, 0.45],
   },
   winter: {
-    turf: [1.12, 1.0, 0.78],
+    turf: [1.0, 0.95, 0.9],
     dryness: 1,
     foliage: [0.9, 0.86, 0.74],
     turning: 0.4,

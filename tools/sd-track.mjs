@@ -386,6 +386,15 @@ function straightModeSection() {
 <section name="Straight Mode Zones">${zones.join("")}</section>`;
 }
 
+function sectorsSection() {
+  const lines = track.sectors.map(
+    (distance, i) =>
+      `<section name="${String(i + 1)}">${num("distance from start", distance, "m")}</section>`,
+  );
+  return `
+<section name="Sectors">${lines.join("")}</section>`;
+}
+
 function gravelSections() {
   if (!gravelSpans.length) return "";
   return `
@@ -508,7 +517,7 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 &default-surfaces;
 ${["l", "r"].map(kerbSurface).join("\n")}
 ${grassSurface()}${gravelSurface()}
-</section>${gravelSections()}${straightModeSection()}
+</section>${gravelSections()}${straightModeSection()}${sectorsSection()}
 <section name="Header">
 ${str("name", track.name)}
 ${str("category", "circuit")}

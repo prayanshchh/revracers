@@ -3,7 +3,9 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import binary_opening, distance_transform_edt, gaussian_filter, map_coordinates
+from PIL import Image
+from pyproj import Transformer
+from scipy.ndimage import distance_transform_edt, gaussian_filter, map_coordinates, maximum_filter
 from scipy.spatial import cKDTree
 from shapely import contains_xy
 from shapely.geometry import LineString, Polygon
@@ -11,11 +13,14 @@ from shapely.ops import unary_union
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "track"))
 
+from geo import DEM_ORIGIN, Osm
 from noise import value_noise
 
 STRIDE = 8
-SPECIES = ("oak", "elm", "ash", "shrub")
+SPECIES = ("oak", "elm", "ash", "shrub", "palm", "liveoak", "juniper", "mesquite", "cedarelm")
 SEED = 20261110
+UNMEASURED = 251
+TABLE = Path(__file__).resolve().parents[2] / "content" / "scenery" / "trees" / "trees.json"
 
 
 class Track:
@@ -116,32 +121,60 @@ def crowd_points(root):
     return cKDTree(people.astype(np.float64))
 
 
-def canopy(root, track, rules, rng):
-    import aerial
+def raster_points(root, rows, columns, cell):
+    utm = Transformer.from_crs(32614, 4326, always_xy=True)
+    x = DEM_ORIGIN[0] + (np.asarray(columns) + 0.5) * cell
+    y = DEM_ORIGIN[1] - (np.asarray(rows) + 0.5) * cell
+    lon, lat = utm.transform(x, y)
+    return Osm(root / "source" / "osm.json").local(np.stack([lat, lon], 1))
 
-    air = aerial.Aerial(root / "source")
-    scale = rules["pixel"]
-    red, infrared = air.image[..., 0], air.infrared
-    cut = lambda a: a[: a.shape[0] // scale * scale, : a.shape[1] // scale * scale].reshape(a.shape[0] // scale, scale, a.shape[1] // scale, scale).mean((1, 3))
-    green = cut((infrared - red) / np.maximum(infrared + red, 1e-3))
-    light = cut(air.image.mean(-1))
-    mask = (gaussian_filter(green, 1.0) > rules["ndvi"]) & (gaussian_filter(light, 1.5) < rules["luminance"])
-    mask = binary_opening(mask, np.ones((3, 3)))
-    metres = scale * aerial.METRES_PER_PIXEL
-    depth = distance_transform_edt(mask) * metres
-    rows, columns = np.nonzero(mask)
-    world = air.local(rows * scale + (scale - 1) / 2, columns * scale + (scale - 1) / 2)
-    _, _, _, gap = track.locate(world)
+
+def spaced(points, height, track, rules):
+    _, _, _, gap = track.locate(points)
     spacing = np.interp(gap, rules["spacingAt"], rules["spacing"])
-    cell = np.floor(world / spacing[:, None]).astype(np.int64)
+    cell = np.floor(points / spacing[:, None]).astype(np.int64)
     key = cell[:, 0] * 1000003 + cell[:, 1] + (spacing * 10).astype(np.int64) * 7919
-    order = rng.permutation(len(key))
+    order = np.argsort(-height, kind="stable")
     _, first = np.unique(key[order], return_index=True)
-    chosen = order[first]
-    crown = depth[rows[chosen], columns[chosen]]
-    height = np.clip(rules["heightBase"] + crown * rules["heightPerDepth"], rules["heightMin"], rules["heightMax"])
-    height *= np.interp(gap[chosen], rules["spacingAt"], rules["heightScale"])
-    return world[chosen] + rng.uniform(-0.4, 0.4, (len(chosen), 2)) * spacing[chosen][:, None], height
+    return order[first]
+
+
+def canopy(root, track, rules, rng):
+    raster = np.asarray(Image.open(root / "source" / rules["raster"]), np.uint8)
+    cell = rules["cell"]
+    tall = np.where(raster < UNMEASURED, raster / 10.0, 0.0)
+    measured = tall > 0
+    smooth = gaussian_filter(tall, rules["smooth"])
+    peaks = measured & (smooth >= maximum_filter(smooth, size=rules["crown"])) & (tall >= rules["heightMin"])
+    rows, columns = np.nonzero(peaks)
+    top = maximum_filter(tall, size=rules["crown"])[rows, columns]
+    depth = distance_transform_edt(measured)[rows, columns] * cell
+    slope, base = np.polyfit(np.minimum(depth, rules["depthCap"]), top, 1)
+    low, high = rules["growth"]
+    measured_height = top * low + high
+    guessed = raster == UNMEASURED
+    guess_rows, guess_columns = np.nonzero(guessed)
+    guess_depth = distance_transform_edt(guessed)[guess_rows, guess_columns] * cell
+    guess_height = (base + slope * np.minimum(guess_depth, rules["depthCap"])) * rng.uniform(0.75, 1.25, len(guess_rows)) * low + high
+    points = raster_points(root, np.concatenate([rows, guess_rows]), np.concatenate([columns, guess_columns]), cell)
+    height = np.clip(np.concatenate([measured_height, guess_height]), rules["heightMin"], rules["heightMax"])
+    chosen = spaced(points, height, track, rules)
+    jitter = rng.uniform(-0.5, 0.5, (len(chosen), 2)) * cell
+    return points[chosen] + jitter, height[chosen], points
+
+
+def widths(points, height, species, cells, track, rules):
+    table = json.loads(TABLE.read_text())["species"]
+    spread = np.array([table[name]["spread"] if name in table else 0.5 for name in SPECIES])[species]
+    crown = np.pi * (spread * height) ** 2
+    _, _, _, gap = track.locate(points)
+    reach = np.interp(gap, rules["spacingAt"], rules["spacing"])
+    distance, owner = cKDTree(points).query(cells, distance_upper_bound=reach.max())
+    found = np.isfinite(distance)
+    owner, distance = owner[found], distance[found]
+    mine = distance <= reach[owner]
+    area = np.bincount(owner[mine], minlength=len(points)) * rules["cell"] ** 2
+    return np.clip(np.sqrt(area / crown), 1.0, rules["widest"])
 
 
 def groves(track, specs, rng):
@@ -167,6 +200,57 @@ def groves(track, specs, rng):
     return np.concatenate(points), np.concatenate(heights), np.concatenate(kinds)
 
 
+def cleared(root, track, points, zones):
+    index, lateral, beyond, _ = track.locate(points)
+    distance = index * track.step
+    out = np.zeros(len(points), bool)
+    osm = Osm(root / "source" / "osm.json")
+    for zone in zones:
+        if "osm" in zone:
+            way = osm.ways[zone["osm"]]
+            ring = osm.local([osm.nodes[node] for node in way["nodes"]])
+            area = Polygon(ring).buffer(zone["buffer"])
+            out |= contains_xy(area, points[:, 0], points[:, 1])
+            continue
+        span = (zone["to"] - zone["from"]) % track.length
+        along = (distance - zone["from"]) % track.length <= span
+        side = {"left": lateral > 0, "right": lateral < 0, "both": np.ones(len(points), bool)}[zone["side"]]
+        out |= along & side & (beyond < zone["far"])
+    return out
+
+
+def occupied(root, track, points, rules):
+    index, lateral, beyond, _ = track.locate(points)
+    distance = index * track.step
+    sign = np.sign(lateral)
+    margin = rules["occupied"]
+    out = np.zeros(len(points), bool)
+    shapes = []
+    landmarks = root / "landmarks.json"
+    if landmarks.exists():
+        for item in json.loads(landmarks.read_text()):
+            if item["solid"] and len(item["outline"]) > 2:
+                shapes.append(Polygon(np.asarray(item["outline"], float) * np.array([1.0, -1.0])).buffer(margin))
+    structures = json.loads((root / "structures.json").read_text())
+    for stand in structures.get("stands", []):
+        front = np.asarray(stand["front"], float)
+        back = np.asarray(stand["back"], float) * stand["depth"]
+        shapes.append(Polygon(np.array([front[0], front[1], front[1] + back, front[0] + back]) * np.array([1.0, -1.0])).buffer(margin))
+    area = unary_union([shape for shape in shapes if shape.is_valid])
+    out |= contains_xy(area, points[:, 0], points[:, 1])
+    dressing = json.loads((root / "dressing.json").read_text())
+    along = lambda spec: (distance - spec["from"] + margin) % track.length <= (spec["to"] - spec["from"]) % track.length + 2 * margin
+    for stand in dressing.get("stands", []):
+        reach = stand.get("gap", 0) + stand["rows"] * rules["standRow"]
+        out |= along(stand) & (sign == stand["side"]) & (beyond > stand.get("gap", 0) - margin) & (beyond < reach + margin)
+    for bank in dressing.get("banks", []):
+        out |= along(bank) & (sign == bank["side"]) & (beyond > bank["near"] - margin) & (beyond < bank["far"] + margin)
+    for zone in dressing.get("clear", []):
+        if zone.get("trees"):
+            out |= along(zone) & (sign == zone["side"]) & (np.abs(lateral) >= zone["near"]) & (np.abs(lateral) <= zone["far"])
+    return out
+
+
 def thin(points, radius):
     tree = cKDTree(points)
     keep = np.ones(len(points), bool)
@@ -176,13 +260,17 @@ def thin(points, radius):
     return keep
 
 
-def species_of(height, kind, rng, shares):
-    roll = rng.random(len(height))
-    tall = np.clip((height - shares["tallFrom"]) / (shares["tallTo"] - shares["tallFrom"]), 0, 1)
-    elm = roll < shares["elm"] * tall
-    ash = ~elm & (roll > 1 - shares["ash"])
-    result = np.where(elm, SPECIES.index("elm"), np.where(ash, SPECIES.index("ash"), SPECIES.index("oak")))
-    result = np.where(height < shares["shrubBelow"], SPECIES.index("shrub"), result)
+def species_of(points, height, kind, rng, rules):
+    noise = value_noise(points, 1 / rules["clump"], rules["seed"])
+    blend = noise * rules["grouping"] + rng.random(len(points)) * (1 - rules["grouping"])
+    roll = np.argsort(np.argsort(blend)) / max(len(points) - 1, 1)
+    result = np.zeros(len(points), int)
+    for band in reversed(rules["bands"]):
+        names = list(band["shares"])
+        edges = np.cumsum([band["shares"][name] for name in names])
+        pick = np.minimum(np.searchsorted(edges / edges[-1], roll), len(names) - 1)
+        chosen = np.array([SPECIES.index(name) for name in names])[pick]
+        result = np.where(height < band["below"], chosen, result)
     return np.where(kind >= 0, kind, result)
 
 
@@ -194,7 +282,7 @@ def main():
     track = Track(root)
     heights = Heights(build, track)
     rules = config["clearance"]
-    wild, wild_height = canopy(root, track, config["canopy"], rng) if "canopy" in config else (np.zeros((0, 2)), np.zeros(0))
+    wild, wild_height, cells = canopy(root, track, config["canopy"], rng) if "canopy" in config else (np.zeros((0, 2)), np.zeros(0), np.zeros((0, 2)))
     planted, planted_height, planted_kind = groves(track, config.get("groves", []), rng)
     points = np.concatenate([planted, wild])
     height = np.concatenate([planted_height, wild_height])
@@ -209,20 +297,23 @@ def main():
     people = crowd_points(root)
     if people is not None:
         keep &= people.query(points)[0] > rules["crowd"]
+    keep &= ~cleared(root, track, points, config.get("clear", []))
+    keep &= ~occupied(root, track, points, rules)
     points, height, kind, art = points[keep], height[keep], kind[keep], art[keep]
     keep = thin(points, rules["spacing"])
     points, height, kind, art = points[keep], height[keep], kind[keep], art[keep]
-    species = species_of(height, kind, rng, config["species"])
+    species = species_of(points, height, kind, rng, config["species"])
     up = heights(points) - config.get("sink", 0.15)
     _, _, _, gap = track.locate(points)
     casts = (gap < config["shadowReach"]).astype(np.float32)
-    out = np.stack([points[:, 0], points[:, 1], up, height, species, rng.random(len(points)), casts, np.zeros(len(points))], 1).astype(np.float32)
+    width = widths(points, height, species, cells, track, config["canopy"]) if "canopy" in config else np.ones(len(points))
+    out = np.stack([points[:, 0], points[:, 1], up, height, species, rng.random(len(points)), casts, width], 1).astype(np.float32)
     assert out.shape[1] == STRIDE
     (root / "trees.bin").write_bytes(out.tobytes())
-    counts = {name: int((species == i).sum()) for i, name in enumerate(SPECIES)}
+    counts = {name: int((species == i).sum()) for i, name in enumerate(SPECIES) if (species == i).any()}
     print(
-        f"trees {len(out)} ({int(art.sum())} planted, {int((~art).sum())} from the aerial photo, {int(casts.sum())} casting shadows) "
-        f"{counts} height {height.min():.1f}..{height.max():.1f} m"
+        f"trees {len(out)} ({int(art.sum())} planted, {int((~art).sum())} from lidar and aerial photos, {int(casts.sum())} casting shadows) "
+        f"{counts} height {height.min():.1f}..{height.max():.1f} m, crowns widened {np.mean(width > 1.05) * 100:.0f}% (median {np.median(width):.2f})"
     )
 
 

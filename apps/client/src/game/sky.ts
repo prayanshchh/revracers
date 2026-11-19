@@ -1,3 +1,5 @@
+import type { SunPath } from "./circuits.ts";
+
 const deg = Math.PI / 180;
 const skyDomeDistance = 20000;
 const minMainLightBrightness = 0.25;
@@ -61,6 +63,26 @@ export interface SkyState {
   fogDensity: number;
 }
 
+function afternoonOf(declination: number): boolean {
+  const turned = ((declination % 360) + 360) % 360;
+  return turned > 90 && turned < 270;
+}
+
+function pathBearing(
+  elevation: number,
+  afternoon: boolean,
+  path: SunPath,
+): number {
+  const height = Math.min(elevation, path.highest * deg);
+  const latitude = path.latitude * deg;
+  const declination = path.declination * deg;
+  const across =
+    (Math.sin(declination) - Math.sin(height) * Math.sin(latitude)) /
+    (Math.cos(height) * Math.cos(latitude));
+  const fromNorth = Math.acos(Math.min(1, Math.max(-1, across)));
+  return afternoon ? 2 * Math.PI - fromNorth : fromNorth;
+}
+
 export class SdSky {
   private sunDeclination: number;
   private readonly sunRightAscension: number;
@@ -76,7 +98,14 @@ export class SdSky {
   private readonly fogState: { color: Vec3; density: number };
   private state!: SkyState;
 
-  constructor(private readonly local: TrackLocal) {
+  private readonly path: SunPath | null;
+
+  constructor(
+    private readonly local: TrackLocal,
+    day: { readonly path: SunPath } | null = null,
+    private readonly heading = 0,
+  ) {
+    this.path = day?.path ?? null;
     const sdVisibility =
       local.rain === 2 ? 200 : local.rain === 3 ? 120 : local.visibility;
     this.effectiveVisibility = sdVisibility <= 25 ? 25 : sdVisibility;
@@ -139,6 +168,20 @@ export class SdSky {
       Math.fround(p[2]),
     ];
     const pos = subtract(this.sunPosition, [x, y, 0]);
+    if (this.path) {
+      const across = Math.hypot(pos[0], pos[1]);
+      const bearing = pathBearing(
+        Math.asin(Math.sin(this.sunDeclination)),
+        afternoonOf(this.sdSunDeclination),
+        this.path,
+      );
+      const turned = bearing + this.heading;
+      this.sunPosition = [
+        x + across * Math.sin(turned),
+        y + across * Math.cos(turned),
+        this.sunPosition[2],
+      ];
+    }
     this.sunAngle =
       90 * deg -
       Math.atan2(pos[2], Math.sqrt(pos[0] * pos[0] + pos[1] * pos[1]));

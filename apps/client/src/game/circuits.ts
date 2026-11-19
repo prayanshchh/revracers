@@ -3,6 +3,8 @@ import hillMap from "../../../../content/tracks/hill-country/circuit-map.json?ur
 import hillLine from "../../../../content/tracks/hill-country/racing-line.json?url";
 import hillTrack from "../../../../content/tracks/hill-country/track.json?url";
 import hillTrees from "../../../../content/tracks/hill-country/trees.bin?url";
+import hillSkyline from "../../../../content/tracks/hill-country/skyline.json?url";
+import hillCars from "../../../../content/tracks/hill-country/cars.bin?url";
 import hillXml from "../../../../content/tracks/hill-country/hill-country.xml?url";
 import hillAi from "../../wasm/hill-country-ai.txt?url";
 import boulevardFrame from "../../../../content/tracks/neon-boulevard/sd-frame.json?url";
@@ -54,6 +56,33 @@ export interface NightLook {
   glare?: number;
 }
 
+export interface SkyLook {
+  tint: Rgb;
+  haze: Rgb;
+  veil: Rgb;
+  aloft: Rgb;
+  air: Rgb;
+  visibility: number;
+  scatter: number;
+  glare: number;
+  iris: readonly [number, number];
+  milk: readonly [number, number, number];
+  photo: Rgb;
+  sun: number;
+  exposure: number;
+}
+
+export interface SunPath {
+  latitude: number;
+  declination: number;
+  highest: number;
+}
+
+export interface DayLook extends SkyLook {
+  path: SunPath;
+  skies: Partial<Record<string, Partial<SkyLook>>>;
+}
+
 export interface Circuit {
   id: string;
   ground: CircuitGround;
@@ -67,8 +96,11 @@ export interface Circuit {
   lessons: Lessons;
   sky: CompactSky | null;
   night: NightLook | null;
+  day: DayLook | null;
   venue: boolean;
   trees: string | null;
+  skyline?: string;
+  parked?: string;
   flora?: Species[];
   mapHeading?: number;
   season: Season;
@@ -93,8 +125,43 @@ const circuits: Circuit[] = [
     lessons: { brake: 1, boost: 11, camera: 12 },
     sky: null,
     night: null,
+    day: {
+      tint: [0.4, 0.74, 2.35],
+      haze: [0.85, 1.2, 0.5],
+      veil: [0.48, 0.88, 2.35],
+      aloft: [0.3, 0.62, 2.4],
+      air: [0.75, 0.85, 1.25],
+      visibility: 16000,
+      scatter: 3,
+      glare: 0.28,
+      iris: [1.3, 1.3],
+      milk: [1.6, 0.35, 3],
+      photo: [1, 1, 1],
+      sun: 1,
+      exposure: 1,
+      path: { latitude: 30.1328, declination: -12.1, highest: 46.2 },
+      skies: {
+        noon: { photo: [0.4, 0.58, 1.2] },
+        morning: { photo: [0.44, 0.62, 1.22] },
+        late: {
+          sun: 1.8,
+          exposure: 1.25,
+          iris: [1.9, -0.15],
+          visibility: 6000,
+          scatter: 7,
+          haze: [0.7, 0.9, 0.5],
+          milk: [1.6, 2.2, 3],
+          glare: 0.08,
+          veil: [0.44, 0.8, 1.04],
+          tint: [0.3, 0.64, 1.7],
+        },
+      },
+    },
     venue: true,
     trees: hillTrees,
+    skyline: hillSkyline,
+    parked: hillCars,
+    flora: ["liveoak", "juniper", "mesquite", "cedarelm"],
     season: "autumn",
   },
   {
@@ -126,6 +193,7 @@ const circuits: Circuit[] = [
       dome: 0.12,
       layer: 26,
     },
+    day: null,
     venue: true,
     trees: null,
     season: "autumn",
@@ -157,6 +225,7 @@ const circuits: Circuit[] = [
       layer: 22,
       glare: 0.9,
     },
+    day: null,
     venue: true,
     trees: duneTrees,
     flora: ["palm", "shrub"],
@@ -181,6 +250,7 @@ const circuits: Circuit[] = [
       meta: trainingSky,
     },
     night: null,
+    day: null,
     venue: false,
     trees: null,
     season: "summer",

@@ -39,15 +39,15 @@ describe("the phone code on the game screen", () => {
   });
 });
 
-const publicDns = new Resolver();
-publicDns.setServers(["1.1.1.1", "8.8.8.8"]);
+const phoneDns = new Resolver();
+phoneDns.setServers(["8.8.8.8", "8.8.4.4"]);
 
 async function overInternet(
   url: string,
   method: "GET" | "POST",
 ): Promise<number> {
   const target = new URL(url);
-  const [address] = await publicDns.resolve4(target.hostname);
+  const [address] = await phoneDns.resolve4(target.hostname);
   if (!address) throw new Error(`${target.hostname} has no address`);
   const body = method === "POST" ? JSON.stringify({ sdp: "v=0" }) : "";
   return new Promise((resolve, reject) => {

@@ -13,15 +13,17 @@ import {
   floor,
   Fn,
   fract,
+  fwidth,
   If,
   max,
   min,
   mix,
   modelViewProjection,
   mx_fractal_noise_float,
-  mx_noise_float,
+  mx_worley_noise_float,
   normalize,
   positionLocal,
+  pow,
   sin,
   smoothstep,
   texture,
@@ -34,7 +36,7 @@ import {
 import { expectDownloads } from "./asset-store.ts";
 import { releaseOnceUploaded } from "./preload.ts";
 import { alphaTestedOrder } from "./road.ts";
-import type { NightLook } from "./circuits.ts";
+import type { DayLook, NightLook, SkyLook } from "./circuits.ts";
 import { sessionLight } from "./daylight.ts";
 import { prime, primed } from "./prime.ts";
 import { picturePixels, type SkyTexels } from "./sky-pack.ts";
@@ -63,6 +65,7 @@ export const skyNames = [
   "noon",
   "afternoon",
   "dusk",
+  "late",
   "night",
 ] as const;
 const skyGrades: Partial<Record<string, [number, number, number]>> = {
@@ -70,7 +73,11 @@ const skyGrades: Partial<Record<string, [number, number, number]>> = {
   dusk: [0.72, 1, 1],
 };
 const nightElevation = (-8 * Math.PI) / 180;
-const skyExposures: Partial<Record<string, number>> = { dawn: 0.7, night: 0.3 };
+const skyExposures: Partial<Record<string, number>> = {
+  dawn: 0.7,
+  night: 0.3,
+  late: 1.15,
+};
 const overcastLevel = 1.2;
 const overcastZenith = 0.68;
 const overcastGround = 0.8;
@@ -83,27 +90,47 @@ const cloudMassScale = 0.35;
 const cloudMassContrast = 0.42;
 const cloudHorizon = 0.18;
 const cloudDrift = 0.004;
-const cumulusScale = 1.6;
-const cumulusEdge = 0.1;
-const cumulusCurve = 0.3;
-const cumulusBase = 0.5;
-const cumulusTop = 1.15;
-const cumulusSilver = 0.45;
+const cumulusSilver = 1.2;
 const photoCloudy = 0.4;
-const scarceCover = 0.45;
+const sunFrom = 4;
+const milkMost = 0.92;
+const milkTint = [1.0, 0.97, 0.9] as const;
+const sunTo = 20;
 const manyCover = 0.65;
-const cloudSoft = 0.3;
-const scarceThreshold = 0.05;
-const fewRegionScale = 1.7;
-const fewRegionShare = 0.15;
-const maskFrom = 0.08;
-const maskTo = 0.55;
-const photoHorizonFrom = 0.01;
-const photoHorizonTo = 0.06;
+const fairBase = 1.6;
+const fairScale = 0.9;
+const fairDrift = 0.004;
+const fairClear = 0.15;
+const fairCrowded = -0.25;
+const fairEdge = 0.2;
+const fairCore = 0.45;
+const fairCells = 1.6;
+const fairJitter = 0.85;
+const fairDetail = 2.6;
+const fairErosion = 0.4;
+const fairClusters = 0.08;
+const fairClustering = 0.7;
+const fairLit = 1.65;
+const fairShade = 0.6;
+const fairShadeShare = 0.92;
+const fairSmall = 2.7;
+const fairSmallShare = 0.85;
+const fairUnder = 0.25;
+const fairBaseEdge = 0.12;
+const fairBaseShade = 0.75;
+const fairBacklitFrom = 0.6;
+const fairBacklit = 0.85;
+const fairRim = 0.3;
+const fairSight = 60;
+const fairAspect = 0.45;
+const fairBlurFrom = 0.08;
+const fairBlurTo = 0.4;
+const fairLow = 0.15;
+const fairHigh = 0.5;
 const clearTint = new THREE.Vector3(0.41, 1.08, 1.28);
 const clearHaze = new THREE.Vector3(0.95, 1.42, 0.7);
-const hazeTint = vec3(0.82, 1.2, 1.72);
-const hazeAloft = vec3(0.29, 0.85, 1.75);
+const hazeTint = new THREE.Vector3(0.82, 1.2, 1.72);
+const hazeAloft = new THREE.Vector3(0.29, 0.85, 1.75);
 const hazeRise = 0.35;
 const nightZenith = new THREE.Vector3(0.0012, 0.0036, 0.0115);
 const nightHorizon = new THREE.Vector3(0.011, 0.017, 0.028);
@@ -236,9 +263,8 @@ function unseenDome(): THREE.DataTexture {
   return map;
 }
 
-function domeSeen(name: string, night: number, clouded: boolean): boolean {
-  if (night >= 1) return true;
-  return clouded || (metaOf(name).clouds ?? 0) <= photoCloudy;
+function domeSeen(name: string, night: number): boolean {
+  return night >= 1 || (metaOf(name).clouds ?? 0) <= photoCloudy;
 }
 
 function domeOf(url: string, loader: HDRLoader): Promise<THREE.DataTexture> {
@@ -256,13 +282,13 @@ function skyPicture(
   return primed(skyKey(url), () => domeOf(url, loader));
 }
 
-export function skyPrimes(hours: number, clouded: boolean): string[] {
-  return skyFor(hours, clouded).map(skyKey);
+export function skyPrimes(hours: number): string[] {
+  return skyFor(hours).map(skyKey);
 }
 
-export function primeSky(hours: number, clouded: boolean): void {
+export function primeSky(hours: number): void {
   const loader = new HDRLoader();
-  for (const url of skyFor(hours, clouded))
+  for (const url of skyFor(hours))
     prime(
       skyKey(url),
       () => domeOf(url, loader),
@@ -277,7 +303,6 @@ async function skyTextures(
   elevation: number,
   afternoon: boolean,
   night: number,
-  clouded: boolean,
 ): Promise<{
   name: string;
   meta: SkyMeta;
@@ -296,16 +321,14 @@ async function skyTextures(
   }
   const { name, meta } = chooseSky(elevation, afternoon);
   const loader = new HDRLoader();
-  const dome = night >= 1 ? `${name}-env.hdr` : `${name}.hdr`;
-  const [domeUrl, clearUrl, envUrl] = [
-    fileUrl(dome),
-    fileUrl(`${name}-clear.hdr`),
-    fileUrl(`${name}-env.hdr`),
-  ];
-  const seen = domeSeen(name, night, clouded);
-  expectDownloads(seen ? [domeUrl, clearUrl, envUrl] : [clearUrl, envUrl]);
+  const clearUrl = fileUrl(`${name}-clear.hdr`);
+  const envUrl = fileUrl(`${name}-env.hdr`);
+  const domeUrl = domeSeen(name, night)
+    ? fileUrl(night >= 1 ? `${name}-env.hdr` : `${name}.hdr`)
+    : null;
+  expectDownloads(domeUrl ? [domeUrl, clearUrl, envUrl] : [clearUrl, envUrl]);
   const [sky, clearSky, environment] = await Promise.all([
-    seen ? skyPicture(domeUrl, loader) : unseenDome(),
+    domeUrl ? skyPicture(domeUrl, loader) : unseenDome(),
     skyPicture(clearUrl, loader),
     skyPicture(envUrl, loader),
   ]);
@@ -334,17 +357,17 @@ function fileUrl(name: string): string {
 
 export function skyDownloads(names: string[]): string[] {
   return names.flatMap((name) => [
-    fileUrl(`${name}.hdr`),
+    ...(domeSeen(name, 0) ? [fileUrl(`${name}.hdr`)] : []),
     fileUrl(`${name}-clear.hdr`),
     fileUrl(`${name}-env.hdr`),
   ]);
 }
 
-export function skyFor(hours: number, clouded: boolean): string[] {
+export function skyFor(hours: number): string[] {
   const light = sessionLight(hours);
   const { name } = chooseSky(light.elevation, light.afternoon);
   const lights = [fileUrl(`${name}-clear.hdr`), fileUrl(`${name}-env.hdr`)];
-  return light.night < 1 && domeSeen(name, light.night, clouded)
+  return light.night < 1 && domeSeen(name, light.night)
     ? [fileUrl(`${name}.hdr`), ...lights]
     : lights;
 }
@@ -366,7 +389,7 @@ function chooseSky(
     if (elevation < nightElevation) return name === "night";
     if (name === "night") return false;
     if (name === "dawn" || name === "morning") return !afternoon;
-    if (name === "afternoon" || name === "dusk") return afternoon;
+    if (["afternoon", "dusk", "late"].includes(name)) return afternoon;
     return true;
   };
   const usable = metas.filter((sky) => fits(sky.name));
@@ -390,6 +413,12 @@ export class SkyBox {
   private readonly kappa = uniform(0);
   readonly tint = uniform(clearTint.clone());
   readonly haze = uniform(clearHaze.clone());
+  readonly veilLow = uniform(hazeTint.clone());
+  readonly veilHigh = uniform(hazeAloft.clone());
+  readonly photoTint = uniform(new THREE.Vector3(1, 1, 1));
+  readonly milk = uniform(0);
+  readonly milkLift = uniform(0);
+  readonly milkPower = uniform(1);
   private readonly rotation = new THREE.Matrix4();
   private readonly nightZenith: THREE.Vector3;
   private readonly nightHorizon: THREE.Vector3;
@@ -413,7 +442,16 @@ export class SkyBox {
     private readonly nightShare: number,
     private readonly grade: THREE.Vector3,
     look: NightLook | null = null,
+    readonly day: SkyLook | null = null,
   ) {
+    if (day) {
+      this.tint.value.set(...day.tint);
+      this.haze.value.set(...day.haze);
+      this.veilLow.value.set(...day.veil);
+      this.veilHigh.value.set(...day.aloft);
+      this.photoTint.value.set(...day.photo);
+      [this.milk.value, this.milkLift.value, this.milkPower.value] = day.milk;
+    }
     this.night = uniform(nightShare);
     this.nightZenith = look ? new THREE.Vector3(...look.zenith) : nightZenith;
     this.nightHorizon = look
@@ -587,7 +625,7 @@ export class SkyBox {
     const photoCloud = (this.meta.clouds ?? 0) > photoCloudy;
     const radiance = photoCloud
       ? this.photoSky(u, v, direction, detailed)
-      : min(texture(this.sky, vec2(u, v)).rgb, vec3(sunPeak));
+      : this.tintedPhoto(min(texture(this.sky, vec2(u, v)).rgb, vec3(sunPeak)));
     const graded = radiance.mul(grade);
     const grey = graded.dot(vec3(0.2126, 0.7152, 0.0722));
     const clear = mix(vec3(grey), graded, skySaturation).mul(skyGain);
@@ -613,19 +651,27 @@ export class SkyBox {
       gradient.mul(clouds).mul(this.horizonLevel).mul(this.overcastLight),
     );
     if (!detailed) return mix(clear, cloudy, this.overcast);
-    const up = direction.z.toVar();
     const towardSun = direction.dot(this.sunAt).mul(0.5).add(0.5).toVar();
     return Fn(() => {
       const result = clear.toVar();
       if (!photoCloud)
         If(this.broken.greaterThan(0), () => {
-          result.assign(this.cumulus(result, plane, up, towardSun));
+          result.assign(this.fairWeather(result, direction, towardSun));
         });
       If(this.overcast.greaterThan(0), () => {
         result.assign(mix(result, cloudy, this.overcast));
       });
       return result;
     })();
+  }
+
+  private tintedPhoto(photo: THREE.Node<"vec3">): THREE.Node<"vec3"> {
+    const level = photo.dot(vec3(0.2126, 0.7152, 0.0722));
+    return mix(
+      photo.mul(this.photoTint),
+      photo,
+      smoothstep(sunFrom, sunTo, level),
+    );
   }
 
   private photoSky(
@@ -640,90 +686,108 @@ export class SkyBox {
     const tinted = clear.mul(this.tint);
     const hazed = exp(up.max(0).div(this.haze.z).negate()).mul(this.haze.x);
     const [hr = 1, hg = 1, hb = 1] = this.meta.horizon;
-    const veil = mix(hazeTint, hazeAloft, up.div(hazeRise).clamp(0, 1)).mul(
-      this.haze.y.mul(0.2126 * hr + 0.7152 * hg + 0.0722 * hb),
-    );
-    const blue = mix(tinted, veil, hazed).toVar();
+    const veil = mix(
+      this.veilLow,
+      this.veilHigh,
+      up.div(hazeRise).clamp(0, 1),
+    ).mul(this.haze.y.mul(0.2126 * hr + 0.7152 * hg + 0.0722 * hb));
+    const hazy = mix(tinted, veil, hazed);
+    const path = float(1).sub(this.sunAt.z.mul(this.sunAt.z));
+    const lobe = pow(max(direction.dot(this.sunAt), 0), this.milkPower)
+      .mul(this.milk)
+      .mul(path.mul(path))
+      .min(milkMost);
+    const milky = vec3(hazy.dot(vec3(0.2126, 0.7152, 0.0722)))
+      .mul(vec3(milkTint[0], milkTint[1], milkTint[2]))
+      .mul(lobe.mul(this.milkLift).add(1));
+    const blue = mix(hazy, milky, lobe).toVar();
     if (!detailed) return blue;
-    const sunU = this.meta.azimuth / (2 * Math.PI) + 0.5;
-    const near = smoothstep(photoHorizonFrom, photoHorizonTo, up);
+    const towardSun = direction.dot(this.sunAt).mul(0.5).add(0.5);
     return Fn(() => {
       const result = blue.toVar();
-      const keep = (photo: THREE.Node<"vec3">, show: THREE.Node<"float">) =>
-        photo.mul(mix(this.tint, vec3(1), show));
       If(this.broken.greaterThan(0), () => {
-        const photo = min(texture(this.sky, at).rgb, vec3(sunPeak));
-        const cover = this.broken.div(scarceCover).clamp(0, 1);
-        const region = smoothstep(
-          fewRegionShare,
-          fewRegionShare + cloudSoft,
-          mx_noise_float(direction.mul(fewRegionScale)),
-        );
-        const show = smoothstep(
-          scarceThreshold,
-          scarceThreshold + cloudSoft,
-          this.cloudOf(photo, clear),
-        )
-          .mul(mix(region, float(1), smoothstep(0.8, 1, cover)))
-          .mul(near);
-        result.assign(mix(blue, keep(photo, show), show));
-        If(this.broken.greaterThan(scarceCover), () => {
-          const mirrored = vec2(fract(float(sunU * 2).sub(u)), v);
-          const second = min(texture(this.sky, mirrored).rgb, vec3(sunPeak));
-          const extra = smoothstep(scarceCover, manyCover, this.broken)
-            .mul(
-              smoothstep(
-                scarceThreshold,
-                scarceThreshold + cloudSoft,
-                this.cloudOf(second, texture(this.clearSky, mirrored).rgb),
-              ),
-            )
-            .mul(near);
-          result.assign(mix(result, keep(second, extra), extra));
-        });
+        result.assign(this.fairWeather(result, direction, towardSun));
       });
       return result;
     })();
   }
 
-  private cloudOf(
-    photo: THREE.Node<"vec3">,
+  private fairWeather(
     clear: THREE.Node<"vec3">,
-  ): THREE.Node<"float"> {
-    const chroma = (c: THREE.Node<"vec3">) => c.z.sub(c.x).div(c.z.max(1e-4));
-    return smoothstep(
-      maskFrom,
-      maskTo,
-      float(1).sub(chroma(photo).div(chroma(clear).max(1e-3))),
-    );
-  }
-
-  private cumulus(
-    clear: THREE.Node<"vec3">,
-    plane: THREE.Node<"vec2">,
-    up: THREE.Node<"float">,
+    direction: THREE.Node<"vec3">,
     towardSun: THREE.Node<"float">,
   ): THREE.Node<"vec3"> {
-    const dome = plane.mul(up.max(0.06).div(up.add(cumulusCurve)));
-    const shape = mx_fractal_noise_float(
-      vec3(dome.mul(cumulusScale), this.cloudTime.mul(0.0015)),
+    const rise = direction.z.max(0);
+    const lifted = rise.div(fairAspect);
+    const reach = float((2 * fairBase) / fairAspect).div(
+      lifted.add(lifted.mul(lifted).add(1).sqrt()),
+    );
+    const sight = float(fairBase).div(rise.max(0.015));
+    const spot = direction.xy
+      .mul(reach)
+      .add(vec2(this.cloudTime.mul(fairDrift), 0))
+      .mul(fairScale);
+    const large = float(1).sub(
+      mx_worley_noise_float(spot.mul(fairCells), fairJitter),
+    );
+    const under = float(1).sub(
+      mx_worley_noise_float(
+        spot.add(direction.xy.normalize().mul(fairUnder)).mul(fairCells),
+        fairJitter,
+      ),
+    );
+    const puffs = large.max(
+      float(fairSmallShare).sub(
+        mx_worley_noise_float(spot.mul(fairSmall).add(3.1), fairJitter),
+      ),
+    );
+    const erosion = mx_fractal_noise_float(
+      vec3(spot.mul(fairDetail), this.cloudTime.mul(0.0004)),
       4,
     );
-    const threshold = mix(float(0.32), float(-0.22), this.broken);
-    const density = smoothstep(threshold, threshold.add(cumulusEdge), shape)
-      .mul(smoothstep(0.0, 0.1, up))
-      .mul(0.97);
-    const core = smoothstep(threshold, threshold.add(0.55), shape);
+    const clusters = mx_fractal_noise_float(
+      vec3(spot.mul(fairClusters), 7.3),
+      2,
+    );
+    const shape = puffs
+      .add(erosion.mul(fairErosion))
+      .add(clusters.mul(fairClustering))
+      .sub(0.55);
+    const crowd = this.broken.div(manyCover).clamp(0, 1);
+    const threshold = mix(float(fairClear), float(fairCrowded), crowd);
+    const blur = smoothstep(
+      fairBlurFrom,
+      fairBlurTo,
+      fwidth(spot.x).add(fwidth(spot.y)),
+    );
+    const density = mix(
+      smoothstep(threshold, threshold.add(fairEdge), shape),
+      mix(float(fairLow), float(fairHigh), crowd),
+      blur,
+    );
+    const core = smoothstep(threshold, threshold.add(fairCore), shape);
     const [hr = 1, hg = 1, hb = 1] = this.meta.horizon;
     const horizon = vec3(hr, hg, hb).mul(skyGain);
     const [sr = 1, sg = 1, sb = 1] = this.meta.sunColor;
-    const lit = horizon
-      .mul(cumulusTop)
-      .mul(mix(vec3(1), vec3(sr, sg, sb), 0.5));
-    const shade = horizon.mul(cumulusBase).mul(vec3(0.92, 0.95, 1.0));
-    const silver = towardSun.pow(6).mul(cumulusSilver).add(1);
-    const cloud = mix(lit, shade, core).mul(silver);
-    return mix(clear, cloud, density);
+    const lit = horizon.mul(fairLit).mul(mix(vec3(1), vec3(sr, sg, sb), 0.5));
+    const shade = horizon.mul(fairShade).mul(vec3(0.92, 0.95, 1.0));
+    const base = smoothstep(0, fairBaseEdge, large.sub(under));
+    const backlit = smoothstep(fairBacklitFrom, 1, towardSun);
+    const rim = float(1)
+      .sub(smoothstep(threshold, threshold.add(fairRim), shape))
+      .mul(backlit);
+    const cloud = mix(
+      lit,
+      shade,
+      core
+        .mul(fairShadeShare)
+        .max(base.mul(fairBaseShade))
+        .max(backlit.mul(fairBacklit)),
+    ).mul(rim.mul(cumulusSilver).add(1));
+    const shown = density
+      .mul(exp(sight.div(fairSight).negate()))
+      .mul(smoothstep(0, 0.02, direction.z));
+    return mix(clear, cloud, shown);
   }
 
   static async load(
@@ -732,14 +796,13 @@ export class SkyBox {
     night: number,
     compact: CompactSky | null = null,
     look: NightLook | null = null,
-    clouded = true,
+    day: DayLook | null = null,
   ): Promise<SkyBox> {
     const { name, meta, sky, clearSky, environment } = await skyTextures(
       compact,
       elevation,
       afternoon,
       night,
-      clouded,
     );
     releaseOnceUploaded(sky);
     releaseOnceUploaded(clearSky);
@@ -756,7 +819,7 @@ export class SkyBox {
     environment.mapping = THREE.EquirectangularReflectionMapping;
     const grade = new THREE.Vector3(...(skyGrades[name] ?? [1, 1, 1]));
     fitSkyAmbient(environment, grade);
-    return new SkyBox(
+    const box = new SkyBox(
       sky,
       clearSky,
       environment,
@@ -765,7 +828,9 @@ export class SkyBox {
       night,
       grade,
       look,
+      day ? { ...day, ...day.skies[name] } : null,
     );
+    return box;
   }
 
   get overcastHorizon(): THREE.Color {
@@ -781,7 +846,11 @@ export class SkyBox {
     const radiance = this.meta.skyRadiance[1] ?? 0;
     const sine = Math.max(Math.sin(this.meta.elevation), 0);
     return (
-      sunShare * Math.PI * radiance * Math.min(1 / sine, sine / lowSunSine ** 2)
+      sunShare *
+      Math.PI *
+      radiance *
+      Math.min(1 / sine, sine / lowSunSine ** 2) *
+      (this.day?.sun ?? 1)
     );
   }
 
@@ -793,8 +862,31 @@ export class SkyBox {
     const radiance = this.meta.skyRadiance[1] ?? 1;
     const day =
       Math.min(maxExposure, targetMidtone / ((1 + sunShare) * radiance)) *
-      this.exposureScale;
+      this.exposureScale *
+      (this.day?.exposure ?? 1);
     return day + (nightExposure - day) * this.nightShare;
+  }
+
+  get airHaze(): THREE.Color {
+    const [hr = 1, hg = 1, hb = 1] = this.meta.horizon;
+    const [ar = 1, ag = 1, ab = 1] = this.day?.air ?? [];
+    return new THREE.Color(hr * ar, hg * ag, hb * ab);
+  }
+
+  get scatter(): number {
+    return this.nightShare >= 1 ? 0 : (this.day?.scatter ?? 0);
+  }
+
+  get iris(): readonly [number, number] {
+    return this.nightShare >= 1 || !this.day ? [0, 0] : this.day.iris;
+  }
+
+  get glare(): number {
+    return this.nightShare >= 1 ? 0 : (this.day?.glare ?? 0);
+  }
+
+  sight(fallback: number): number {
+    return this.day?.visibility ?? fallback;
   }
 
   get nightHaze(): THREE.Color {

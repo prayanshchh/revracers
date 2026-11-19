@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 from scipy.ndimage import gaussian_filter
 
 import brands
+import runoff
 from palette import PALETTE, PALETTE_CELLS, TEAMS, shade
 from pitlane import FACADE_SIZE, FACADE_TILE, NUMBER_COLUMNS, NUMBER_TILE, TEAM_BAYS, bay_count
 
@@ -19,7 +20,8 @@ STREAK_LAYERS = ((1.4, 60.0, 1.0), (3.5, 140.0, 0.8), (0.8, 18.0, 0.5))
 KERB_SIZE = (512, 1024)
 FONT = Path("apps/client/node_modules/@fontsource-variable/saira/files/saira-latin-wght-normal.woff2")
 CHAINLINK = 256
-CHAINLINK_WIRE = 14
+CHAINLINK_WIRE = 9
+CHAINLINK_CELLS = 2
 CHAINLINK_COLOUR = (165, 168, 172)
 DISTANCES = ("300", "200", "100")
 PALETTE_SIZE = 256
@@ -48,12 +50,13 @@ FENCE_METAL = (108, 112, 118)
 TURF_PIXELS = 2048
 TURF_SUPERSAMPLE = 2
 TURF_LAYERS = (
-    (0.0, 110000, (5, 11), (62, 76, 32), (84, 100, 40)),
-    (0.35, 140000, (7, 16), (92, 114, 42), (128, 144, 56)),
-    (0.7, 90000, (8, 19), (130, 148, 58), (176, 180, 84)),
+    (0.0, 110000, (5, 11), (96, 88, 36), (128, 116, 48)),
+    (0.35, 140000, (7, 16), (140, 124, 54), (178, 158, 74)),
+    (0.7, 90000, (8, 19), (180, 160, 82), (214, 194, 110)),
 )
-TURF_STRAW = (0.07, (170, 158, 104), (198, 186, 128))
-TURF_SOIL = (58, 62, 34)
+TURF_STRAW = (0.2, (196, 178, 112), (224, 206, 136))
+TURF_SOIL = (124, 102, 60)
+TURF_GAIN = 0.82
 TURF_CLUMP_PERIODS = (8, 16)
 TURF_CLUMP_SHARE = 0.35
 TURF_SEED = 41
@@ -109,7 +112,7 @@ def tileable_noise(rng, size, periods):
 def turf():
     rng = np.random.default_rng(TURF_SEED)
     size = TURF_PIXELS * TURF_SUPERSAMPLE
-    colour = Image.new("RGB", (size, size), TURF_SOIL)
+    colour = Image.new("RGB", (size, size), tuple(int(v * TURF_GAIN) for v in TURF_SOIL))
     paint = ImageDraw.Draw(colour)
     clumps = tileable_noise(rng, TURF_PIXELS, TURF_CLUMP_PERIODS)
     for base, count, length, low, high in TURF_LAYERS:
@@ -126,7 +129,7 @@ def turf():
         widths = rng.integers(2, 4, count)
         for k in range(count):
             dx, dy = np.cos(angle[k]) * reach[k], np.sin(angle[k]) * reach[k]
-            tone = tuple(int(v * (0.82 + 0.18 * base)) for v in tones[k])
+            tone = tuple(int(v * (0.82 + 0.18 * base) * TURF_GAIN) for v in tones[k])
             for ox in (0, -size, size) if x[k] < reach[k] or x[k] > size - reach[k] else (0,):
                 for oy in (0, -size, size) if y[k] < reach[k] or y[k] > size - reach[k] else (0,):
                     a = (x[k] + ox - dx / 2, y[k] + oy - dy / 2)
@@ -180,12 +183,29 @@ def tecpro():
 
 def chainlink():
     size = CHAINLINK
-    image = Image.new("RGBA", (size, size), (*CHAINLINK_COLOUR, 0))
-    draw = ImageDraw.Draw(image)
-    for shift in (-size, 0, size):
-        draw.line([(shift, 0), (shift + size, size)], fill=(*CHAINLINK_COLOUR, 255), width=CHAINLINK_WIRE)
-        draw.line([(shift + size, 0), (shift, size)], fill=(*CHAINLINK_COLOUR, 255), width=CHAINLINK_WIRE)
-    return image
+    cell = size / CHAINLINK_CELLS
+    y, x = np.mgrid[0:size, 0:size].astype(np.float32) + 0.5
+    a = (x + y) / cell
+    b = (x - y) / cell
+    da = np.abs(a - np.round(a)) * cell / np.sqrt(2)
+    db = np.abs(b - np.round(b)) * cell / np.sqrt(2)
+    half = CHAINLINK_WIRE / 2
+    ca = np.clip(half + 0.75 - da, 0, 1)
+    cb = np.clip(half + 0.75 - db, 0, 1)
+    over = ((np.floor(a) + np.floor(b)) % 2 == 0)
+    top_a = np.where(over, 1.0, 0.72)
+    top_b = np.where(over, 0.72, 1.0)
+    shade_a = (0.55 + 0.45 * np.sqrt(np.clip(1 - (da / half) ** 2, 0, 1))) * top_a
+    shade_b = (0.55 + 0.45 * np.sqrt(np.clip(1 - (db / half) ** 2, 0, 1))) * top_b
+    a_wins = (ca * top_a) >= (cb * top_b)
+    shade = np.where(a_wins, shade_a, shade_b)
+    alpha = np.maximum(ca, cb)
+    rng = np.random.default_rng(17)
+    rust = 1 - 0.06 * rng.random((size, size)).astype(np.float32)
+    colour = np.array(CHAINLINK_COLOUR, np.float32) / 255.0
+    rgb = colour[None, None, :] * (shade * rust)[..., None]
+    image = np.concatenate([np.clip(rgb, 0, 1), alpha[..., None]], -1)
+    return Image.fromarray(np.uint8(image * 255), "RGBA")
 
 
 def pit_decals():
@@ -685,7 +705,12 @@ def main():
     Image.fromarray(np.clip(np.round(gravel(source) * 255.0), 0, 255).astype(np.uint8)).save(
         root / "textures" / "baked" / "gravel_base_color.jpg", quality=GRAVEL_QUALITY, subsampling=0
     )
-    save(brands.boards(build_fonts(out)), out / "boards_base_color.png")
+    fonts = build_fonts(out)
+    atlas, layout = runoff.word_atlas(root / "source", fonts)
+    if atlas is not None:
+        atlas.save(out / "runoff_words_base_color.png")
+        (out / "runoff_words.json").write_text(json.dumps(layout))
+    save(brands.boards(fonts), out / "boards_base_color.png")
     save(tecpro(), out / "tecpro_base_color.png")
     chainlink().save(out / "chainlink_base_color.png")
     save(distance_boards(), out / "distance_base_color.png")

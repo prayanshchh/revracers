@@ -1,4 +1,4 @@
-import type * as THREE from "three/webgpu";
+import * as THREE from "three/webgpu";
 import {
   float,
   floor,
@@ -98,4 +98,59 @@ export function glaze(material: THREE.MeshStandardNodeMaterial): void {
     .mul(lit)
     .mul(float(1).sub(solid))
     .mul(smoothstep(0.55, 0.95, fract(height.mul(2.4).add(0.1))));
+}
+
+const curtainPane = 1.5;
+const curtainRow = 1.9;
+const curtainFrame = 0.05;
+const curtainTransom = 0.03;
+const curtainInterior = vec3(0.05, 0.065, 0.08);
+const curtainDeep = vec3(0.02, 0.025, 0.03);
+const curtainBlind = vec3(0.42, 0.42, 0.4);
+const curtainMullion = vec3(0.16, 0.17, 0.18);
+const curtainBlinds = 0.18;
+const curtainIor = 2.2;
+const curtainLight = vec3(1.0, 0.86, 0.66);
+const curtainGlow = 0.22;
+const curtainLit = 0.45;
+const curtainFloor = 0.3;
+
+export function curtain(material: THREE.MeshStandardNodeMaterial): void {
+  const at = uv();
+  const across = at.x.div(curtainPane);
+  const up = at.y.div(curtainRow);
+  const postGap = across.sub(0.5).fract().sub(0.5).abs().mul(curtainPane);
+  const railGap = up.sub(0.5).fract().sub(0.5).abs().mul(curtainRow);
+  const soft = fwidth(at.x).add(fwidth(at.y)).max(1e-4);
+  const post = float(1).sub(
+    smoothstep(float(curtainFrame), soft.add(curtainFrame), postGap),
+  );
+  const rail = float(1).sub(
+    smoothstep(float(curtainTransom), soft.add(curtainTransom), railGap),
+  );
+  const pane = floor(across).add(floor(up).mul(53.1));
+  const roll = hash(pane);
+  const height = up.fract();
+  const blind = step(roll, float(curtainBlinds)).mul(step(0.55, height));
+  const depth = mix(curtainDeep, curtainInterior, hash(pane.add(7.3)));
+  const interior = mix(depth, curtainBlind, blind);
+  const frame = post.max(rail);
+  material.colorNode = mix(interior, curtainMullion, frame);
+  material.roughnessNode = mix(
+    mix(float(0.05), float(0.6), blind),
+    float(0.4),
+    frame,
+  );
+  material.metalnessNode = mix(float(0), float(0.3), frame);
+  const rise = float(1).sub(height);
+  const ceiling = rise
+    .mul(rise)
+    .mul(float(1).sub(curtainFloor))
+    .add(curtainFloor);
+  const lit = step(hash(pane.add(3.1)), float(curtainLit))
+    .mul(float(1).sub(blind))
+    .mul(float(1).sub(frame));
+  material.emissiveNode = curtainLight.mul(ceiling.mul(lit).mul(curtainGlow));
+  if (material instanceof THREE.MeshPhysicalNodeMaterial)
+    material.ior = curtainIor;
 }

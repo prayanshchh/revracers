@@ -204,7 +204,7 @@ async function bestSectors(
   return db.query<BestSectorRow>(
     `SELECT l.track, l.car, u.position::int AS position, min(u.value)::int AS best
      FROM laps l, unnest(l.sector_ms) WITH ORDINALITY AS u(value, position)
-     WHERE l.driver_id = $1 AND l.valid
+     WHERE l.driver_id = $1 AND l.valid AND NOT l.legacy_sectors
        AND ($2::text IS NULL OR l.track = $2)
        AND ($3::text IS NULL OR l.car = $3)
      GROUP BY l.track, l.car, u.position
@@ -301,17 +301,21 @@ export async function profileSummary(
       laps: totals?.laps ?? 0,
       timeMs: totals?.time_ms ?? 0,
     },
-    bests: bests.map((row) => ({
-      track: row.track,
-      car: row.car,
-      team: row.team,
-      timeMs: row.time_ms,
-      sectorsMs: row.sector_ms,
-      bestSectorsMs: sectors
+    bests: bests.map((row) => {
+      const fastest = sectors
         .filter((s) => s.track === row.track && s.car === row.car)
-        .map((s) => s.best),
-      setAt: iso(row.set_at),
-    })),
+        .map((s) => s.best);
+      return {
+        track: row.track,
+        car: row.car,
+        team: row.team,
+        timeMs: row.time_ms,
+        sectorsMs: row.sector_ms,
+        bestSectorsMs:
+          fastest.length > 0 ? fastest : row.sector_ms.map((ms) => ms ?? 0),
+        setAt: iso(row.set_at),
+      };
+    }),
   };
 }
 

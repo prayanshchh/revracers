@@ -10,6 +10,7 @@ import {
   migrate,
   serverDb,
 } from "../../apps/api/src/index.ts";
+import { migrations } from "../../apps/api/src/schema.ts";
 
 const realPostgres = process.env["TEST_DATABASE_URL"];
 
@@ -457,6 +458,29 @@ describe.each(backends)("api on %s", (_name, open) => {
       const stored = await driver.json<Stored>("GET", url);
       expect(stored.reference?.sectorsMs).toEqual([29_000, 31_000, 30_000]);
       expect(stored.reference?.bestSectorsMs).toEqual([29_000, 30_000, 29_000]);
+    });
+
+    test("Hill Country laps split at the old sector lines never become best sectors", async () => {
+      const driver = await signedUp();
+      const id = await startSession(driver);
+      await driver.json(
+        "PUT",
+        `/api/sessions/${id}/laps/1`,
+        lap(90_000, [25_000, 30_000, 35_000]),
+      );
+      await db.exec(migrations[3] ?? "");
+      await driver.json(
+        "PUT",
+        `/api/sessions/${id}/laps/2`,
+        lap(92_000, [28_000, 34_000, 30_000]),
+      );
+      await driver.json(
+        "PUT",
+        url,
+        reference(92_000, [28_000, 34_000, 30_000]),
+      );
+      const stored = await driver.json<Stored>("GET", url);
+      expect(stored.reference?.bestSectorsMs).toEqual([28_000, 34_000, 30_000]);
     });
 
     test("references are private to each driver", async () => {

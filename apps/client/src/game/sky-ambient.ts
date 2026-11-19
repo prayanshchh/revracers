@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { float, mix, normalWorld, uniform } from "three/tsl";
+import { float, mix, normalWorld, uniform, vec3 } from "three/tsl";
 
 const rowStep = 4;
 const columnStep = 8;
@@ -45,9 +45,34 @@ class SkyAmbient extends THREE.LightingNode {
   }
 }
 
+type DirectInput = Parameters<THREE.PhysicalLightingModel["direct"]>[0];
+
+export class MatteLighting extends THREE.PhysicalLightingModel {
+  constructor(private readonly gloss: THREE.Node<"float">) {
+    super();
+  }
+
+  override direct(input: DirectInput, builder: THREE.NodeBuilder): void {
+    const specular = input.reflectedLight
+      .directSpecular as unknown as ReturnType<typeof vec3>;
+    const before = vec3(0).toVar();
+    before.assign(specular);
+    super.direct(input, builder);
+    specular.assign(mix(before, specular, this.gloss));
+  }
+}
+
 export class SkyLitMaterial extends THREE.MeshStandardNodeMaterial {
+  gloss: THREE.Node<"float"> | null = null;
+
   override setupEnvironment(): THREE.EnvironmentNode {
     return new SkyAmbient() as unknown as THREE.EnvironmentNode;
+  }
+
+  override setupLightingModel(): THREE.PhysicalLightingModel {
+    return this.gloss
+      ? new MatteLighting(this.gloss)
+      : super.setupLightingModel();
   }
 }
 

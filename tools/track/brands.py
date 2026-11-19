@@ -14,6 +14,10 @@ FONTS = {
     "montserrat": "ofl/montserrat/Montserrat%5Bwght%5D.ttf",
     "cinzel": "ofl/cinzel/Cinzel%5Bwght%5D.ttf",
     "barlow": "ofl/barlowcondensed/BarlowCondensed-BoldItalic.ttf",
+    "nunito": "ofl/nunito/Nunito%5Bwght%5D.ttf",
+    "greatvibes": "ofl/greatvibes/GreatVibes-Regular.ttf",
+    "pacifico": "ofl/pacifico/Pacifico-Regular.ttf",
+    "archivo": "ofl/archivoblack/ArchivoBlack-Regular.ttf",
 }
 
 

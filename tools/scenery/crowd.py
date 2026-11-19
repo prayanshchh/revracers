@@ -8,8 +8,11 @@ import numpy as np
 import OpenImageIO as oiio
 from mathutils import Matrix, Vector
 
-CELL = (192, 384)
-GRID = (8, 8)
+CELL = (128, 256)
+GRID = (24, 16)
+PEOPLE = 128
+VIEWS = (0.0, 0.6, 1.2)
+VIEW_JITTER = 0.1
 FRAME_HEIGHT = 2.0
 SAMPLES = 96
 SEED = 20261112
@@ -48,7 +51,15 @@ TORSO = ("Bip01 Spine", "Bip01 Spine1", "Bip01 Spine2", "Bip01 L Clavicle", "Bip
 FAN_SHARE = 0.62
 SKIN_REACH = 0.11
 SHIRT_LEVEL = 0.8
-CAP_SHARE = 0.34
+CAP_SHARE = 0.42
+COWBOYS = 12
+HAT_TONES = (
+    ((0.86, 0.84, 0.8), 0.35),
+    ((0.76, 0.64, 0.42), 0.3),
+    ((0.52, 0.4, 0.26), 0.15),
+    ((0.05, 0.05, 0.05), 0.12),
+    ((0.28, 0.18, 0.11), 0.08),
+)
 FACE = ("Eye", "Mouth", "Lip", "Brow", "Cheek", "Jaw", "Tongue", "Nose", "Masseter", "Caninus", "lip")
 
 
@@ -75,7 +86,7 @@ def setup():
     scene.render.image_settings.color_depth = "32"
     layer = scene.view_layers[0]
     layer.use_pass_diffuse_color = True
-    for name in ("torso", "head"):
+    for name in ("torso", "head", "cap"):
         mark = layer.aovs.add()
         mark.name = name
         mark.type = "VALUE"
@@ -121,7 +132,7 @@ def dress(mesh, folder):
         if part == "opacity" and texture_for(folder, part):
             links.new(image.outputs["Alpha"], shader.inputs["Alpha"])
         links.new(shader.outputs[0], output.inputs["Surface"])
-        for name, value in (("torso", part == "body"), ("head", part == "head")):
+        for name, value in (("torso", part == "body"), ("head", part == "head"), ("cap", False)):
             mark = nodes.new("ShaderNodeOutputAOV")
             mark.aov_name = name
             if name == "torso" and value:
@@ -173,28 +184,41 @@ def pose(armature, library, name, share):
     return fresh
 
 
-def cap(armature, rng):
+def head_frame(armature):
     head = armature.pose.bones.get("Bip01 Head")
     nose = armature.pose.bones.get("Bip01 MNose")
     if head is None or nose is None:
-        return []
+        return None
     world = armature.matrix_world
     forward = ((world @ head.tail) - (world @ head.head)).normalized()
     aside = forward.cross(Vector((0, 0, 1))).normalized()
     up = aside.cross(forward).normalized()
     turn = Matrix((forward, -aside, up)).transposed().to_euler()
-    material = bpy.data.materials.new("cap")
+    return world @ nose.head, forward, up, turn
+
+
+def marked(name, tone, marks):
+    material = bpy.data.materials.new(name)
     material.use_nodes = True
     nodes = material.node_tree.nodes
     shader = nodes["Principled BSDF"]
-    tone = rng.uniform(0.6, 0.92)
-    shader.inputs["Base Color"].default_value = (tone, tone, tone, 1)
+    shader.inputs["Base Color"].default_value = (*tone, 1)
     shader.inputs["Roughness"].default_value = 0.9
-    for name, value in (("torso", 1.0), ("head", 0.0)):
+    for aov in ("torso", "head", "cap"):
         mark = nodes.new("ShaderNodeOutputAOV")
-        mark.aov_name = name
-        mark.inputs["Value"].default_value = value
-    base = (world @ nose.head) - forward * 0.105 + up * 0.085
+        mark.aov_name = aov
+        mark.inputs["Value"].default_value = marks.get(aov, 0.0)
+    return material
+
+
+def cap(armature, rng):
+    frame = head_frame(armature)
+    if frame is None:
+        return []
+    nose, forward, up, turn = frame
+    tone = rng.uniform(0.72, 0.92)
+    material = marked("cap", (tone, tone, tone), {"cap": 1.0})
+    base = nose - forward * 0.105 + up * 0.085
     bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=12, radius=0.092, location=base, rotation=turn)
     dome = bpy.context.object
     shape = bmesh.new()
@@ -209,6 +233,46 @@ def cap(armature, rng):
     for part in (dome, brim):
         part.data.materials.append(material)
     return [dome, brim]
+
+
+def cowboy(armature, rng):
+    frame = head_frame(armature)
+    if frame is None:
+        return []
+    nose, forward, up, turn = frame
+    weights = np.array([weight for _, weight in HAT_TONES])
+    tone = HAT_TONES[int(rng.choice(len(HAT_TONES), p=weights / weights.sum()))][0]
+    material = marked("cowboy", tuple(np.clip(np.array(tone) * rng.uniform(0.9, 1.08), 0, 1)), {})
+    band = marked("band", (0.08, 0.06, 0.05), {})
+    base = nose - forward * 0.085 + up * 0.075
+    bpy.ops.mesh.primitive_cylinder_add(vertices=40, radius=1.0, depth=0.012, location=base, rotation=turn)
+    brim = bpy.context.object
+    brim.scale = (0.2, 0.18, 1.0)
+    shape = bmesh.new()
+    shape.from_mesh(brim.data)
+    for vertex in shape.verts:
+        x, y = vertex.co.x, vertex.co.y
+        vertex.co.z += 0.045 * y * y - 0.015 * max(0.0, x)
+    shape.to_mesh(brim.data)
+    shape.free()
+    bpy.ops.mesh.primitive_cylinder_add(vertices=28, radius=1.0, depth=0.13, location=base + up * 0.07, rotation=turn)
+    crown = bpy.context.object
+    crown.scale = (0.1, 0.085, 1.0)
+    shape = bmesh.new()
+    shape.from_mesh(crown.data)
+    for vertex in shape.verts:
+        if vertex.co.z > 0:
+            vertex.co.z -= 0.035 * (1 - abs(vertex.co.y)) + 0.012 * max(0.0, vertex.co.x)
+            vertex.co.x *= 0.92
+    shape.to_mesh(crown.data)
+    shape.free()
+    bpy.ops.mesh.primitive_cylinder_add(vertices=28, radius=1.0, depth=0.022, location=base + up * 0.02, rotation=turn)
+    ribbon = bpy.context.object
+    ribbon.scale = (0.103, 0.088, 1.0)
+    brim.data.materials.append(material)
+    crown.data.materials.append(material)
+    ribbon.data.materials.append(band)
+    return [brim, crown, ribbon]
 
 
 def read_layers(path):
@@ -287,7 +351,9 @@ def sprite(layers, fan):
     torso = layers["torso"][..., 0] > 0.5
     head = layers["head"][..., 0] > 0.5
     solid = alpha > 0.6
-    mask = np.zeros(alpha.shape, np.float32)
+    mask = np.zeros(alpha.shape + (2,), np.float32)
+    capped = (layers["cap"][..., 0] > 0.5) & solid
+    mask[..., 1] = capped
     if fan and (head & solid).sum() > 20:
         skin = np.median(albedo[head & solid], 0)
         chroma = lambda c: c / np.maximum(c.sum(-1, keepdims=True), 1e-4)
@@ -298,7 +364,7 @@ def sprite(layers, fan):
             level = np.percentile(grey[cloth], 70)
             shirt = np.clip(grey / max(level, 1e-3) * SHIRT_LEVEL, 0, 1)
             colour = np.where(cloth[..., None], shirt[..., None], colour)
-            mask = cloth.astype(np.float32)
+            mask[..., 0] = cloth
     frame = np.concatenate([np.clip(srgb(np.clip(colour, 0, 1)), 0, 1), alpha[..., None]], -1)
     return bleed(frame), mask
 
@@ -311,21 +377,23 @@ def main():
     avatars = sorted(folder for folder in (source / "avatars").iterdir() if folder.is_dir() and folder.name not in SKIP and texture_for(folder, "body"))
     rng = np.random.default_rng(SEED)
     columns, rows = GRID
-    rounds = math.ceil(columns * rows / len(avatars))
+    rounds = math.ceil(PEOPLE / len(avatars))
     order = np.concatenate([rng.permutation(len(avatars)) for _ in range(rounds)])
     atlas = np.zeros((CELL[1] * rows, CELL[0] * columns, 4), np.float32)
-    masks = np.zeros((CELL[1] * rows, CELL[0] * columns), np.float32)
+    masks = np.zeros((CELL[1] * rows, CELL[0] * columns, 2), np.float32)
+    half = PEOPLE // 2
     scratch = out / "person.exr"
-    for index in range(columns * rows):
-        folder = avatars[order[index]]
-        seated = index < columns * rows // 2
+    for person in range(PEOPLE):
+        folder = avatars[order[person]]
+        seated = person < half
+        hatted = person % half >= half - COWBOYS
         poses = SEATED if seated else STANDING
         name, share = poses[int(rng.integers(len(poses)))]
-        turn = rng.uniform(-0.6, 0.6)
+        jitter = rng.uniform(-VIEW_JITTER, VIEW_JITTER)
         lift = rng.uniform(-0.02, 0.1)
         fan = rng.random() < FAN_SHARE
         capped = rng.random() < CAP_SHARE
-        if only and index not in only:
+        if only and person not in only:
             continue
         scene, camera, sun = setup()
         armature, mesh, parts = load_avatar(folder)
@@ -333,14 +401,17 @@ def main():
         pose(armature, source / "anims", prefix + name, share)
         bpy.context.view_layer.update()
         shown = [mesh]
-        if capped:
+        if hatted:
+            shown.extend(cowboy(armature, rng))
+        elif capped:
             shown.extend(cap(armature, rng))
-        frame, mask = sprite(shoot(scene, camera, sun, shown, turn, lift, scratch), fan)
-        row, column = divmod(index, columns)
-        window = (slice(row * CELL[1], (row + 1) * CELL[1]), slice(column * CELL[0], (column + 1) * CELL[0]))
-        atlas[window] = frame
-        masks[window] = mask
-        print(f"sprite {index} {folder.name} {name} fan {fan} cap {capped} cover {(frame[..., 3] > 0.5).mean():.3f}", flush=True)
+        for view, turn in enumerate(VIEWS):
+            frame, mask = sprite(shoot(scene, camera, sun, shown, turn + jitter, lift, scratch), fan)
+            row, column = divmod(person * len(VIEWS) + view, columns)
+            window = (slice(row * CELL[1], (row + 1) * CELL[1]), slice(column * CELL[0], (column + 1) * CELL[0]))
+            atlas[window] = frame
+            masks[window] = mask
+        print(f"person {person} {folder.name} {name} fan {fan} cap {capped} hat {hatted} cover {(frame[..., 3] > 0.5).mean():.3f}", flush=True)
     scratch.unlink(missing_ok=True)
     np.save(out / "people.npy", atlas)
     np.save(out / "people-mask.npy", masks)

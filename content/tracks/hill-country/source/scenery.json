@@ -3,23 +3,63 @@
     "sink": 0.15,
     "shadowReach": 190,
     "canopy": {
-      "pixel": 2,
-      "ndvi": 0.2,
-      "luminance": 0.42,
-      "spacingAt": [0, 250, 600, 1200],
-      "spacing": [7.5, 9, 12, 16],
-      "heightScale": [1, 1, 1.15, 1.3],
-      "heightBase": 5.5,
-      "heightPerDepth": 0.55,
-      "heightMin": 3.2,
-      "heightMax": 13
+      "raster": "canopy.png",
+      "cell": 2.0,
+      "smooth": 0.7,
+      "crown": 3,
+      "depthCap": 12,
+      "growth": [
+        1.08,
+        0.6
+      ],
+      "heightMin": 2.2,
+      "heightMax": 16,
+      "spacingAt": [
+        0,
+        250,
+        600,
+        1200
+      ],
+      "spacing": [
+        6,
+        8,
+        11,
+        15
+      ],
+      "widest": 1.8
     },
-    "groves": [
-      { "from": 0, "to": 5477, "side": "outside", "near": 14, "far": 130, "density": 0.5, "bias": 1.4, "height": [7.5, 12.5], "gaps": 0.44, "clump": 48, "seed": 3 },
-      { "from": 0, "to": 5477, "side": "outside", "near": 10, "far": 60, "density": 0.25, "height": [2.2, 3.6], "gaps": 0.5, "clump": 26, "seed": 9, "species": "shrub" },
-      { "from": 0, "to": 5477, "side": "inside", "near": 30, "far": 110, "density": 0.035, "height": [7, 11], "gaps": 0.55, "clump": 60, "seed": 5 }
-    ],
-    "species": { "elm": 0.62, "ash": 0.16, "tallFrom": 5, "tallTo": 8, "shrubBelow": 4 },
+    "groves": [],
+    "species": {
+      "clump": 45,
+      "seed": 7,
+      "grouping": 0.6,
+      "bands": [
+        {
+          "below": 4,
+          "shares": {
+            "mesquite": 0.55,
+            "juniper": 0.45
+          }
+        },
+        {
+          "below": 7,
+          "shares": {
+            "mesquite": 0.4,
+            "juniper": 0.25,
+            "liveoak": 0.2,
+            "cedarelm": 0.15
+          }
+        },
+        {
+          "below": 99,
+          "shares": {
+            "cedarelm": 0.55,
+            "liveoak": 0.35,
+            "mesquite": 0.1
+          }
+        }
+      ]
+    },
     "clearance": {
       "wall": 7,
       "crownShare": 0.42,
@@ -34,7 +74,65 @@
       "stand": 8,
       "tower": 40,
       "crowd": 7,
-      "spacing": 4.2
-    }
+      "spacing": 4.2,
+      "occupied": 6,
+      "standRow": 0.8
+    },
+    "clear": [
+      {
+        "from": 3250,
+        "to": 3790,
+        "side": "right",
+        "far": 160
+      },
+      {
+        "osm": 1528618064,
+        "buffer": 15
+      },
+      {
+        "osm": 1484855306,
+        "buffer": 20
+      }
+    ]
+  },
+  "lots": {
+    "bay": 2.7,
+    "module": 17.0,
+    "edge": 1.0,
+    "smallest": 800,
+    "aisleClear": 3.2,
+    "building": 3.0,
+    "road": 6.0,
+    "lane": 3.5,
+    "wall": 8.0,
+    "fill": 0.9,
+    "spacing": 2.2,
+    "trucks": 0.45,
+    "jitter": 3.0,
+    "sink": 0.05,
+    "colours": [
+      24,
+      21,
+      22,
+      18,
+      7,
+      3,
+      5
+    ],
+    "buses": {
+      "at": [
+        3800,
+        3900,
+        4000,
+        4100,
+        4200
+      ],
+      "reach": 450,
+      "count": 90
+    },
+    "rows": [
+      5.6,
+      10.4
+    ]
   }
 }

@@ -60,7 +60,7 @@ const credits: Credit[] = [
   },
   {
     name: "Microsoft Rocketbox Avatar Library",
-    role: "Pit crew body and spectators",
+    role: "Pit crew body, build-up people and spectators",
     licence: "MIT",
     url: "https://github.com/microsoft/Microsoft-Rocketbox",
   },

@@ -91,6 +91,7 @@ interface Instances {
   place: THREE.InstancedBufferAttribute;
   look: THREE.InstancedBufferAttribute;
   frame: THREE.InstancedBufferAttribute;
+  width: THREE.InstancedBufferAttribute;
 }
 
 interface Lean {
@@ -150,6 +151,9 @@ function billboard(
   const shape = vec4(
     instancedBufferAttribute(instances.frame) as ReturnType<typeof vec4>,
   );
+  const width = float(
+    instancedBufferAttribute(instances.width) as ReturnType<typeof float>,
+  );
   const height = place.w;
   const direction = view.toward(place.xyz.add(vec3(0, height.mul(0.5), 0)));
   const level = view.ring(direction);
@@ -167,7 +171,7 @@ function billboard(
     .mul(swayReach)
     .mul(rise.mul(rise));
   const position = place.xyz
-    .add(right.mul(across.add(sway).mul(size).mul(height)))
+    .add(right.mul(across.add(sway).mul(size).mul(height).mul(width)))
     .add(up.mul(rise.sub(drop).mul(size).mul(height)));
   const angle = atan(flat.y.negate(), flat.x).sub(look.y.mul(turn));
   const frame = fract(angle.div(turn)).mul(table.azimuths);
@@ -395,6 +399,10 @@ function instanced(
       new Float32Array(indices.length * 4),
       4,
     ),
+    width: new THREE.InstancedBufferAttribute(
+      new Float32Array(indices.length),
+      1,
+    ),
   };
   const mesh = new THREE.InstancedMesh(
     plane,
@@ -409,6 +417,7 @@ function instanced(
     const height = field(values, source + 3);
     const kind = Math.round(field(values, source + 4));
     const seed = field(values, source + 5);
+    const width = Math.max(1, field(values, source + 7));
     const name = speciesNames[kind] ?? "oak";
     const shape = table.species[name];
     const [low = 1, high = 1] = shape.sizes;
@@ -422,7 +431,8 @@ function instanced(
       (seed * 13.7) % 1,
     );
     instances.frame.setXYZW(i, low, high, lowDrop, highDrop);
-    const span = height * Math.max(low, high) * 2;
+    instances.width.setX(i, width);
+    const span = height * Math.max(low, high) * 2 * width;
     matrix.makeScale(span, span, span);
     matrix.setPosition(x, up - span * 0.25, -north);
     mesh.setMatrixAt(i, matrix);

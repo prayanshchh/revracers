@@ -18,9 +18,13 @@ FENCE_LEAN = 0.6
 FENCE_TILE = 0.15
 POST_SPACING = 4.0
 POST_SIZE = 0.1
-CABLE_HEIGHTS = (1.6, 2.4, 3.2)
-CABLE_SIZE = 0.025
+FLANGE = (0.15, 0.022)
+WEB = (0.16, 0.018)
+CABLE_HEIGHTS = (1.45, 2.05, 2.65, 3.2)
+CABLE_SIZE = 0.022
+CLAMP_SIZE = 0.07
 RAIL_SIZE = 0.06
+PLATE = (0.17, 0.025)
 
 
 def wall_line(track, side, offset):
@@ -153,6 +157,49 @@ def beam(batch, bottom, top, size):
         batch.add([bottom + a, bottom + b, top + b, top + a], UNIT)
 
 
+def bar(batch, bottom, top, across, half_across, half_depth):
+    axis = top - bottom
+    length = np.linalg.norm(axis)
+    if length < 1e-6:
+        return
+    axis = axis / length
+    u = across - axis * np.dot(across, axis)
+    u /= np.linalg.norm(u)
+    v = np.cross(axis, u)
+    offsets = [u * half_across + v * half_depth, u * half_across - v * half_depth, -u * half_across - v * half_depth, -u * half_across + v * half_depth]
+    for a, b in zip(offsets, offsets[1:] + offsets[:1]):
+        batch.add([bottom + a, bottom + b, top + b, top + a], UNIT)
+
+
+def section(batch, bottom, top, along):
+    axis = top - bottom
+    normal = np.cross(axis / np.linalg.norm(axis), along)
+    width, flange = FLANGE
+    depth, web = WEB
+    for side in (-1, 1):
+        shift = normal * side * (depth / 2 - flange / 2)
+        bar(batch, bottom + shift, top + shift, along, width / 2, flange / 2)
+    bar(batch, bottom, top, along, web / 2, depth / 2 - flange)
+
+
+def plate(batch, centre, along):
+    size, thick = PLATE
+    across = np.cross(np.array([0.0, 0.0, 1.0]), along)
+    lift = np.array([0.0, 0.0, thick])
+    corners = [centre + lift + along * a * size + across * c * size for a, c in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    batch.add(corners, UNIT)
+
+
+def post_at(steel, frame, along):
+    foot, knee, tip = frame
+    section(steel, foot, knee, along)
+    bar(steel, knee, tip, along, FLANGE[0] / 2, WEB[0] / 2)
+    plate(steel, foot, along)
+    for height in CABLE_HEIGHTS[:: len(CABLE_HEIGHTS) - 1]:
+        point = foot + np.array([0.0, 0.0, height - WALL_HEIGHT])
+        bar(steel, point - along * CLAMP_SIZE, point + along * CLAMP_SIZE, np.array([0.0, 0.0, 1.0]), CLAMP_SIZE / 2, CLAMP_SIZE / 2)
+
+
 def metalwork(track):
     steel = Batch()
     for side, offset, present, _ in wall_runs(track):
@@ -171,8 +218,8 @@ def metalwork(track):
             foot = np.array([*middle[i], base[i] + WALL_HEIGHT])
             knee = np.array([*middle[i], base[i] + FENCE_KNEE])
             tip = np.array([*lean[i], base[i] + FENCE_TOP])
-            beam(steel, foot, knee, POST_SIZE)
-            beam(steel, knee, tip, POST_SIZE)
+            tangent = np.array([*track.tangent[i], 0.0])
+            post_at(steel, (foot, knee, tip), tangent / np.linalg.norm(tangent))
             if previous is not None:
                 p_middle, p_lean, p_base = previous
                 for height in CABLE_HEIGHTS:

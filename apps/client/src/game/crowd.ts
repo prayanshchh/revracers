@@ -13,6 +13,7 @@ import {
   normalize,
   positionGeometry,
   sin,
+  smoothstep,
   step,
   texture,
   time,
@@ -35,7 +36,9 @@ export const crowdAtlas = [albedoUrl, maskUrl];
 import {
   alphaCutoff,
   atlasColumns,
+  farCutoff,
   atlasRows,
+  cowboyCells,
   spriteBounds,
 } from "./sprite-bounds.ts";
 
@@ -45,32 +48,83 @@ const personHeight = 2;
 const personWidth = 1;
 const bobHeight = 0.05;
 const bobRate = 3.2;
+const cheerRate = 7.5;
+const cheerHeight = 0.11;
+const cheerNear = 18;
+const cheerFar = 55;
 const skinGain = 1.0;
 const heightJitter = 0.07;
-const standingFrom = (atlasColumns * atlasRows) / 2;
+const views = 3;
+export const standingFrom = (atlasColumns * atlasRows) / views / 2;
+export const plainSprites = standingFrom - cowboyCells;
 const bounceFill = 0.5;
 const lampFill = 0.22;
 export const crowdLamps = uniform(0);
 const bounceFacing = 0.75;
 const fanColours: [string, number][] = [
-  ["#f2f2f0", 14],
-  ["#1b1b1d", 12],
+  ["#f2f2f0", 20],
+  ["#1b1b1d", 10],
+  ["#c8202a", 18],
+  ["#9a1820", 3],
   ["#1d2b4f", 9],
-  ["#8a8d91", 6],
-  ["#b8b9bb", 4],
-  ["#c8202a", 7],
-  ["#ff7a1a", 7],
+  ["#8a8d91", 3],
+  ["#b8b9bb", 3],
+  ["#ff7a1a", 8],
   ["#19a7a0", 3],
-  ["#2453c7", 5],
-  ["#f4c20d", 3],
-  ["#1f7a3a", 2],
+  ["#1f5c3a", 2],
+  ["#2453c7", 6],
+  ["#6fb7e8", 3],
+  ["#d8e021", 2],
+  ["#f4c20d", 2],
+  ["#c8b48a", 4],
   ["#e8508e", 2],
   ["#6b1f2b", 2],
-  ["#6fb7e8", 3],
-  ["#c8b48a", 3],
-  ["#3e5a7e", 3],
 ];
-const flagShare = 0.02;
+const capColours: [string, number][] = [
+  ["#c8202a", 26],
+  ["#f2f2f0", 24],
+  ["#1b1b1d", 18],
+  ["#1d2b4f", 9],
+  ["#ff7a1a", 8],
+  ["#19a7a0", 4],
+  ["#c8b48a", 5],
+  ["#2453c7", 4],
+  ["#f4c20d", 2],
+];
+const umbrellaShare = 0.035;
+const seatShade = 0.55;
+const cutoffNear = 45;
+const cutoffFar = 220;
+const campShare = 0.15;
+const chairSeat = 0.42;
+const chairColours: [string, number][] = [
+  ["#1a2a5c", 5],
+  ["#16161a", 5],
+  ["#2f6a3a", 2],
+  ["#a3242a", 3],
+  ["#4c5560", 3],
+  ["#1f6fa8", 2],
+];
+const umbrellaRibs = 8;
+const umbrellaHeight = 1.95;
+const umbrellaRadius = [0.55, 0.85] as const;
+const umbrellaDome = 0.36;
+const umbrellaTilt = 0.32;
+const umbrellaColours: [string, number][] = [
+  ["#16161a", 32],
+  ["#f0efea", 14],
+  ["#c42a2e", 12],
+  ["#1d3f8a", 7],
+  ["#4fb8d8", 4],
+  ["#ee6a1f", 5],
+  ["#e05a8a", 4],
+  ["#7a3fa0", 2],
+  ["#1c6e4a", 3],
+  ["#f2c12e", 3],
+  ["#6a6d72", 5],
+];
+const flagShare = 0.0015;
+const fanFlagShare = 0.0025;
 const flagSize = [0.95, 0.6] as const;
 const flagGrip = 1.35;
 const flagPole = 1.25;
@@ -94,14 +148,17 @@ function fillLight(): THREE.Node<"vec3"> {
     .add(crowdLamps.mul(lampFill));
 }
 
-function pickWeighted(roll: number): THREE.Color {
-  const total = fanColours.reduce((sum, [, weight]) => sum + weight, 0);
+function pickWeighted(
+  roll: number,
+  colours: [string, number][] = fanColours,
+): THREE.Color {
+  const total = colours.reduce((sum, [, weight]) => sum + weight, 0);
   let left = roll * total;
-  for (const [colour, weight] of fanColours) {
+  for (const [colour, weight] of colours) {
     left -= weight;
     if (left <= 0) return new THREE.Color(colour);
   }
-  return new THREE.Color(fanColours[0]?.[0] ?? "#ffffff");
+  return new THREE.Color(colours[0]?.[0] ?? "#ffffff");
 }
 
 function roll(index: number, salt: number): number {
@@ -110,6 +167,13 @@ function roll(index: number, salt: number): number {
 }
 
 const eyeModel = uniform(new THREE.Vector3());
+const cheerSlots = 4;
+const cheerCars = Array.from(
+  { length: cheerSlots },
+  () => new THREE.Vector3(0, -1e5, 0),
+);
+const cheerModel = uniformArray(cheerCars, "vec3");
+const viewEdges = [0.3, 0.9] as const;
 
 type Atlas = CanvasImageSource & { width: number; height: number };
 
@@ -131,6 +195,8 @@ function material(
   boxes: ReturnType<typeof uniformArray>,
   origin: THREE.InstancedBufferAttribute,
   shirt: THREE.InstancedBufferAttribute,
+  hat: THREE.InstancedBufferAttribute,
+  face: THREE.InstancedBufferAttribute,
 ) {
   const result = new SkyLitMaterial({
     side: THREE.DoubleSide,
@@ -146,32 +212,84 @@ function material(
   const flat = normalize(vec2(toEye.x, toEye.z));
   const right = vec3(flat.y, 0, flat.x.negate());
   const phase = place.x.mul(0.37).add(place.z.mul(0.71));
-  const bob = sin(time.mul(bobRate).add(phase)).abs().mul(bobHeight);
-  const box = boxes.element(
-    floor(tint.w).toInt(),
-  ) as unknown as THREE.Node<"vec4">;
-  const across = mix(box.x, box.y, positionGeometry.x.add(0.5));
+  const closest = Array.from({ length: cheerSlots }, (_, k) =>
+    (cheerModel.element(k) as unknown as THREE.Node<"vec3">)
+      .sub(place.xyz)
+      .length(),
+  ).reduce((a, b) => a.min(b));
+  const near = smoothstep(float(cheerFar), float(cheerNear), closest).mul(
+    step(float(standingFrom - 0.5), tint.w),
+  );
+  const facing = vec2(
+    instancedBufferAttribute(face) as ReturnType<typeof vec2>,
+  );
+  const faced = step(float(1e-3), facing.length());
+  const front = flat.dot(facing).clamp(-1, 1).acos();
+  const view = step(float(viewEdges[0]), front)
+    .add(step(float(viewEdges[1]), front))
+    .mul(faced);
+  const mirror = step(
+    flat.dot(vec2(facing.y, facing.x.negate())),
+    float(0),
+  ).mul(faced);
+  const bob = sin(
+    time.mul(mix(float(bobRate), float(cheerRate), near)).add(phase),
+  )
+    .abs()
+    .mul(mix(float(bobHeight), float(cheerHeight), near));
+  const identity = floor(tint.w);
+  const atlasCell = identity.mul(views).add(view);
+  const box = boxes.element(atlasCell.toInt()) as unknown as THREE.Node<"vec4">;
+  const low = mix(box.x, float(1).sub(box.y), mirror);
+  const high = mix(box.y, float(1).sub(box.x), mirror);
+  const across = mix(low, high, positionGeometry.x.add(0.5));
   const down = mix(box.z, box.w, float(1).sub(positionGeometry.y));
   result.positionNode = place.xyz
     .add(right.mul(across.sub(0.5).mul(personWidth).mul(place.w)))
     .add(
       vec3(0, float(1).sub(down).mul(personHeight).mul(place.w).add(bob), 0),
     );
-  const cell = varying(floor(tint.w));
+  const cell = varying(identity);
+  const tile = varying(atlasCell);
+  const u = mix(
+    varying(across),
+    float(1).sub(varying(across)),
+    varying(mirror),
+  );
   const sprite = vec2(
-    cell.mod(atlasColumns).add(varying(across)).div(atlasColumns),
-    floor(cell.div(atlasColumns)).add(varying(down)).div(atlasRows),
+    tile.mod(atlasColumns).add(u).div(atlasColumns),
+    floor(tile.div(atlasColumns)).add(varying(down)).div(atlasRows),
   );
   const colour = texture(albedo, sprite);
-  const shirtMask = texture(mask, sprite).r;
-  const painted = mix(
+  const marks = texture(mask, sprite);
+  const capTint = vec3(
+    instancedBufferAttribute(hat) as ReturnType<typeof vec3>,
+  );
+  const dressed = mix(
     colour.rgb.mul(skinGain),
     colour.rgb.mul(varying(tint.xyz)).mul(1.1),
-    shirtMask,
+    marks.r,
   );
-  result.colorNode = vec4(painted, colour.a);
-  result.normalNode = vec3(0, 0.25, 0.97);
-  result.emissiveNode = painted.mul(fillLight());
+  const painted = mix(
+    dressed,
+    colour.rgb.mul(varying(capTint)).mul(1.15),
+    marks.g,
+  );
+  const sits = step(cell, float(standingFrom - 0.5));
+  const lap = mix(
+    float(1),
+    float(seatShade),
+    smoothstep(0.55, 0.8, varying(down)).mul(sits),
+  );
+  const shaded = painted.mul(lap);
+  result.colorNode = vec4(shaded, colour.a);
+  result.alphaTestNode = mix(
+    float(alphaCutoff),
+    float(farCutoff),
+    smoothstep(float(cutoffNear), float(cutoffFar), varying(toEye.length())),
+  );
+  result.normalNode = vec3(0, 0.5, 0.87);
+  result.emissiveNode = shaded.mul(fillLight());
   return result;
 }
 
@@ -277,8 +395,10 @@ function flagPair(person: number): [THREE.Color, THREE.Color] {
 
 function flags(values: Float32Array): THREE.InstancedMesh {
   const chosen: number[] = [];
-  for (let i = 0; i < values.length; i += stride)
-    if (roll(i / stride, 7) < flagShare) chosen.push(i);
+  for (let i = 0; i < values.length; i += stride) {
+    const share = (values[i + 3] ?? 0) >= 1 ? fanFlagShare : flagShare;
+    if (roll(i / stride, 7) < share) chosen.push(i);
+  }
   const place = new THREE.InstancedBufferAttribute(
     new Float32Array(chosen.length * 4),
     4,
@@ -313,24 +433,282 @@ function flags(values: Float32Array): THREE.InstancedMesh {
   return mesh;
 }
 
+function seating(
+  i: number,
+  kind: number,
+  first: number,
+  rise: number,
+): [number, number] {
+  if (kind === 1) return roll(i, 21) < campShare ? [2, 0] : [kind, first];
+  return first === 0 && roll(i, 24) < rise
+    ? [kind, standingFrom]
+    : [kind, first];
+}
+
+function settle(
+  slots: THREE.Vector3[],
+  reach: Float64Array,
+  distance: number,
+  at: number[],
+): void {
+  let slot = reach.length - 1;
+  if (distance >= Number(reach[slot])) return;
+  while (slot > 0 && distance < Number(reach[slot - 1])) {
+    reach[slot] = Number(reach[slot - 1]);
+    const before = slots[slot - 1];
+    if (before) slots[slot]?.copy(before);
+    slot--;
+  }
+  reach[slot] = distance;
+  slots[slot]?.fromArray(at);
+}
+
+export function nearestCars(
+  cars: Float64Array | null,
+  carStride: number,
+  eye: THREE.Vector3,
+  slots: THREE.Vector3[],
+  reach: Float64Array,
+): void {
+  reach.fill(Infinity);
+  for (const slot of slots) slot.set(0, -1e5, 0);
+  if (!cars) return;
+  const at = [0, 0, 0];
+  for (let k = carStride; k + 14 < cars.length; k += carStride) {
+    at[0] = Number(cars[k + 12]);
+    at[1] = Number(cars[k + 13]);
+    at[2] = Number(cars[k + 14]);
+    settle(slots, reach, eye.distanceToSquared(scratchCar.fromArray(at)), at);
+  }
+}
+
+const scratchCar = new THREE.Vector3();
+
+export const riseShare = 0.22;
+
 export function placedCrowd(
   standing: number[],
   seated: number[],
+  fans: number[] = [],
+  sprites = standingFrom,
+  rise = 0,
 ): Float32Array {
-  const sitting = Math.floor(seated.length / 3);
-  const count = sitting + Math.floor(standing.length / 3);
+  const groups: [number[], number, number][] = [
+    [seated, 0, 0],
+    [standing, standingFrom, 0],
+    [fans, standingFrom, 1],
+  ];
+  const count = groups.reduce(
+    (sum, [spots]) => sum + Math.floor(spots.length / 3),
+    0,
+  );
   const values = new Float32Array(count * stride);
-  for (let i = 0; i < count; i++) {
-    const sits = i < sitting;
-    const spots = sits ? seated : standing;
-    const at = (sits ? i : i - sitting) * 3;
-    values[i * stride] = spots[at] ?? 0;
-    values[i * stride + 1] = -(spots[at + 2] ?? 0);
-    values[i * stride + 2] = spots[at + 1] ?? 0;
-    values[i * stride + 4] =
-      (sits ? 0 : standingFrom) + Math.floor(roll(i, 5) * standingFrom);
-  }
+  let i = 0;
+  for (const [spots, first, kind] of groups)
+    for (let at = 0; at + 2 < spots.length; at += 3, i++) {
+      values[i * stride] = spots[at] ?? 0;
+      values[i * stride + 1] = -(spots[at + 2] ?? 0);
+      values[i * stride + 2] = spots[at + 1] ?? 0;
+      const [look, cell] = seating(i, kind, first, rise);
+      values[i * stride + 3] = look;
+      values[i * stride + 4] = cell + Math.floor(roll(i, 5) * sprites);
+    }
   return values;
+}
+
+function umbrellaGeometry(): THREE.BufferGeometry {
+  const position: number[] = [];
+  const shade: number[] = [];
+  const corner = (k: number, lift: number, reach: number) => {
+    const angle = (k / umbrellaRibs) * Math.PI;
+    return [Math.cos(angle) * reach, lift, Math.sin(angle) * reach];
+  };
+  for (let k = 0; k < umbrellaRibs * 2; k++) {
+    const rib = k % 2 === 0;
+    const a = corner(k, 0, 1);
+    const b = corner(k + 1, rib ? 0.05 : -0.05, rib ? 0.94 : 1);
+    position.push(0, umbrellaDome, 0, ...a, ...b);
+    shade.push(1, 1, 1);
+  }
+  const pole = 0.018;
+  const low = -umbrellaHeight * 0.55;
+  for (const [x, z] of [
+    [pole, 0],
+    [0, pole],
+  ] as const)
+    position.push(
+      -x,
+      low,
+      -z,
+      x,
+      low,
+      z,
+      x,
+      umbrellaDome,
+      z,
+      -x,
+      low,
+      -z,
+      x,
+      umbrellaDome,
+      z,
+      -x,
+      umbrellaDome,
+      -z,
+    );
+  while (shade.length < position.length / 3) shade.push(0);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(new Float32Array(position), 3),
+  );
+  geometry.setAttribute(
+    "canopy",
+    new THREE.BufferAttribute(new Float32Array(shade), 1),
+  );
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function umbrellaMaterial(tint: THREE.InstancedBufferAttribute, solid = 0) {
+  const result = new SkyLitMaterial({
+    side: THREE.DoubleSide,
+    roughness: 0.8,
+    metalness: 0,
+  });
+  const canopy = solid > 0 ? float(1) : attribute<"float">("canopy", "float");
+  const fabric = vec3(
+    instancedBufferAttribute(tint) as ReturnType<typeof vec3>,
+  );
+  const colour = mix(vec3(0.05, 0.05, 0.05), fabric, canopy);
+  result.colorNode = colour;
+  result.emissiveNode = colour.mul(fillLight());
+  return result;
+}
+
+function chairGeometry(): THREE.BufferGeometry {
+  const quads: number[][][] = [
+    [
+      [-0.25, chairSeat, -0.22],
+      [0.25, chairSeat, -0.22],
+      [0.25, chairSeat - 0.06, 0.2],
+      [-0.25, chairSeat - 0.06, 0.2],
+    ],
+    [
+      [-0.25, chairSeat - 0.06, 0.2],
+      [0.25, chairSeat - 0.06, 0.2],
+      [0.27, chairSeat + 0.5, 0.32],
+      [-0.27, chairSeat + 0.5, 0.32],
+    ],
+  ];
+  for (const side of [-1, 1])
+    quads.push([
+      [-0.24, 0, side * 0.2],
+      [0.24, 0, side * 0.2],
+      [0.24, chairSeat, -side * 0.2],
+      [-0.24, chairSeat, -side * 0.2],
+    ]);
+  const position = quads.flatMap(([a = [], b = [], c = [], d = []]) => [
+    ...a,
+    ...b,
+    ...c,
+    ...a,
+    ...c,
+    ...d,
+  ]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(new Float32Array(position), 3),
+  );
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function chairs(values: Float32Array): THREE.InstancedMesh | null {
+  const chosen: number[] = [];
+  for (let i = 0; i < values.length; i += stride)
+    if ((values[i + 3] ?? 0) >= 2) chosen.push(i);
+  if (chosen.length === 0) return null;
+  const tint = new THREE.InstancedBufferAttribute(
+    new Float32Array(chosen.length * 3),
+    3,
+  );
+  const mesh = new THREE.InstancedMesh(
+    chairGeometry(),
+    umbrellaMaterial(tint, 1),
+    chosen.length,
+  );
+  const matrix = new THREE.Matrix4();
+  const turn = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  const at = new THREE.Vector3();
+  const one = new THREE.Vector3(1, 1, 1);
+  chosen.forEach((source, i) => {
+    const person = source / stride;
+    const [x, north, rise] = triple(values, source);
+    const fx = values[source + 5] ?? 0;
+    const fz = -(values[source + 6] ?? 0);
+    const yaw =
+      fx !== 0 || fz !== 0
+        ? Math.atan2(-fx, -fz) + (roll(person, 22) - 0.5) * 0.6
+        : roll(person, 22) * Math.PI * 2;
+    turn.setFromAxisAngle(up, yaw);
+    at.set(x, rise, -north);
+    matrix.compose(at, turn, one);
+    mesh.setMatrixAt(i, matrix);
+    const colour = pickWeighted(roll(person, 23), chairColours);
+    tint.setXYZ(i, colour.r, colour.g, colour.b);
+  });
+  mesh.computeBoundingSphere();
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  return mesh;
+}
+
+function umbrellas(values: Float32Array): THREE.InstancedMesh | null {
+  const chosen: number[] = [];
+  for (let i = 0; i < values.length; i += stride)
+    if ((values[i + 3] ?? 0) >= 1 && roll(i / stride, 11) < umbrellaShare)
+      chosen.push(i);
+  if (chosen.length === 0) return null;
+  const tint = new THREE.InstancedBufferAttribute(
+    new Float32Array(chosen.length * 3),
+    3,
+  );
+  const mesh = new THREE.InstancedMesh(
+    umbrellaGeometry(),
+    umbrellaMaterial(tint),
+    chosen.length,
+  );
+  const matrix = new THREE.Matrix4();
+  const turn = new THREE.Quaternion();
+  const tilt = new THREE.Euler();
+  const scale = new THREE.Vector3();
+  const at = new THREE.Vector3();
+  chosen.forEach((source, i) => {
+    const person = source / stride;
+    const [x, north, up] = triple(values, source);
+    const radius =
+      umbrellaRadius[0] +
+      (umbrellaRadius[1] - umbrellaRadius[0]) * roll(person, 12);
+    tilt.set(
+      (roll(person, 13) - 0.5) * umbrellaTilt,
+      roll(person, 14) * Math.PI * 2,
+      (roll(person, 15) - 0.5) * umbrellaTilt,
+    );
+    turn.setFromEuler(tilt);
+    scale.set(radius, radius, radius);
+    at.set(x, up + umbrellaHeight * (0.92 + 0.12 * roll(person, 16)), -north);
+    matrix.compose(at, turn, scale);
+    mesh.setMatrixAt(i, matrix);
+    const colour = pickWeighted(roll(person, 17), umbrellaColours);
+    tint.setXYZ(i, colour.r, colour.g, colour.b);
+  });
+  mesh.computeBoundingSphere();
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  return mesh;
 }
 
 export class Crowd {
@@ -386,9 +764,17 @@ export class Crowd {
         new Float32Array(indices.length * 4),
         4,
       );
+      const hat = new THREE.InstancedBufferAttribute(
+        new Float32Array(indices.length * 3),
+        3,
+      );
+      const face = new THREE.InstancedBufferAttribute(
+        new Float32Array(indices.length * 2),
+        2,
+      );
       const mesh = new THREE.InstancedMesh(
         plane,
-        material(albedo, mask, boxes, origin, shirt),
+        material(albedo, mask, boxes, origin, shirt, hat, face),
         indices.length,
       );
       indices.forEach((source, i) => {
@@ -402,6 +788,9 @@ export class Crowd {
           0.82 + 0.25 * roll(person, 3),
         );
         shirt.setXYZW(i, fan.r, fan.g, fan.b, values[source + 4] ?? 0);
+        const cap = pickWeighted(roll(person, 4), capColours);
+        hat.setXYZ(i, cap.r, cap.g, cap.b);
+        face.setXY(i, values[source + 5] ?? 0, -(values[source + 6] ?? 0));
         matrix.makeScale(personHeight, personHeight, personHeight);
         matrix.setPosition(x, up, -north);
         mesh.setMatrixAt(i, matrix);
@@ -413,12 +802,21 @@ export class Crowd {
       crowd.root.add(mesh);
     }
     crowd.root.add(flags(values));
+    const shades = umbrellas(values);
+    if (shades) crowd.root.add(shades);
+    const seats = chairs(values);
+    if (seats) crowd.root.add(seats);
     return crowd;
   }
 
-  update(eye: THREE.Vector3): void {
+  update(eye: THREE.Vector3, cars: readonly THREE.Vector3[] = []): void {
     this.root.updateWorldMatrix(true, false);
     this.inverse.copy(this.root.matrixWorld).invert();
     eyeModel.value.copy(this.scratch.copy(eye).applyMatrix4(this.inverse));
+    cheerCars.forEach((slot, k) => {
+      const car = cars[k];
+      if (car) slot.copy(car).applyMatrix4(this.inverse);
+      else slot.set(0, -1e5, 0);
+    });
   }
 }
