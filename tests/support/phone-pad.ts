@@ -617,6 +617,7 @@ export class Game {
       null,
       { timeout: 170_000 },
     );
+    await page.waitForLoadState("networkidle", { timeout: 170_000 });
     await page.evaluate(wrapEngine);
     return new Game(page);
   }

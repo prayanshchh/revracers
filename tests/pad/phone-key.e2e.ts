@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { pastSchool } from "../support/player.ts";
 
 interface Debugged {
   f1Debug: {
@@ -35,8 +36,10 @@ function panelOnTop(page: Page): Promise<boolean> {
 if (!softwareGpu) {
   test("P shows the phone code on top of everything and pauses the session under it", async ({
     page,
+    context,
   }) => {
     test.setTimeout(420_000);
+    await pastSchool(context);
     await page.goto("/?intro=off", { waitUntil: "commit" });
     await page.evaluate(() => {
       localStorage.setItem(

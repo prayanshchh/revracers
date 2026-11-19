@@ -278,7 +278,7 @@ test.describe("first visit", () => {
             return [
               /\/road-[\w-]+\.glb$/,
               /\/car-[\w-]+\.glb$/,
-              /\/circuit-sky-[\w-]+\.webp$/,
+              /\/circuit-clear-[\w-]+\.hdr$/,
               /\/lod-[\w-]+\.glb$/,
             ].every((pattern) => paths.some((path) => pattern.test(path)));
           },
