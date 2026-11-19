@@ -57,6 +57,29 @@ async function openEvent(page: Page, query = ""): Promise<void> {
 }
 
 async function centreOffset(page: Page): Promise<number> {
+  await page.locator(".ev-carousel").evaluate(async (carousel) => {
+    const sliding = () =>
+      carousel.getAnimations({ subtree: true }).filter((animation) => {
+        const target =
+          animation.effect instanceof KeyframeEffect
+            ? animation.effect.target
+            : null;
+        return (
+          animation.playState !== "finished" &&
+          target instanceof Element &&
+          target.matches(".ev-carousel, .ev-belt, .ev-slide")
+        );
+      });
+    for (let running = sliding(); running.length > 0; running = sliding())
+      await Promise.all(
+        running.map((animation) =>
+          animation.finished.then(
+            () => undefined,
+            () => undefined,
+          ),
+        ),
+      );
+  });
   const box = await page.locator(".ev-slide.active").boundingBox();
   const width = page.viewportSize()?.width ?? 0;
   return box ? Math.abs(box.x + box.width / 2 - width / 2) : Infinity;
@@ -87,20 +110,20 @@ test.describe("race event screens", () => {
       page.locator(`[data-row=${row}] [data-option="${option}"]`);
 
     await expect(active).toHaveAttribute("data-track", "hill-country");
-    await expect.poll(() => centreOffset(page)).toBeLessThan(30);
+    expect(await centreOffset(page)).toBeLessThan(30);
     await page.keyboard.press("ArrowRight");
     await expect(active).toHaveAttribute("data-track", "neon-boulevard");
-    await expect.poll(() => centreOffset(page)).toBeLessThan(30);
+    expect(await centreOffset(page)).toBeLessThan(30);
     await page.keyboard.press("ArrowRight");
     await expect(active).toHaveAttribute("data-track", "dune-bay");
-    await expect.poll(() => centreOffset(page)).toBeLessThan(30);
+    expect(await centreOffset(page)).toBeLessThan(30);
     await page.keyboard.press("ArrowRight");
     await expect(active).toHaveAttribute("data-track", "dune-bay");
     await page.keyboard.press("ArrowLeft");
     await expect(active).toHaveAttribute("data-track", "neon-boulevard");
     await page.keyboard.press("ArrowLeft");
     await expect(active).toHaveAttribute("data-track", "hill-country");
-    await expect.poll(() => centreOffset(page)).toBeLessThan(30);
+    expect(await centreOffset(page)).toBeLessThan(30);
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
 
